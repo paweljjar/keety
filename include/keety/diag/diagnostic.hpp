@@ -1,5 +1,6 @@
 #pragma once
 
+#include <keety/diag/error_code.hpp>
 #include <keety/diag/source_location.hpp>
 
 #include <string>
@@ -44,6 +45,15 @@ struct Diagnostic {
     std::vector<DiagnosticFooter> footers;
 
     Diagnostic() = default;
+
+    static Diagnostic makeError(ErrorCode errCode, std::string message, SourceLocation loc = {}) {
+        Diagnostic d;
+        d.severity = DiagnosticSeverity::Error;
+        d.code = std::string(getErrorCodeString(errCode));
+        d.message = std::move(message);
+        d.location = loc;
+        return d;
+    }
 
     static Diagnostic makeError(std::string code, std::string message, SourceLocation loc = {}) {
         Diagnostic d;
