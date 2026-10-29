@@ -1,6 +1,7 @@
 # Library containing compiler internals
 add_library(keety_core STATIC
     diag/source_manager.cpp
+    diag/diagnostic_emitter.cpp
 )
 
 target_include_directories(keety_core PUBLIC
