@@ -12,6 +12,7 @@ FetchContent_MakeAvailable(Catch2)
 # Unit test runner
 add_executable(keety_unit_tests
     unit/test_version.cpp
+    unit/test_source_location.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE
