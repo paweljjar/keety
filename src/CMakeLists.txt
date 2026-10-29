@@ -1,12 +1,14 @@
 # Library containing compiler internals
-add_library(keety_core INTERFACE)
+add_library(keety_core STATIC
+    diag/source_manager.cpp
+)
 
-target_include_directories(keety_core INTERFACE
+target_include_directories(keety_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
     $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(keety_core INTERFACE
+target_link_libraries(keety_core PUBLIC
     keety_warnings
 )
 
