@@ -1,0 +1,22 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+bin/
+
+# IDE & Editor files
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# Compile-time artifacts and temporary files
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.log

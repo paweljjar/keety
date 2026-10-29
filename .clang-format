@@ -1,0 +1,38 @@
+---
+BasedOnStyle: LLVM
+Standard: c++20
+Language: Cpp
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+# Braces & Formatting
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: Never
+AllowShortBlocksOnASingleLine: Never
+
+# Namespaces & Classes
+NamespaceIndentation: None
+FixNamespaceComments: true
+AccessModifierOffset: -4
+
+# Alignment & Spacing
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: None
+AlignConsecutiveDeclarations: None
+AlignEscapedNewlines: Right
+AlignOperands: Align
+AlignTrailingComments: true
+SpacesBeforeTrailingComments: 1
+SpaceAfterCStyleCast: false
+SpaceBeforeParens: ControlStatements
+
+# Includes
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+...
