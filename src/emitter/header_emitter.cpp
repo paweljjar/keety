@@ -2,6 +2,7 @@
 #include <keety/resolver/module_path_resolver.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <ostream>
 #include <sstream>
 
@@ -178,8 +179,87 @@ std::string HeaderEmitter::emit_preamble() const {
     return ss.str();
 }
 
+std::string HeaderEmitter::sanitize_identifier(std::string_view name) {
+    if (name.empty()) {
+        return "main";
+    }
+
+    std::string sanitized;
+    sanitized.reserve(name.size());
+
+    if (std::isdigit(static_cast<unsigned char>(name.front()))) {
+        sanitized.push_back('_');
+    }
+
+    for (char c : name) {
+        if (std::isalnum(static_cast<unsigned char>(c)) || c == '_') {
+            sanitized.push_back(c);
+        } else {
+            sanitized.push_back('_');
+        }
+    }
+
+    if (sanitized.empty()) {
+        return "main";
+    }
+    return sanitized;
+}
+
+std::string HeaderEmitter::make_module_namespace(std::string_view module_name) {
+    if (module_name.empty()) {
+        return "keet_module_main";
+    }
+
+    std::string sanitized = sanitize_identifier(module_name);
+    if (sanitized.rfind("keet_module_", 0) == 0) {
+        return sanitized;
+    }
+    return "keet_module_" + sanitized;
+}
+
+std::string HeaderEmitter::get_namespace_name() const {
+    if (!options_.custom_namespace.empty()) {
+        return options_.custom_namespace;
+    }
+    return make_module_namespace(module_name_);
+}
+
+std::string HeaderEmitter::emit_namespace_begin() const {
+    if (!options_.emit_namespace) {
+        return "";
+    }
+    return "namespace " + get_namespace_name() + " {\n";
+}
+
+std::string HeaderEmitter::emit_namespace_end() const {
+    if (!options_.emit_namespace) {
+        return "";
+    }
+    return "} // namespace " + get_namespace_name() + "\n";
+}
+
+std::string HeaderEmitter::emit_namespace_body() const {
+    return "";
+}
+
 std::string HeaderEmitter::emit() const {
-    return emit_preamble();
+    std::ostringstream ss;
+    std::string preamble = emit_preamble();
+    ss << preamble;
+
+    if (options_.emit_namespace) {
+        if (!preamble.empty()) {
+            ss << "\n";
+        }
+        ss << emit_namespace_begin();
+        std::string body = emit_namespace_body();
+        if (!body.empty()) {
+            ss << body;
+        }
+        ss << emit_namespace_end();
+    }
+
+    return ss.str();
 }
 
 void HeaderEmitter::emit(std::ostream& os) const {

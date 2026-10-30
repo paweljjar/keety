@@ -18,6 +18,8 @@ struct HeaderEmitterOptions {
     bool emit_pragma_once{true};
     bool emit_runtime_header{true};
     bool sort_imported_headers{false};
+    bool emit_namespace{true};
+    std::string custom_namespace{""};
     std::string runtime_header_path{"<keet/runtime.hpp>"};
     std::vector<std::string> standard_headers = {
         "<algorithm>",
@@ -74,6 +76,14 @@ public:
     [[nodiscard]] std::string emit_standard_includes() const;
     [[nodiscard]] std::string emit_imported_includes() const;
     [[nodiscard]] std::string emit_preamble() const;
+
+    // Namespace encapsulation
+    [[nodiscard]] static std::string sanitize_identifier(std::string_view name);
+    [[nodiscard]] static std::string make_module_namespace(std::string_view module_name);
+    [[nodiscard]] std::string get_namespace_name() const;
+    [[nodiscard]] std::string emit_namespace_begin() const;
+    [[nodiscard]] std::string emit_namespace_end() const;
+    [[nodiscard]] std::string emit_namespace_body() const;
 
     // Full header generation
     [[nodiscard]] std::string emit() const;

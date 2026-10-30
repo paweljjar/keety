@@ -179,3 +179,68 @@ TEST_CASE("C++ Header Emitter interacts with IR Module and supports stream emiss
     REQUIRE(oss.str() == emitter.emit());
     REQUIRE(oss.str().find("#pragma once") != std::string::npos);
 }
+
+TEST_CASE("C++ Header Emitter encapsulates declarations within module namespace", "[emitter][namespace]") {
+    SECTION("Default module name produces keet_module_main namespace") {
+        keety::emitter::HeaderEmitter emitter;
+        REQUIRE(emitter.get_namespace_name() == "keet_module_main");
+
+        std::string header = emitter.emit();
+        REQUIRE(header.find("namespace keet_module_main {\n") != std::string::npos);
+        REQUIRE(header.find("} // namespace keet_module_main\n") != std::string::npos);
+    }
+
+    SECTION("Named module produces keet_module_<name> namespace") {
+        keety::emitter::HeaderEmitter emitter;
+        emitter.set_module_name("metrics");
+        REQUIRE(emitter.get_namespace_name() == "keet_module_metrics");
+
+        std::string header = emitter.emit();
+        REQUIRE(header.find("namespace keet_module_metrics {\n") != std::string::npos);
+        REQUIRE(header.find("} // namespace keet_module_metrics\n") != std::string::npos);
+    }
+
+    SECTION("Sanitizes invalid identifier characters in module name") {
+        REQUIRE(keety::emitter::HeaderEmitter::make_module_namespace("math/stats") == "keet_module_math_stats");
+        REQUIRE(keety::emitter::HeaderEmitter::make_module_namespace("my-service") == "keet_module_my_service");
+        REQUIRE(keety::emitter::HeaderEmitter::make_module_namespace("net.http") == "keet_module_net_http");
+        REQUIRE(keety::emitter::HeaderEmitter::make_module_namespace("99bottles") == "keet_module__99bottles");
+        REQUIRE(keety::emitter::HeaderEmitter::make_module_namespace("keet_module_already_prefixed") == "keet_module_already_prefixed");
+        REQUIRE(keety::emitter::HeaderEmitter::make_module_namespace("") == "keet_module_main");
+    }
+
+    SECTION("Allows custom namespace override") {
+        keety::emitter::HeaderEmitterOptions options;
+        options.custom_namespace = "enterprise::telemetry";
+
+        keety::emitter::HeaderEmitter emitter(options);
+        REQUIRE(emitter.get_namespace_name() == "enterprise::telemetry");
+
+        std::string header = emitter.emit();
+        REQUIRE(header.find("namespace enterprise::telemetry {\n") != std::string::npos);
+        REQUIRE(header.find("} // namespace enterprise::telemetry\n") != std::string::npos);
+    }
+
+    SECTION("Allows suppressing namespace encapsulation") {
+        keety::emitter::HeaderEmitterOptions options;
+        options.emit_namespace = false;
+
+        keety::emitter::HeaderEmitter emitter(options);
+        std::string header = emitter.emit();
+
+        REQUIRE(header.find("namespace ") == std::string::npos);
+        REQUIRE(header.find("} // namespace") == std::string::npos);
+    }
+
+    SECTION("Parsed ModuleAST sets namespace accordingly") {
+        const std::string source = "let x: int = 1;";
+        keety::parser::ModuleAST ast = parseSource(source, "user_account");
+
+        keety::emitter::HeaderEmitter emitter(ast);
+        REQUIRE(emitter.get_namespace_name() == "keet_module_user_account");
+
+        std::string header = emitter.emit();
+        REQUIRE(header.find("namespace keet_module_user_account {\n") != std::string::npos);
+        REQUIRE(header.find("} // namespace keet_module_user_account\n") != std::string::npos);
+    }
+}
