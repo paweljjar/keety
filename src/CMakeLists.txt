@@ -8,6 +8,7 @@ add_library(keety_core STATIC
     parser/parser.cpp
     resolver/module_path_resolver.cpp
     resolver/module_graph.cpp
+    resolver/cycle_detector.cpp
 )
 
 target_include_directories(keety_core PUBLIC
