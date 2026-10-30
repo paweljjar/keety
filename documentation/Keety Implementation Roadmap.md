@@ -51,7 +51,7 @@ This document specifies the operational development plan for the `keety` compile
 - [x] **Task 2.2.1:** Define declaration AST node hierarchy (`VarDecl`, `ConstDecl`, `DefineDecl`, `FnDecl`, `ClassDecl`, `EnumDecl`, `ErrTypeDecl`, `ImportDecl`, `ExportDecl`).
 - [x] **Task 2.2.2:** Define statement AST node hierarchy (`IfStmt`, `WhileStmt`, `ForStmt`, `SwitchStmt`, `ReturnStmt`, `YieldStmt`, `BreakStmt`, `ContinueStmt`, `ZonkStmt`).
 - [x] **Task 2.2.3:** Define expression and operator AST nodes (`BinaryExpr`, `UnaryExpr`, `CallExpr`, `IndexExpr`, `MemberExpr`, `ZonkExpr`, `TernaryExpr`, `TypeCastExpr`, `ClosureExpr`).
-- [ ] **Task 2.2.4:** Define type annotation AST nodes (`PrimitiveType`, `ArrayType`, `MapType`, `UnionType`, `FunctionType`, `CustomType`).
+- [x] **Task 2.2.4:** Define type annotation AST nodes (`PrimitiveType`, `ArrayType`, `MapType`, `UnionType`, `FunctionType`, `CustomType`).
 
 #### **Phase 2.3: Syntactic Analysis (`keety::parser`)**
 - [ ] **Task 2.3.1:** Implement top-down Recursive Descent parser with bounded LL(k) lookahead.
