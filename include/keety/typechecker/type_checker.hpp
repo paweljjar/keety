@@ -112,6 +112,31 @@ public:
     /// and extracts flow-based type narrowing facts for the 'then' and 'else' branches.
     BranchNarrowing analyzeCondition(const ast::Expr* condition, sema::Scope& scope);
 
+    // --- Task 3.4.3: Exhaustiveness & Reachability Analysis ---
+
+    struct ReachabilityResult {
+        bool locallyTerminates{false}; // Cannot reach statement textually following in same block
+        bool functionExits{false};     // Guarantees return/divergence from function
+    };
+
+    /// Checks statement reachability, detecting dead code following terminating statements (E5002)
+    ReachabilityResult checkReachability(const ast::Stmt* stmt);
+
+    /// Checks whether all paths through a function/method/closure body return or diverge (E5001)
+    bool checkExhaustiveness(const ast::Stmt* body, std::string_view name, TypePtr returnType, diag::SourceSpan span);
+
+    /// Checks nested closures within expressions for return exhaustiveness and dead code
+    void checkClosuresInExpr(const ast::Expr* expr);
+
+    // Factory methods for Task 3.4.3 diagnostics
+    [[nodiscard]] static diag::Diagnostic createMissingReturnDiagnostic(
+        std::string_view functionName,
+        TypePtr returnType,
+        diag::SourceSpan span);
+
+    [[nodiscard]] static diag::Diagnostic createUnreachableCodeDiagnostic(
+        diag::SourceSpan span);
+
 private:
     diag::DiagnosticEmitter* emitter_{nullptr};
     bool hasErrors_{false};
@@ -122,6 +147,8 @@ private:
     void reportBinaryCoercion(TypePtr leftType, TypePtr rightType, lexer::TokenKind op, diag::SourceSpan span);
     void reportCannotInferCollectionType(std::string_view literalKind, diag::SourceSpan span);
     void reportTypeMismatch(TypePtr expectedType, TypePtr actualType, diag::SourceSpan span, std::string_view contextDesc);
+    void reportMissingReturn(std::string_view functionName, TypePtr returnType, diag::SourceSpan span);
+    void reportUnreachableCode(diag::SourceSpan span);
 };
 
 } // namespace keety::typechecker

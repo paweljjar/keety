@@ -481,6 +481,81 @@ void TypeChecker::reportTypeMismatch(TypePtr expectedType, TypePtr actualType, d
     }
 }
 
+// =============================================================================
+// Task 3.4.3: Exhaustiveness & Reachability Analysis (E5001 / E5002)
+// =============================================================================
+
+diag::Diagnostic TypeChecker::createMissingReturnDiagnostic(
+    std::string_view functionName,
+    TypePtr returnType,
+    diag::SourceSpan span) {
+    std::string retStr = returnType ? returnType->toString() : "non-void";
+    std::string msg;
+    if (!functionName.empty() && functionName != "<anonymous closure>") {
+        msg = "missing return statement in non-void function '" + std::string(functionName) + "' returning '" + retStr + "'";
+    } else {
+        msg = "missing return statement in closure returning '" + retStr + "'";
+    }
+
+    auto d = diag::Diagnostic::makeError(
+        diag::ErrorCode::MissingReturnStatement,
+        std::move(msg),
+        span.isValid() ? span.start : diag::SourceLocation{});
+
+    if (span.isValid()) {
+        d.labels.push_back(diag::DiagnosticLabel{
+            span,
+            "all execution paths must terminate in a return, yield, or zonk statement",
+            true
+        });
+    }
+
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Help,
+        "ensure every control-flow branch ends with a 'return <expr>;' or 'zonk <err>;' statement"
+    });
+
+    return d;
+}
+
+diag::Diagnostic TypeChecker::createUnreachableCodeDiagnostic(diag::SourceSpan span) {
+    std::string msg = "unreachable code detected: statement follows a terminating statement";
+
+    auto d = diag::Diagnostic::makeError(
+        diag::ErrorCode::UnreachableCode,
+        std::move(msg),
+        span.isValid() ? span.start : diag::SourceLocation{});
+
+    if (span.isValid()) {
+        d.labels.push_back(diag::DiagnosticLabel{
+            span,
+            "this statement cannot be executed",
+            true
+        });
+    }
+
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Help,
+        "remove the unreachable statement or reorder control flow"
+    });
+
+    return d;
+}
+
+void TypeChecker::reportMissingReturn(std::string_view functionName, TypePtr returnType, diag::SourceSpan span) {
+    hasErrors_ = true;
+    if (emitter_ != nullptr) {
+        emitter_->report(createMissingReturnDiagnostic(functionName, returnType, span));
+    }
+}
+
+void TypeChecker::reportUnreachableCode(diag::SourceSpan span) {
+    hasErrors_ = true;
+    if (emitter_ != nullptr) {
+        emitter_->report(createUnreachableCodeDiagnostic(span));
+    }
+}
+
 bool TypeChecker::checkAssignment(
     TypePtr expectedType,
     TypePtr actualType,
@@ -614,6 +689,7 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
         currentFunctionReturnType_ = retType;
         if (fnDecl->getBody()) {
             checkZeroCoercion(*fnDecl->getBody(), *fnScope);
+            checkExhaustiveness(fnDecl->getBody(), fnDecl->getName(), retType, fnDecl->getSpan());
         }
         currentFunctionReturnType_ = prevRet;
     } else if (const auto* classDecl = dynamic_cast<const ast::ClassDecl*>(&decl)) {
@@ -642,6 +718,61 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
 }
 
 namespace {
+
+bool isTrueCondition(const ast::Expr* cond) {
+    if (!cond) return false;
+    if (const auto* lit = dynamic_cast<const ast::LiteralExpr*>(cond)) {
+        return lit->getLiteralKind() == lexer::TokenKind::KwTrue;
+    }
+    return false;
+}
+
+bool hasBreakTargetingLoop(const ast::Stmt* stmt, std::string_view targetLabel, int loopDepth = 0) {
+    if (!stmt) return false;
+
+    if (const auto* breakStmt = dynamic_cast<const ast::BreakStmt*>(stmt)) {
+        if (breakStmt->hasTargetLabel()) {
+            return !targetLabel.empty() && breakStmt->getTargetLabel() == targetLabel;
+        }
+        return loopDepth == 0;
+    }
+
+    if (const auto* blockStmt = dynamic_cast<const ast::BlockStmt*>(stmt)) {
+        for (const auto& s : blockStmt->getStatements()) {
+            if (s && hasBreakTargetingLoop(s.get(), targetLabel, loopDepth)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    if (const auto* ifStmt = dynamic_cast<const ast::IfStmt*>(stmt)) {
+        if (hasBreakTargetingLoop(ifStmt->getThenBranch(), targetLabel, loopDepth)) return true;
+        if (hasBreakTargetingLoop(ifStmt->getElseBranch(), targetLabel, loopDepth)) return true;
+        return false;
+    }
+
+    if (const auto* switchStmt = dynamic_cast<const ast::SwitchStmt*>(stmt)) {
+        for (const auto& c : switchStmt->getCases()) {
+            if (hasBreakTargetingLoop(c.body.get(), targetLabel, loopDepth + 1)) return true;
+        }
+        return false;
+    }
+
+    if (const auto* whileStmt = dynamic_cast<const ast::WhileStmt*>(stmt)) {
+        return hasBreakTargetingLoop(whileStmt->getBody(), targetLabel, loopDepth + 1);
+    }
+
+    if (const auto* forStmt = dynamic_cast<const ast::ForStmt*>(stmt)) {
+        return hasBreakTargetingLoop(forStmt->getBody(), targetLabel, loopDepth + 1);
+    }
+
+    if (const auto* forInStmt = dynamic_cast<const ast::ForInStmt*>(stmt)) {
+        return hasBreakTargetingLoop(forInStmt->getBody(), targetLabel, loopDepth + 1);
+    }
+
+    return false;
+}
 
 bool matchesTypeofTarget(const Type& variant, std::string_view targetStr) {
     if (targetStr == "int") return variant.isInt();
@@ -1403,18 +1534,23 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
 
     if (const auto* closure = dynamic_cast<const ast::ClosureExpr*>(&expr)) {
         auto fnScope = scope.createChild(sema::ScopeKind::Function);
+        std::vector<TypePtr> paramTypes;
         for (const auto& p : closure->getParams()) {
+            auto pType = Type::fromAnnotation(p.type.get());
+            paramTypes.push_back(pType ? pType : Type::unknownType());
             auto pSym = std::make_shared<sema::Symbol>(p.name, sema::SymbolKind::Parameter, p.span);
             pSym->setTypeAnnotation(p.type.get());
             fnScope->define(pSym);
         }
+        auto retType = Type::fromAnnotation(closure->getReturnType());
         if (closure->getBody()) {
             auto prevRet = currentFunctionReturnType_;
-            currentFunctionReturnType_ = Type::fromAnnotation(closure->getReturnType());
+            currentFunctionReturnType_ = retType;
             checkZeroCoercion(*closure->getBody(), *fnScope);
+            checkExhaustiveness(closure->getBody(), "<anonymous closure>", retType, closure->getSpan());
             currentFunctionReturnType_ = prevRet;
         }
-        return Type::fromAnnotation(closure->getReturnType());
+        return Type::function(std::move(paramTypes), retType ? retType : Type::voidType());
     }
 
     if (const auto* index = dynamic_cast<const ast::IndexExpr*>(&expr)) {
@@ -1453,6 +1589,253 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
     }
 
     return Type::unknownType();
+}
+
+TypeChecker::ReachabilityResult TypeChecker::checkReachability(const ast::Stmt* stmt) {
+    ReachabilityResult result;
+    if (!stmt) return result;
+
+    if (const auto* retStmt = dynamic_cast<const ast::ReturnStmt*>(stmt)) {
+        if (retStmt->hasValue()) {
+            checkClosuresInExpr(retStmt->getValue());
+        }
+        result.locallyTerminates = true;
+        result.functionExits = true;
+        return result;
+    }
+
+    if (const auto* zonkStmt = dynamic_cast<const ast::ZonkStmt*>(stmt)) {
+        if (zonkStmt->getErrorExpr()) {
+            checkClosuresInExpr(zonkStmt->getErrorExpr());
+        }
+        result.locallyTerminates = true;
+        result.functionExits = true;
+        return result;
+    }
+
+    if (const auto* yieldStmt = dynamic_cast<const ast::YieldStmt*>(stmt)) {
+        if (yieldStmt->getValue()) {
+            checkClosuresInExpr(yieldStmt->getValue());
+        }
+        result.locallyTerminates = true;
+        result.functionExits = false;
+        return result;
+    }
+
+    if (dynamic_cast<const ast::BreakStmt*>(stmt)) {
+        result.locallyTerminates = true;
+        result.functionExits = false;
+        return result;
+    }
+
+    if (dynamic_cast<const ast::ContinueStmt*>(stmt)) {
+        result.locallyTerminates = true;
+        result.functionExits = false;
+        return result;
+    }
+
+    if (const auto* blockStmt = dynamic_cast<const ast::BlockStmt*>(stmt)) {
+        bool terminated = false;
+        ReachabilityResult lastResult;
+
+        for (const auto& s : blockStmt->getStatements()) {
+            if (!s) continue;
+            if (terminated) {
+                reportUnreachableCode(s->getSpan());
+                break;
+            }
+            auto sub = checkReachability(s.get());
+            if (sub.locallyTerminates) {
+                terminated = true;
+                lastResult = sub;
+            }
+        }
+
+        if (terminated) {
+            return lastResult;
+        }
+        return result;
+    }
+
+    if (const auto* ifStmt = dynamic_cast<const ast::IfStmt*>(stmt)) {
+        if (ifStmt->getCondition()) {
+            checkClosuresInExpr(ifStmt->getCondition());
+        }
+
+        auto thenRes = checkReachability(ifStmt->getThenBranch());
+        ReachabilityResult elseRes;
+        if (ifStmt->hasElseBranch()) {
+            elseRes = checkReachability(ifStmt->getElseBranch());
+            result.locallyTerminates = thenRes.locallyTerminates && elseRes.locallyTerminates;
+            result.functionExits = thenRes.functionExits && elseRes.functionExits;
+        } else {
+            result.locallyTerminates = false;
+            result.functionExits = false;
+        }
+        return result;
+    }
+
+    if (const auto* switchStmt = dynamic_cast<const ast::SwitchStmt*>(stmt)) {
+        if (switchStmt->getDiscriminant()) {
+            checkClosuresInExpr(switchStmt->getDiscriminant());
+        }
+
+        bool hasDefault = false;
+        bool allFunctionExit = !switchStmt->getCases().empty();
+
+        for (const auto& c : switchStmt->getCases()) {
+            if (c.isDefault()) hasDefault = true;
+            auto cRes = checkReachability(c.body.get());
+            if (!cRes.functionExits) {
+                allFunctionExit = false;
+            }
+        }
+
+        if (hasDefault && allFunctionExit) {
+            result.locallyTerminates = true;
+            result.functionExits = true;
+        } else {
+            result.locallyTerminates = false;
+            result.functionExits = false;
+        }
+        return result;
+    }
+
+    if (const auto* whileStmt = dynamic_cast<const ast::WhileStmt*>(stmt)) {
+        if (whileStmt->getCondition()) {
+            checkClosuresInExpr(whileStmt->getCondition());
+        }
+
+        checkReachability(whileStmt->getBody());
+
+        bool isInf = isTrueCondition(whileStmt->getCondition()) &&
+                     !hasBreakTargetingLoop(whileStmt->getBody(), whileStmt->getLabel());
+        if (isInf) {
+            result.locallyTerminates = true;
+            result.functionExits = true;
+        } else {
+            result.locallyTerminates = false;
+            result.functionExits = false;
+        }
+        return result;
+    }
+
+    if (const auto* forStmt = dynamic_cast<const ast::ForStmt*>(stmt)) {
+        if (forStmt->getCondition()) {
+            checkClosuresInExpr(forStmt->getCondition());
+        }
+
+        checkReachability(forStmt->getBody());
+
+        bool isInf = (!forStmt->getCondition() || isTrueCondition(forStmt->getCondition())) &&
+                     !hasBreakTargetingLoop(forStmt->getBody(), forStmt->getLabel());
+        if (isInf) {
+            result.locallyTerminates = true;
+            result.functionExits = true;
+        } else {
+            result.locallyTerminates = false;
+            result.functionExits = false;
+        }
+        return result;
+    }
+
+    if (const auto* forInStmt = dynamic_cast<const ast::ForInStmt*>(stmt)) {
+        if (forInStmt->getCollection()) {
+            checkClosuresInExpr(forInStmt->getCollection());
+        }
+        checkReachability(forInStmt->getBody());
+        result.locallyTerminates = false;
+        result.functionExits = false;
+        return result;
+    }
+
+    if (const auto* exprStmt = dynamic_cast<const ast::ExprStmt*>(stmt)) {
+        if (exprStmt->getExpression()) {
+            checkClosuresInExpr(exprStmt->getExpression());
+        }
+        return result;
+    }
+
+    if (const auto* declStmt = dynamic_cast<const ast::DeclStmt*>(stmt)) {
+        if (const auto* decl = declStmt->getDeclaration()) {
+            if (const auto* vd = dynamic_cast<const ast::VarDecl*>(decl)) {
+                if (vd->hasInitializer()) checkClosuresInExpr(vd->getInitializer());
+            } else if (const auto* cd = dynamic_cast<const ast::ConstDecl*>(decl)) {
+                if (cd->getInitializer()) checkClosuresInExpr(cd->getInitializer());
+            } else if (const auto* dd = dynamic_cast<const ast::DefineDecl*>(decl)) {
+                if (dd->getValue()) checkClosuresInExpr(dd->getValue());
+            }
+        }
+        return result;
+    }
+
+    return result;
+}
+
+bool TypeChecker::checkExhaustiveness(const ast::Stmt* body, std::string_view name, TypePtr returnType, diag::SourceSpan span) {
+    if (!body) return false;
+
+    auto termRes = checkReachability(body);
+
+    if (returnType && !returnType->isVoid()) {
+        if (!termRes.functionExits) {
+            reportMissingReturn(name, returnType, span);
+            return false;
+        }
+    }
+    return true;
+}
+
+void TypeChecker::checkClosuresInExpr(const ast::Expr* expr) {
+    if (!expr) return;
+
+    if (const auto* closure = dynamic_cast<const ast::ClosureExpr*>(expr)) {
+        auto retType = Type::fromAnnotation(closure->getReturnType());
+        if (closure->getBody()) {
+            checkExhaustiveness(closure->getBody(), "<anonymous closure>", retType, closure->getSpan());
+        }
+        return;
+    }
+
+    if (const auto* binary = dynamic_cast<const ast::BinaryExpr*>(expr)) {
+        checkClosuresInExpr(binary->getLeft());
+        checkClosuresInExpr(binary->getRight());
+    } else if (const auto* unary = dynamic_cast<const ast::UnaryExpr*>(expr)) {
+        checkClosuresInExpr(unary->getOperand());
+    } else if (const auto* call = dynamic_cast<const ast::CallExpr*>(expr)) {
+        checkClosuresInExpr(call->getCallee());
+        for (const auto& arg : call->getArgs()) {
+            checkClosuresInExpr(arg.value.get());
+        }
+    } else if (const auto* ternary = dynamic_cast<const ast::TernaryExpr*>(expr)) {
+        checkClosuresInExpr(ternary->getCondition());
+        checkClosuresInExpr(ternary->getThenExpr());
+        checkClosuresInExpr(ternary->getElseExpr());
+    } else if (const auto* arr = dynamic_cast<const ast::ArrayLitExpr*>(expr)) {
+        for (const auto& el : arr->getElements()) {
+            checkClosuresInExpr(el.get());
+        }
+    } else if (const auto* map = dynamic_cast<const ast::MapLitExpr*>(expr)) {
+        for (const auto& entry : map->getEntries()) {
+            checkClosuresInExpr(entry.key.get());
+            checkClosuresInExpr(entry.value.get());
+        }
+    } else if (const auto* cast = dynamic_cast<const ast::TypeCastExpr*>(expr)) {
+        checkClosuresInExpr(cast->getExpr());
+    } else if (const auto* index = dynamic_cast<const ast::IndexExpr*>(expr)) {
+        checkClosuresInExpr(index->getContainer());
+        checkClosuresInExpr(index->getIndex());
+    } else if (const auto* member = dynamic_cast<const ast::MemberExpr*>(expr)) {
+        checkClosuresInExpr(member->getObject());
+    } else if (const auto* typeofExpr = dynamic_cast<const ast::TypeofExpr*>(expr)) {
+        checkClosuresInExpr(typeofExpr->getExpr());
+    } else if (const auto* zonk = dynamic_cast<const ast::ZonkExpr*>(expr)) {
+        checkClosuresInExpr(zonk->getPrimary());
+        checkClosuresInExpr(zonk->getFallback());
+        if (zonk->getRecoveryBlock()) {
+            checkReachability(zonk->getRecoveryBlock());
+        }
+    }
 }
 
 } // namespace keety::typechecker

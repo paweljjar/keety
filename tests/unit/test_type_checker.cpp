@@ -1338,3 +1338,334 @@ TEST_CASE("Task 3.4.2: Mutation Watcher - Closure Mutation & Enclosing Scopes", 
         REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
     }
 }
+
+TEST_CASE("Task 3.4.3: Exhaustiveness Analysis - Missing Return in Non-Void Functions (E5001)", "[cfa][exhaustiveness][E5001]") {
+    SECTION("Empty body in non-void function emits E5001") {
+        ParseResult res("fn compute(): int {}");
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::MissingReturnStatement));
+
+        const auto& d = res.emitter.getDiagnostics().front();
+        REQUIRE(d.code == "E5001");
+        REQUIRE(d.message.find("missing return statement in non-void function 'compute'") != std::string::npos);
+    }
+
+    SECTION("Partial return inside if without else emits E5001") {
+        ParseResult res(
+            "fn abs(x: int): int {\n"
+            "    if (x > 0) {\n"
+            "        return x;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::MissingReturnStatement));
+    }
+
+    SECTION("Non-terminating while loop emits E5001") {
+        ParseResult res(
+            "fn loop(x: int): int {\n"
+            "    while (x > 0) {\n"
+            "        return 1;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::MissingReturnStatement));
+    }
+
+    SECTION("while (true) with break statement emits E5001") {
+        ParseResult res(
+            "fn search(): int {\n"
+            "    while (true) {\n"
+            "        break;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::MissingReturnStatement));
+    }
+
+    SECTION("Switch without default case emits E5001") {
+        ParseResult res(
+            "fn pick(x: int): string {\n"
+            "    switch (x) {\n"
+            "        case (1) { return \"one\"; }\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::MissingReturnStatement));
+    }
+
+    SECTION("Switch with break in default case emits E5001") {
+        ParseResult res(
+            "fn pick(x: int): string {\n"
+            "    switch (x) {\n"
+            "        case (1) { return \"one\"; }\n"
+            "        default { break; }\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::MissingReturnStatement));
+    }
+
+    SECTION("Class method missing return statement emits E5001") {
+        ParseResult res(
+            "class Calculator {\n"
+            "    pub fn getFactor(): float {}\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::MissingReturnStatement));
+    }
+
+    SECTION("Non-void closure literal missing return emits E5001") {
+        ParseResult res(
+            "fn run(): void {\n"
+            "    (fn(): int {})();\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::MissingReturnStatement));
+    }
+}
+
+TEST_CASE("Task 3.4.3: Exhaustiveness Analysis - Exhaustive Control Paths Succeed", "[cfa][exhaustiveness]") {
+    SECTION("Straight-line return in non-void function succeeds") {
+        ParseResult res("fn add(a: int, b: int): int { return a + b; }");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("if-else with returns in both branches succeeds") {
+        ParseResult res(
+            "fn abs(x: int): int {\n"
+            "    if (x >= 0) {\n"
+            "        return x;\n"
+            "    } else {\n"
+            "        return -x;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("if-elif-else with returns in all branches succeeds") {
+        ParseResult res(
+            "fn sign(x: int): int {\n"
+            "    if (x > 0) {\n"
+            "        return 1;\n"
+            "    } elif (x < 0) {\n"
+            "        return -1;\n"
+            "    } else {\n"
+            "        return 0;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Diverging zonk statement satisfies non-void function termination") {
+        ParseResult res("fn panic(): int { zonk \"fatal error\"; }");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("if-else with return in then and zonk in else succeeds") {
+        ParseResult res(
+            "fn checkPos(x: int): int {\n"
+            "    if (x > 0) {\n"
+            "        return x;\n"
+            "    } else {\n"
+            "        zonk \"must be positive\";\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Unconditional while (true) loop without break satisfies termination") {
+        ParseResult res(
+            "fn serverLoop(): int {\n"
+            "    while (true) {\n"
+            "        let tick: int = 1;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Unconditional for (;;) loop without break satisfies termination") {
+        ParseResult res(
+            "fn ticker(): int {\n"
+            "    for (;;) {\n"
+            "        let tick: int = 1;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Break in inner loop does not break outer infinite loop") {
+        ParseResult res(
+            "fn worker(): int {\n"
+            "    while (true) {\n"
+            "        while (true) {\n"
+            "            break;\n"
+            "        }\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Switch with default where all branches return succeeds") {
+        ParseResult res(
+            "fn mapNum(x: int): string {\n"
+            "    switch (x) {\n"
+            "        case (1) { return \"one\"; }\n"
+            "        case (2) { return \"two\"; }\n"
+            "        default { return \"other\"; }\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Void functions do not require return statements") {
+        ParseResult res("fn logMessage(): void { let x: int = 42; }");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Void functions with bare return succeed") {
+        ParseResult res("fn earlyExit(): void { return; }");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Class method with return succeeds") {
+        ParseResult res(
+            "class MathUtil {\n"
+            "    pub fn square(n: int): int { return n * n; }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Non-void closure literal with return succeeds") {
+        ParseResult res(
+            "fn run(): void {\n"
+            "    (fn(): int { return 42; })();\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+}
+
+TEST_CASE("Task 3.4.3: Reachability Analysis - Dead Code Detection (E5002)", "[cfa][reachability][E5002]") {
+    SECTION("Statement following return in same block emits E5002") {
+        ParseResult res(
+            "fn test(): int {\n"
+            "    return 1;\n"
+            "    let dead: int = 2;\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::UnreachableCode));
+
+        const auto& d = res.emitter.getDiagnostics().front();
+        REQUIRE(d.code == "E5002");
+        REQUIRE(d.message.find("unreachable code detected") != std::string::npos);
+    }
+
+    SECTION("Statement following zonk statement in same block emits E5002") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    zonk \"error\";\n"
+            "    let dead: int = 2;\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::UnreachableCode));
+    }
+
+    SECTION("Statement following break in loop emits E5002") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    while (true) {\n"
+            "        break;\n"
+            "        let dead: int = 2;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::UnreachableCode));
+    }
+
+    SECTION("Statement following continue in loop emits E5002") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    for (let i: int = 0; i < 10; ++i) {\n"
+            "        continue;\n"
+            "        let dead: int = 2;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::UnreachableCode));
+    }
+
+    SECTION("Statement following if-else where both branches return emits E5002") {
+        ParseResult res(
+            "fn test(flag: bool): int {\n"
+            "    if (flag) {\n"
+            "        return 1;\n"
+            "    } else {\n"
+            "        return 2;\n"
+            "    }\n"
+            "    return 3;\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::UnreachableCode));
+    }
+
+    SECTION("Statement following unconditional infinite loop emits E5002") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    while (true) {\n"
+            "        let x: int = 1;\n"
+            "    }\n"
+            "    let dead: int = 2;\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::UnreachableCode));
+    }
+
+    SECTION("Dead code inside nested block emits E5002") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    {\n"
+            "        return;\n"
+            "        let dead: int = 1;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::UnreachableCode));
+    }
+}
+
