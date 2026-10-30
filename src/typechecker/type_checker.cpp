@@ -818,6 +818,19 @@ std::string exprToStorageString(const ast::Expr* expr) {
         auto o = exprToStorageString(member->getObject());
         return o.empty() ? member->getMemberName() : o + "." + member->getMemberName();
     }
+    if (const auto* bin = dynamic_cast<const ast::BinaryExpr*>(expr)) {
+        auto left = exprToStorageString(bin->getLeft());
+        auto right = exprToStorageString(bin->getRight());
+        if (!left.empty() && !right.empty()) {
+            return left + " " + std::string(lexer::getTokenKindName(bin->getOp())) + " " + right;
+        }
+    }
+    if (const auto* unary = dynamic_cast<const ast::UnaryExpr*>(expr)) {
+        auto operand = exprToStorageString(unary->getOperand());
+        if (!operand.empty()) {
+            return std::string(lexer::getTokenKindName(unary->getOp())) + operand;
+        }
+    }
     return "";
 }
 
@@ -840,7 +853,9 @@ std::string TypeChecker::computeStoragePath(const ast::Expr* expr) {
         auto cont = computeStoragePath(index->getContainer());
         if (cont.empty()) return "";
         auto idxStr = exprToStorageString(index->getIndex());
-        if (idxStr.empty()) return "";
+        if (idxStr.empty()) {
+            idxStr = "?";
+        }
         return cont + "[" + idxStr + "]";
     }
 
@@ -911,6 +926,88 @@ void TypeChecker::reportDuplicateMutableBorrow(
         emitter_->report(createDuplicateMutableBorrowDiagnostic(path, firstSpan, duplicateSpan));
     }
 }
+
+// =============================================================================
+// Mutable Reference Borrow Checker (Container & Element Borrowing - E4002)
+// =============================================================================
+
+bool TypeChecker::isContainerAndElementPair(
+    const std::string& p1,
+    const std::string& p2,
+    std::string* outContainer,
+    std::string* outElement) {
+    if (p1.empty() || p2.empty()) return false;
+
+    // Check if p2 is an indexed element of container p1 (e.g. p1="arr", p2="arr[0]")
+    if (p2.size() > p1.size() && p2[p1.size()] == '[' && p2.rfind(p1, 0) == 0) {
+        if (outContainer) *outContainer = p1;
+        if (outElement) *outElement = p2;
+        return true;
+    }
+
+    // Check if p1 is an indexed element of container p2 (e.g. p1="arr[0]", p2="arr")
+    if (p1.size() > p2.size() && p1[p2.size()] == '[' && p1.rfind(p2, 0) == 0) {
+        if (outContainer) *outContainer = p2;
+        if (outElement) *outElement = p1;
+        return true;
+    }
+
+    return false;
+}
+
+diag::Diagnostic TypeChecker::createContainerAndElementBorrowDiagnostic(
+    std::string_view containerPath,
+    std::string_view elementPath,
+    diag::SourceSpan firstSpan,
+    diag::SourceSpan secondSpan) {
+    std::string msg = "cannot simultaneously borrow container '" + std::string(containerPath) +
+                      "' and its element '" + std::string(elementPath) + "'";
+
+    auto d = diag::Diagnostic::makeError(
+        diag::ErrorCode::ContainerAndElementBorrow,
+        std::move(msg),
+        secondSpan.isValid() ? secondSpan.start : diag::SourceLocation{});
+
+    if (secondSpan.isValid()) {
+        d.labels.push_back(diag::DiagnosticLabel{
+            secondSpan,
+            "simultaneous borrow of container and element occurs here",
+            true
+        });
+    }
+
+    if (firstSpan.isValid()) {
+        d.labels.push_back(diag::DiagnosticLabel{
+            firstSpan,
+            "first borrow occurs here",
+            false
+        });
+    }
+
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Note,
+        "Simultaneous mutable borrowing of a container and one of its elements violates disjointness."
+    });
+
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Help,
+        "container mutations can reallocate storage and invalidate active element references"
+    });
+
+    return d;
+}
+
+void TypeChecker::reportContainerAndElementBorrow(
+    std::string_view containerPath,
+    std::string_view elementPath,
+    diag::SourceSpan firstSpan,
+    diag::SourceSpan secondSpan) {
+    hasErrors_ = true;
+    if (emitter_ != nullptr) {
+        emitter_->report(createContainerAndElementBorrowDiagnostic(containerPath, elementPath, firstSpan, secondSpan));
+    }
+}
+
 
 
 
@@ -1754,32 +1851,45 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
     if (const auto* call = dynamic_cast<const ast::CallExpr*>(&expr)) {
         std::vector<std::string> mutatedVars;
 
-        struct BorrowRecord {
+        struct CallArgBorrowInfo {
             std::string path;
             diag::SourceSpan span;
+            bool isMut{false};
         };
-        std::vector<BorrowRecord> activeBorrows;
+        std::vector<CallArgBorrowInfo> callArgBorrows;
 
-        auto checkMutArg = [&](const ast::CallArg& arg) {
+        auto checkCallArg = [&](const ast::CallArg& arg, bool isMut) {
             if (!arg.value) return;
-            if (const auto* argIdent = dynamic_cast<const ast::IdentExpr*>(arg.value.get())) {
-                mutatedVars.push_back(argIdent->getName());
+            if (isMut) {
+                if (const auto* argIdent = dynamic_cast<const ast::IdentExpr*>(arg.value.get())) {
+                    mutatedVars.push_back(argIdent->getName());
+                }
             }
             diag::SourceSpan errSpan = arg.span.isValid() ? arg.span : arg.value->getSpan();
-            std::string reason;
-            if (!isMutableLValue(arg.value.get(), scope, &reason)) {
-                reportNonLValueMutableBorrow(reason, errSpan);
-            } else {
-                auto path = computeStoragePath(arg.value.get());
-                if (!path.empty()) {
-                    for (const auto& prev : activeBorrows) {
-                        if (storagePathsAlias(prev.path, path)) {
-                            reportDuplicateMutableBorrow(path, prev.span, errSpan);
+            if (isMut) {
+                std::string reason;
+                if (!isMutableLValue(arg.value.get(), scope, &reason)) {
+                    reportNonLValueMutableBorrow(reason, errSpan);
+                    return;
+                }
+            }
+
+            auto path = computeStoragePath(arg.value.get());
+            if (!path.empty()) {
+                for (const auto& prev : callArgBorrows) {
+                    if (isMut && prev.isMut && storagePathsAlias(prev.path, path)) {
+                        reportDuplicateMutableBorrow(path, prev.span, errSpan);
+                        break;
+                    }
+                    if (isMut || prev.isMut) {
+                        std::string cont, elem;
+                        if (isContainerAndElementPair(prev.path, path, &cont, &elem)) {
+                            reportContainerAndElementBorrow(cont, elem, prev.span, errSpan);
                             break;
                         }
                     }
-                    activeBorrows.push_back(BorrowRecord{std::move(path), errSpan});
                 }
+                callArgBorrows.push_back(CallArgBorrowInfo{std::move(path), errSpan, isMut});
             }
         };
 
@@ -1793,9 +1903,7 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 member->getMemberName() == "toChar") {
                 for (const auto& arg : call->getArgs()) {
                     if (arg.value) inferType(*arg.value, scope);
-                    if (arg.isMut && arg.value) {
-                        checkMutArg(arg);
-                    }
+                    checkCallArg(arg, arg.isMut);
                 }
                 for (const auto& v : mutatedVars) {
                     scope.resetNarrowedType(v);
@@ -1834,9 +1942,7 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                         checkAssignment(pType, argType, arg.value->getSpan(), "method argument");
                     }
                     bool isMut = arg.isMut || (methodDecl && i < methodDecl->getParams().size() && methodDecl->getParams()[i].isMut);
-                    if (isMut) {
-                        checkMutArg(arg);
-                    }
+                    checkCallArg(arg, isMut);
                 }
             }
             for (const auto& v : mutatedVars) {
@@ -1887,9 +1993,7 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                             checkAssignment(pType, argType, arg.value->getSpan(), "function argument");
                         }
                         bool isMut = arg.isMut || (i < fnDecl->getParams().size() && fnDecl->getParams()[i].isMut);
-                        if (isMut) {
-                            checkMutArg(arg);
-                        }
+                        checkCallArg(arg, isMut);
                     }
                 }
                 for (const auto& v : mutatedVars) {
@@ -1908,9 +2012,7 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                             checkAssignment(pType, argType, arg.value->getSpan(), "function argument");
                         }
                         bool isMut = arg.isMut || (i < funcTypeAnnotation->getParams().size() && funcTypeAnnotation->getParams()[i].isMut);
-                        if (isMut) {
-                            checkMutArg(arg);
-                        }
+                        checkCallArg(arg, isMut);
                     }
                 }
                 for (const auto& v : mutatedVars) {
@@ -1922,9 +2024,7 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
 
         for (const auto& arg : call->getArgs()) {
             if (arg.value) inferType(*arg.value, scope);
-            if (arg.isMut && arg.value) {
-                checkMutArg(arg);
-            }
+            checkCallArg(arg, arg.isMut);
         }
         for (const auto& v : mutatedVars) {
             scope.resetNarrowedType(v);

@@ -2182,5 +2182,221 @@ TEST_CASE("Mutable Reference Borrow Checker - Exclusive Borrowing (E4001)", "[ty
     }
 }
 
+// =============================================================================
+// Mutable Reference Borrow Checker - Container and Element Borrowing (E4002)
+// =============================================================================
+
+TEST_CASE("Mutable Reference Borrow Checker - Container and Element Borrowing (E4002)", "[typechecker][borrow_checker][E4002]") {
+    SECTION("Reject simultaneous borrow of element and container: f(mut arr[i], mut arr)") {
+        ParseResult res(
+            "fn modify(mut item: int, mut arr: array<int>): void {}\n"
+            "fn test(): void {\n"
+            "    let arr: array<int> = [1, 2, 3];\n"
+            "    let i: int = 0;\n"
+            "    modify(mut arr[i], mut arr);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ContainerAndElementBorrow));
+    }
+
+    SECTION("Reject simultaneous borrow with reverse argument order: f(mut arr, mut arr[i])") {
+        ParseResult res(
+            "fn modify(mut arr: array<int>, mut item: int): void {}\n"
+            "fn test(): void {\n"
+            "    let arr: array<int> = [1, 2, 3];\n"
+            "    let i: int = 0;\n"
+            "    modify(mut arr, mut arr[i]);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ContainerAndElementBorrow));
+    }
+
+    SECTION("Reject when element is mut and container is by-value: f(mut arr[i], arr)") {
+        ParseResult res(
+            "fn check(mut item: int, arr: array<int>): void {}\n"
+            "fn test(): void {\n"
+            "    let arr: array<int> = [1, 2, 3];\n"
+            "    let i: int = 0;\n"
+            "    check(mut arr[i], arr);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ContainerAndElementBorrow));
+    }
+
+    SECTION("Reject when container is mut and element is by-value: f(arr[i], mut arr)") {
+        ParseResult res(
+            "fn check(item: int, mut arr: array<int>): void {}\n"
+            "fn test(): void {\n"
+            "    let arr: array<int> = [1, 2, 3];\n"
+            "    let i: int = 0;\n"
+            "    check(arr[i], mut arr);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ContainerAndElementBorrow));
+    }
+
+    SECTION("Reject when callee parameters are declared mut but call site omits mut") {
+        ParseResult res(
+            "fn modify(mut item: int, mut arr: array<int>): void {}\n"
+            "fn test(): void {\n"
+            "    let arr: array<int> = [1, 2, 3];\n"
+            "    let i: int = 0;\n"
+            "    modify(arr[i], arr);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ContainerAndElementBorrow));
+    }
+
+    SECTION("Reject nested container indexing against outer container: matrix[0][1] and matrix") {
+        ParseResult res(
+            "fn mutateNested(mut cell: int, mut m: array<array<int>>): void {}\n"
+            "fn test(): void {\n"
+            "    let matrix: array<array<int>> = [[1, 2], [3, 4]];\n"
+            "    mutateNested(mut matrix[0][1], mut matrix);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ContainerAndElementBorrow));
+    }
+
+    SECTION("Reject nested container indexing against intermediate container: matrix[0][1] and matrix[0]") {
+        ParseResult res(
+            "fn mutateRow(mut cell: int, mut row: array<int>): void {}\n"
+            "fn test(): void {\n"
+            "    let matrix: array<array<int>> = [[1, 2], [3, 4]];\n"
+            "    mutateRow(mut matrix[0][1], mut matrix[0]);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ContainerAndElementBorrow));
+    }
+
+    SECTION("Reject container and element borrowing in class method call") {
+        ParseResult res(
+            "class Worker {\n"
+            "    pub fn process(mut item: int, mut arr: array<int>): void {}\n"
+            "}\n"
+            "fn test(): void {\n"
+            "    let w: Worker = new Worker();\n"
+            "    let arr: array<int> = [10, 20];\n"
+            "    w.process(mut arr[0], mut arr);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ContainerAndElementBorrow));
+    }
+
+    SECTION("Reject container and element borrowing in closure call") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    let cb: (mut a: int, mut b: array<int>) => void = fn(mut a: int, mut b: array<int>): void {};\n"
+            "    let arr: array<int> = [10, 20];\n"
+            "    cb(mut arr[0], mut arr);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ContainerAndElementBorrow));
+    }
+
+    SECTION("Reject member container and its element: obj.items[0] and obj.items") {
+        ParseResult res(
+            "class ContainerHolder {\n"
+            "    pub let items: array<int> = [1, 2, 3];\n"
+            "}\n"
+            "fn inspect(mut item: int, mut list: array<int>): void {}\n"
+            "fn test(): void {\n"
+            "    let holder: ContainerHolder = new ContainerHolder();\n"
+            "    inspect(mut holder.items[0], mut holder.items);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ContainerAndElementBorrow));
+    }
+
+    SECTION("Accept distinct containers: arr1[0] and arr2") {
+        ParseResult res(
+            "fn operate(mut item: int, mut list: array<int>): void {}\n"
+            "fn test(): void {\n"
+            "    let arr1: array<int> = [1, 2];\n"
+            "    let arr2: array<int> = [3, 4];\n"
+            "    operate(mut arr1[0], mut arr2);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::ContainerAndElementBorrow));
+    }
+
+    SECTION("Accept distinct elements of same container: arr[0] and arr[1]") {
+        ParseResult res(
+            "fn swap(mut a: int, mut b: int): void {}\n"
+            "fn test(): void {\n"
+            "    let arr: array<int> = [1, 2];\n"
+            "    swap(mut arr[0], mut arr[1]);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::ContainerAndElementBorrow));
+    }
+
+    SECTION("Accept container and element passed by value (neither is mut)") {
+        ParseResult res(
+            "fn examine(item: int, list: array<int>): int {\n"
+            "    return item + list.length;\n"
+            "}\n"
+            "fn test(): void {\n"
+            "    let arr: array<int> = [1, 2, 3];\n"
+            "    examine(arr[0], arr);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::ContainerAndElementBorrow));
+    }
+
+    SECTION("Accept sequential calls borrowing container and element separately") {
+        ParseResult res(
+            "fn modifyElem(mut item: int): void {}\n"
+            "fn modifyCont(mut list: array<int>): void {}\n"
+            "fn test(): void {\n"
+            "    let arr: array<int> = [1, 2, 3];\n"
+            "    modifyElem(mut arr[0]);\n"
+            "    modifyCont(mut arr);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::ContainerAndElementBorrow));
+    }
+
+    SECTION("Verify diagnostic structure, labels, notes, and help footer") {
+        diag::SourceLocation loc1{10, 5, 100};
+        diag::SourceLocation loc2{10, 15, 110};
+        diag::SourceSpan span1{loc1, loc2};
+
+        diag::SourceLocation loc3{10, 20, 115};
+        diag::SourceLocation loc4{10, 30, 125};
+        diag::SourceSpan span2{loc3, loc4};
+
+        auto diag = typechecker::TypeChecker::createContainerAndElementBorrowDiagnostic(
+            "arr", "arr[i]", span1, span2);
+
+        REQUIRE(diag.code == "E4002");
+        REQUIRE(diag.message == "cannot simultaneously borrow container 'arr' and its element 'arr[i]'");
+        REQUIRE(diag.labels.size() == 2);
+        REQUIRE(diag.labels[0].isPrimary);
+        REQUIRE(diag.labels[0].message == "simultaneous borrow of container and element occurs here");
+        REQUIRE_FALSE(diag.labels[1].isPrimary);
+        REQUIRE(diag.labels[1].message == "first borrow occurs here");
+        REQUIRE(diag.footers.size() == 2);
+        REQUIRE(diag.footers[0].kind == diag::DiagnosticFooter::Kind::Note);
+        REQUIRE(diag.footers[0].message == "Simultaneous mutable borrowing of a container and one of its elements violates disjointness.");
+        REQUIRE(diag.footers[1].kind == diag::DiagnosticFooter::Kind::Help);
+        REQUIRE(diag.footers[1].message == "container mutations can reallocate storage and invalidate active element references");
+    }
+}
+
 
 

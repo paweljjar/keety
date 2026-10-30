@@ -161,6 +161,21 @@ public:
         diag::SourceSpan firstSpan,
         diag::SourceSpan duplicateSpan);
 
+    // --- Mutable Reference Borrow Checker (Container & Element Borrowing - E4002) ---
+
+    /// Checks if one storage path is a container and the other is an indexed element of it.
+    [[nodiscard]] static bool isContainerAndElementPair(
+        const std::string& p1,
+        const std::string& p2,
+        std::string* outContainer = nullptr,
+        std::string* outElement = nullptr);
+
+    [[nodiscard]] static diag::Diagnostic createContainerAndElementBorrowDiagnostic(
+        std::string_view containerPath,
+        std::string_view elementPath,
+        diag::SourceSpan firstSpan,
+        diag::SourceSpan secondSpan);
+
 private:
     diag::DiagnosticEmitter* emitter_{nullptr};
     bool hasErrors_{false};
@@ -175,6 +190,7 @@ private:
     void reportUnreachableCode(diag::SourceSpan span);
     void reportNonLValueMutableBorrow(std::string_view exprDesc, diag::SourceSpan span);
     void reportDuplicateMutableBorrow(std::string_view path, diag::SourceSpan firstSpan, diag::SourceSpan duplicateSpan);
+    void reportContainerAndElementBorrow(std::string_view containerPath, std::string_view elementPath, diag::SourceSpan firstSpan, diag::SourceSpan secondSpan);
 };
 
 } // namespace keety::typechecker
