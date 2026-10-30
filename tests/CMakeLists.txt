@@ -21,6 +21,7 @@ add_executable(keety_unit_tests
     unit/test_runtime_deep_copy_ptr.cpp
     unit/test_runtime_numeric.cpp
     unit/test_token.cpp
+    unit/test_lexer.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE
