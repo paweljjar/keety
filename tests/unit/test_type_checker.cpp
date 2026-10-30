@@ -932,4 +932,213 @@ TEST_CASE("Task 3.3.4: Union and Literal Types - Negative Rejection (E3003)", "[
     }
 }
 
+// =============================================================================
+// Phase 3.4: Control-Flow Analysis (CFA) & Type Narrowing
+// =============================================================================
+
+TEST_CASE("Task 3.4.1: Flow-Based Type Narrowing - typeof(x) == \"T\"", "[cfa][narrowing]") {
+    SECTION("Variable narrowed to int inside then branch") {
+        ParseResult res(
+            "fn test(x: int | string): void {\n"
+            "    if (typeof(x) == \"int\") {\n"
+            "        let y: int = x;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Variable narrowed to int cannot be assigned to string in then branch (E3003)") {
+        ParseResult res(
+            "fn test(x: int | string): void {\n"
+            "    if (typeof(x) == \"int\") {\n"
+            "        let s: string = x;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Variable filtered in else branch of typeof check") {
+        ParseResult res(
+            "fn test(x: int | string): void {\n"
+            "    if (typeof(x) == \"int\") {\n"
+            "        let i: int = x;\n"
+            "    } else {\n"
+            "        let s: string = x;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Conformance Test 3.1: formatValue with if-elif-else narrowing") {
+        ParseResult res(
+            "fn formatValue(v: int | string | null): string {\n"
+            "    if (typeof(v) == \"int\") {\n"
+            "        let i: int = v;\n"
+            "        return \"int\";\n"
+            "    } elif (typeof(v) == \"string\") {\n"
+            "        let s: string = v;\n"
+            "        return \"str\";\n"
+            "    } else {\n"
+            "        let n: null = v;\n"
+            "        return \"empty\";\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Symmetric check: \"string\" == typeof(x)") {
+        ParseResult res(
+            "fn test(x: int | string): void {\n"
+            "    if (\"string\" == typeof(x)) {\n"
+            "        let s: string = x;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Inequality typeof check: typeof(x) != \"int\" narrows then branch to string") {
+        ParseResult res(
+            "fn test(x: int | string): void {\n"
+            "    if (typeof(x) != \"int\") {\n"
+            "        let s: string = x;\n"
+            "    } else {\n"
+            "        let i: int = x;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+}
+
+TEST_CASE("Task 3.4.1: Flow-Based Type Narrowing - Non-Null Checks (x != null)", "[cfa][narrowing]") {
+    SECTION("Nullable variable narrowed to non-null inside if (x != null)") {
+        ParseResult res(
+            "fn test(x: int | null): void {\n"
+            "    if (x != null) {\n"
+            "        let y: int = x;\n"
+            "        let sum: int = x + 10;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Else branch of if (x != null) narrows to null") {
+        ParseResult res(
+            "fn test(x: int | null): void {\n"
+            "    if (x != null) {\n"
+            "        let y: int = x;\n"
+            "    } else {\n"
+            "        let n: null = x;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Variable narrowed to null in else branch cannot be used as int (E3003)") {
+        ParseResult res(
+            "fn test(x: int | null): void {\n"
+            "    if (x != null) {\n"
+            "        let y: int = x;\n"
+            "    } else {\n"
+            "        let y: int = x;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Checking if (x == null) narrows then to null and else to non-null") {
+        ParseResult res(
+            "fn test(x: string | null): void {\n"
+            "    if (x == null) {\n"
+            "        let n: null = x;\n"
+            "    } else {\n"
+            "        let s: string = x;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Symmetric null check: null != x") {
+        ParseResult res(
+            "fn test(x: float | null): void {\n"
+            "    if (null != x) {\n"
+            "        let f: float = x;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Multi-union non-null check: int | string | null narrows to int | string") {
+        ParseResult res(
+            "fn test(x: int | string | null): void {\n"
+            "    if (x != null) {\n"
+            "        let u: int | string = x;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+}
+
+TEST_CASE("Task 3.4.1: Flow-Based Type Narrowing - Compound Conditions & Ternaries", "[cfa][narrowing]") {
+    SECTION("Compound condition with && narrows multiple constraints") {
+        ParseResult res(
+            "fn test(x: int | string | null): void {\n"
+            "    if (x != null && typeof(x) == \"int\") {\n"
+            "        let i: int = x;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Ternary conditional narrowing") {
+        ParseResult res(
+            "fn test(x: string | null): string {\n"
+            "    let s: string = (x != null) ? x : \"default\";\n"
+            "    return s;\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("While loop condition narrows inside body") {
+        ParseResult res(
+            "fn test(x: int | null): void {\n"
+            "    while (x != null) {\n"
+            "        let i: int = x;\n"
+            "        break;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+}
+
+
 

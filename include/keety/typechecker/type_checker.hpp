@@ -96,6 +96,22 @@ public:
         diag::SourceSpan span,
         std::string_view contextDesc = "");
 
+    // --- Task 3.4.1: Control-Flow Analysis (CFA) & Type Narrowing ---
+
+    struct NarrowingFact {
+        std::string varName;
+        TypePtr narrowedType;
+    };
+
+    struct BranchNarrowing {
+        std::vector<NarrowingFact> thenFacts;
+        std::vector<NarrowingFact> elseFacts;
+    };
+
+    /// Analyzes a boolean condition expression (such as `typeof(x) == "T"` or `x != null`)
+    /// and extracts flow-based type narrowing facts for the 'then' and 'else' branches.
+    BranchNarrowing analyzeCondition(const ast::Expr* condition, sema::Scope& scope);
+
 private:
     diag::DiagnosticEmitter* emitter_{nullptr};
     bool hasErrors_{false};

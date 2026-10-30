@@ -641,6 +641,262 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
     return !hasErrors_;
 }
 
+namespace {
+
+bool matchesTypeofTarget(const Type& variant, std::string_view targetStr) {
+    if (targetStr == "int") return variant.isInt();
+    if (targetStr == "float") return variant.isFloat();
+    if (targetStr == "bool") return variant.isBool();
+    if (targetStr == "char") return variant.isChar();
+    if (targetStr == "string") return variant.isString();
+    if (targetStr == "null") return variant.isNull();
+    if (targetStr == "void") return variant.isVoid();
+    if (targetStr == "error") return variant.isError();
+    if (targetStr == "array") return variant.isArray();
+    if (targetStr == "map") return variant.isMap();
+    if (targetStr == "function") return variant.isFunction();
+    if (variant.isCustom()) {
+        return static_cast<const CustomType&>(variant).getName() == targetStr;
+    }
+    return false;
+}
+
+TypePtr typeFromTargetStr(std::string_view targetStr) {
+    if (targetStr == "int") return Type::intType();
+    if (targetStr == "float") return Type::floatType();
+    if (targetStr == "bool") return Type::boolType();
+    if (targetStr == "char") return Type::charType();
+    if (targetStr == "string") return Type::stringType();
+    if (targetStr == "null") return Type::nullType();
+    if (targetStr == "void") return Type::voidType();
+    if (targetStr == "error") return Type::errorType();
+    return Type::custom(std::string(targetStr));
+}
+
+TypePtr narrowToTypeof(TypePtr currentType, std::string_view targetStr) {
+    if (!currentType) return typeFromTargetStr(targetStr);
+    if (currentType->isUnion()) {
+        const auto& u = static_cast<const UnionType&>(*currentType);
+        std::vector<TypePtr> matched;
+        for (const auto& v : u.getVariants()) {
+            if (v && matchesTypeofTarget(*v, targetStr)) {
+                matched.push_back(v);
+            }
+        }
+        if (!matched.empty()) {
+            return Type::normalizeUnion(matched);
+        }
+    }
+    if (currentType->isError() && targetStr != "error") {
+        return Type::custom(std::string(targetStr));
+    }
+    return typeFromTargetStr(targetStr);
+}
+
+TypePtr narrowExcludeTypeof(TypePtr currentType, std::string_view targetStr) {
+    if (!currentType) return Type::unknownType();
+    if (currentType->isUnion()) {
+        const auto& u = static_cast<const UnionType&>(*currentType);
+        std::vector<TypePtr> kept;
+        for (const auto& v : u.getVariants()) {
+            if (v && !matchesTypeofTarget(*v, targetStr)) {
+                kept.push_back(v);
+            }
+        }
+        if (!kept.empty()) {
+            return Type::normalizeUnion(kept);
+        }
+        return Type::unknownType();
+    }
+    return currentType;
+}
+
+TypePtr narrowExcludeNull(TypePtr currentType) {
+    if (!currentType) return Type::unknownType();
+    if (currentType->isUnion()) {
+        const auto& u = static_cast<const UnionType&>(*currentType);
+        std::vector<TypePtr> kept;
+        for (const auto& v : u.getVariants()) {
+            if (v && !v->isNull()) {
+                kept.push_back(v);
+            }
+        }
+        if (!kept.empty()) {
+            return Type::normalizeUnion(kept);
+        }
+        return Type::unknownType();
+    }
+    if (currentType->isNull()) {
+        return Type::unknownType();
+    }
+    return currentType;
+}
+
+TypePtr getActiveType(std::string_view varName, sema::Scope& scope) {
+    if (auto narrowed = scope.getNarrowedType(varName)) {
+        return narrowed;
+    }
+    if (auto sym = scope.lookup(varName)) {
+        if (sym->getTypeAnnotation()) {
+            return Type::fromAnnotation(sym->getTypeAnnotation());
+        }
+        if (sym->isBuiltinType()) {
+            return Type::custom(std::string(varName));
+        }
+    }
+    return Type::unknownType();
+}
+
+} // namespace
+
+TypeChecker::BranchNarrowing TypeChecker::analyzeCondition(const ast::Expr* condition, sema::Scope& scope) {
+    BranchNarrowing result;
+    if (!condition) return result;
+
+    // 1. Unary NOT: `!cond`
+    if (const auto* unary = dynamic_cast<const ast::UnaryExpr*>(condition)) {
+        if (unary->getOp() == lexer::TokenKind::Exclaim && unary->getOperand()) {
+            auto inner = analyzeCondition(unary->getOperand(), scope);
+            result.thenFacts = std::move(inner.elseFacts);
+            result.elseFacts = std::move(inner.thenFacts);
+            return result;
+        }
+    }
+
+    // 2. Binary operations: `==`, `!=`, `&&`, `||`
+    if (const auto* binary = dynamic_cast<const ast::BinaryExpr*>(condition)) {
+        auto op = binary->getOp();
+
+        // Logical AND: `A && B`
+        if (op == lexer::TokenKind::AmpAmp) {
+            auto left = analyzeCondition(binary->getLeft(), scope);
+            auto right = analyzeCondition(binary->getRight(), scope);
+
+            result.thenFacts = left.thenFacts;
+            for (const auto& rf : right.thenFacts) {
+                bool updated = false;
+                for (auto& lf : result.thenFacts) {
+                    if (lf.varName == rf.varName) {
+                        lf.narrowedType = rf.narrowedType;
+                        updated = true;
+                        break;
+                    }
+                }
+                if (!updated) {
+                    result.thenFacts.push_back(rf);
+                }
+            }
+            result.elseFacts = std::move(left.elseFacts);
+            return result;
+        }
+
+        // Logical OR: `A || B`
+        if (op == lexer::TokenKind::PipePipe) {
+            auto left = analyzeCondition(binary->getLeft(), scope);
+            auto right = analyzeCondition(binary->getRight(), scope);
+
+            for (const auto& lf : left.thenFacts) {
+                for (const auto& rf : right.thenFacts) {
+                    if (lf.varName == rf.varName) {
+                        result.thenFacts.push_back({lf.varName, Type::unionOf({lf.narrowedType, rf.narrowedType})});
+                    }
+                }
+            }
+            result.elseFacts = left.elseFacts;
+            for (const auto& rf : right.elseFacts) {
+                bool updated = false;
+                for (auto& ef : result.elseFacts) {
+                    if (ef.varName == rf.varName) {
+                        ef.narrowedType = rf.narrowedType;
+                        updated = true;
+                        break;
+                    }
+                }
+                if (!updated) {
+                    result.elseFacts.push_back(rf);
+                }
+            }
+            return result;
+        }
+
+        // Equality / Inequality: `==` and `!=`
+        if (op == lexer::TokenKind::EqualEqual || op == lexer::TokenKind::ExclaimEqual) {
+            // Pattern A: `typeof(x) == "T"` or `typeof(x) != "T"`
+            const ast::TypeofExpr* typeofExpr = nullptr;
+            std::string targetStr;
+            bool foundTypeof = false;
+
+            auto checkTypeofAndStr = [&](const ast::Expr* a, const ast::Expr* b) {
+                if (const auto* te = dynamic_cast<const ast::TypeofExpr*>(a)) {
+                    if (const auto* lit = dynamic_cast<const ast::LiteralExpr*>(b)) {
+                        if (lit->getLiteralKind() == lexer::TokenKind::StringLiteral) {
+                            std::string raw = lit->getRawText();
+                            if (raw.size() >= 2 && ((raw.front() == '"' && raw.back() == '"') ||
+                                                    (raw.front() == '\'' && raw.back() == '\''))) {
+                                raw = raw.substr(1, raw.size() - 2);
+                            }
+                            typeofExpr = te;
+                            targetStr = raw;
+                            foundTypeof = true;
+                        }
+                    }
+                }
+            };
+            checkTypeofAndStr(binary->getLeft(), binary->getRight());
+            if (!foundTypeof) checkTypeofAndStr(binary->getRight(), binary->getLeft());
+
+            if (foundTypeof && typeofExpr && typeofExpr->getExpr()) {
+                if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(typeofExpr->getExpr())) {
+                    std::string varName = ident->getName();
+                    auto currentType = getActiveType(varName, scope);
+
+                    if (op == lexer::TokenKind::EqualEqual) {
+                        result.thenFacts.push_back({varName, narrowToTypeof(currentType, targetStr)});
+                        result.elseFacts.push_back({varName, narrowExcludeTypeof(currentType, targetStr)});
+                    } else {
+                        result.thenFacts.push_back({varName, narrowExcludeTypeof(currentType, targetStr)});
+                        result.elseFacts.push_back({varName, narrowToTypeof(currentType, targetStr)});
+                    }
+                    return result;
+                }
+            }
+
+            // Pattern B: `x == null` or `x != null`
+            const ast::IdentExpr* identExpr = nullptr;
+            bool foundNull = false;
+
+            auto checkIdentAndNull = [&](const ast::Expr* a, const ast::Expr* b) {
+                if (const auto* ie = dynamic_cast<const ast::IdentExpr*>(a)) {
+                    if (const auto* lit = dynamic_cast<const ast::LiteralExpr*>(b)) {
+                        if (lit->getLiteralKind() == lexer::TokenKind::KwNull) {
+                            identExpr = ie;
+                            foundNull = true;
+                        }
+                    }
+                }
+            };
+            checkIdentAndNull(binary->getLeft(), binary->getRight());
+            if (!foundNull) checkIdentAndNull(binary->getRight(), binary->getLeft());
+
+            if (foundNull && identExpr) {
+                std::string varName = identExpr->getName();
+                auto currentType = getActiveType(varName, scope);
+
+                if (op == lexer::TokenKind::ExclaimEqual) { // x != null
+                    result.thenFacts.push_back({varName, narrowExcludeNull(currentType)});
+                    result.elseFacts.push_back({varName, Type::nullType()});
+                } else { // x == null
+                    result.thenFacts.push_back({varName, Type::nullType()});
+                    result.elseFacts.push_back({varName, narrowExcludeNull(currentType)});
+                }
+                return result;
+            }
+        }
+    }
+
+    return result;
+}
+
 bool TypeChecker::checkZeroCoercion(const ast::Stmt& stmt, sema::Scope& scope) {
     if (const auto* blockStmt = dynamic_cast<const ast::BlockStmt*>(&stmt)) {
         auto blockScope = scope.createChild(sema::ScopeKind::Block);
@@ -664,11 +920,34 @@ bool TypeChecker::checkZeroCoercion(const ast::Stmt& stmt, sema::Scope& scope) {
         if (ifStmt->getCondition()) {
             inferType(*ifStmt->getCondition(), scope);
         }
+
+        BranchNarrowing narrowing = analyzeCondition(ifStmt->getCondition(), scope);
+
         if (ifStmt->getThenBranch()) {
-            checkZeroCoercion(*ifStmt->getThenBranch(), scope);
+            auto thenScope = scope.createChild(sema::ScopeKind::Block);
+            for (const auto& fact : narrowing.thenFacts) {
+                thenScope->setNarrowedType(fact.varName, fact.narrowedType);
+            }
+            for (const auto& s : ifStmt->getThenBranch()->getStatements()) {
+                if (s) {
+                    checkZeroCoercion(*s, *thenScope);
+                }
+            }
         }
         if (ifStmt->getElseBranch()) {
-            checkZeroCoercion(*ifStmt->getElseBranch(), scope);
+            auto elseScope = scope.createChild(sema::ScopeKind::Block);
+            for (const auto& fact : narrowing.elseFacts) {
+                elseScope->setNarrowedType(fact.varName, fact.narrowedType);
+            }
+            if (const auto* elseBlock = dynamic_cast<const ast::BlockStmt*>(ifStmt->getElseBranch())) {
+                for (const auto& s : elseBlock->getStatements()) {
+                    if (s) {
+                        checkZeroCoercion(*s, *elseScope);
+                    }
+                }
+            } else {
+                checkZeroCoercion(*ifStmt->getElseBranch(), *elseScope);
+            }
         }
     } else if (const auto* whileStmt = dynamic_cast<const ast::WhileStmt*>(&stmt)) {
         if (whileStmt->hasInit()) {
@@ -677,10 +956,22 @@ bool TypeChecker::checkZeroCoercion(const ast::Stmt& stmt, sema::Scope& scope) {
         if (whileStmt->getCondition()) {
             inferType(*whileStmt->getCondition(), scope);
         }
+
+        BranchNarrowing narrowing = analyzeCondition(whileStmt->getCondition(), scope);
+
         if (whileStmt->getBody()) {
-            checkZeroCoercion(*whileStmt->getBody(), scope);
+            auto bodyScope = scope.createChild(sema::ScopeKind::Block);
+            for (const auto& fact : narrowing.thenFacts) {
+                bodyScope->setNarrowedType(fact.varName, fact.narrowedType);
+            }
+            for (const auto& s : whileStmt->getBody()->getStatements()) {
+                if (s) {
+                    checkZeroCoercion(*s, *bodyScope);
+                }
+            }
         }
     } else if (const auto* forStmt = dynamic_cast<const ast::ForStmt*>(&stmt)) {
+
         auto forScope = scope.createChild(sema::ScopeKind::Block);
         if (forStmt->getInit()) {
             checkZeroCoercion(*forStmt->getInit(), *forScope);
@@ -787,6 +1078,9 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
     }
 
     if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(&expr)) {
+        if (auto narrowed = scope.getNarrowedType(ident->getName())) {
+            return narrowed;
+        }
         auto sym = scope.lookup(ident->getName());
         if (sym) {
             if (sym->getTypeAnnotation()) {
@@ -798,6 +1092,7 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
         }
         return Type::unknownType();
     }
+
 
     if (const auto* cast = dynamic_cast<const ast::TypeCastExpr*>(&expr)) {
         if (cast->getExpr()) {
@@ -935,15 +1230,28 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
 
     if (const auto* ternary = dynamic_cast<const ast::TernaryExpr*>(&expr)) {
         if (ternary->getCondition()) inferType(*ternary->getCondition(), scope);
-        auto thenType = ternary->getThenExpr() ? inferType(*ternary->getThenExpr(), scope, contextualType) : Type::unknownType();
-        auto elseType = ternary->getElseExpr() ? inferType(*ternary->getElseExpr(), scope, contextualType) : Type::unknownType();
+
+        BranchNarrowing narrowing = analyzeCondition(ternary->getCondition(), scope);
+
+        auto thenScope = scope.createChild(sema::ScopeKind::Block);
+        for (const auto& fact : narrowing.thenFacts) {
+            thenScope->setNarrowedType(fact.varName, fact.narrowedType);
+        }
+        auto thenType = ternary->getThenExpr() ? inferType(*ternary->getThenExpr(), *thenScope, contextualType) : Type::unknownType();
+
+        auto elseScope = scope.createChild(sema::ScopeKind::Block);
+        for (const auto& fact : narrowing.elseFacts) {
+            elseScope->setNarrowedType(fact.varName, fact.narrowedType);
+        }
+        auto elseType = ternary->getElseExpr() ? inferType(*ternary->getElseExpr(), *elseScope, contextualType) : Type::unknownType();
 
         if ((thenType->isInt() && elseType->isFloat()) ||
             (thenType->isFloat() && elseType->isInt())) {
             reportImplicitWidening(thenType, elseType, ternary->getSpan(), "ternary branches");
         }
-        return contextualType ? contextualType : thenType;
+        return contextualType ? contextualType : Type::unionOf({thenType, elseType});
     }
+
 
     if (const auto* arrLit = dynamic_cast<const ast::ArrayLitExpr*>(&expr)) {
         if (arrLit->getElements().empty()) {

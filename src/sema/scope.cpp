@@ -144,4 +144,27 @@ std::shared_ptr<Symbol> Scope::lookupParentForShadowing(std::string_view name) c
     return nullptr;
 }
 
+std::shared_ptr<const typechecker::Type> Scope::getNarrowedType(std::string_view name) const {
+    auto it = narrowedTypes_.find(std::string(name));
+    if (it != narrowedTypes_.end()) {
+        return it->second;
+    }
+    if (auto p = parent_.lock()) {
+        return p->getNarrowedType(name);
+    }
+    return nullptr;
+}
+
+void Scope::setNarrowedType(std::string name, std::shared_ptr<const typechecker::Type> type) {
+    narrowedTypes_[std::move(name)] = std::move(type);
+}
+
+void Scope::resetNarrowedType(std::string_view name) {
+    narrowedTypes_.erase(std::string(name));
+    if (auto p = parent_.lock()) {
+        p->resetNarrowedType(name);
+    }
+}
+
 } // namespace keety::sema
+

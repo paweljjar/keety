@@ -83,7 +83,7 @@ This document specifies the operational development plan for the `keety` compile
 - [x] **Task 3.3.4:** Canonical union algebra normalization (flattening, deduplication, subtype absorption).
 
 #### **Phase 3.4: Control-Flow Analysis (CFA) & Type Narrowing**
-- [ ] **Task 3.4.1:** Track flow-based type narrowing within `if (typeof(x) == "T")` and `if (x != null)`.
+- [x] **Task 3.4.1:** Track flow-based type narrowing within `if (typeof(x) == "T")` and `if (x != null)`.
 - [ ] **Task 3.4.2:** Implement *Mutation Watcher* dirty-bit tracking: invalidate narrowed types upon reassignment or passing to `mut`.
 - [ ] **Task 3.4.3:** Exhaustiveness and reachability analysis for non-void functions, flagging dead code after terminating statements.
 

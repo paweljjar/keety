@@ -2,6 +2,7 @@
 
 #include <keety/diag/error_code.hpp>
 #include <keety/sema/symbol.hpp>
+#include <keety/typechecker/type.hpp>
 
 #include <memory>
 #include <optional>
@@ -140,12 +141,30 @@ public:
         return children_;
     }
 
+    // --- Control-Flow Analysis & Type Narrowing ---
+
+    /// Gets the narrowed static type for a variable name in this scope or ancestor scopes.
+    /// Returns nullptr if the variable's type is not narrowed.
+    [[nodiscard]] std::shared_ptr<const typechecker::Type> getNarrowedType(std::string_view name) const;
+
+    /// Sets the narrowed static type for a variable name in this specific scope.
+    void setNarrowedType(std::string name, std::shared_ptr<const typechecker::Type> type);
+
+    /// Invalidates / clears any narrowed type for a variable name in this scope and ancestor scopes.
+    void resetNarrowedType(std::string_view name);
+
+    [[nodiscard]] const std::unordered_map<std::string, std::shared_ptr<const typechecker::Type>>& getNarrowedTypes() const noexcept {
+        return narrowedTypes_;
+    }
+
 private:
     ScopeKind kind_;
     std::weak_ptr<Scope> parent_;
     size_t depth_{0};
     std::unordered_map<std::string, std::shared_ptr<Symbol>> symbols_;
     std::vector<std::shared_ptr<Scope>> children_;
+    std::unordered_map<std::string, std::shared_ptr<const typechecker::Type>> narrowedTypes_;
 };
 
 } // namespace keety::sema
+
