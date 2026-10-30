@@ -7,9 +7,9 @@ This document specifies the operational development plan for the `keety` compile
 ## Progress Summary
 
 - [x] **Stage I: Foundations, Diagnostic Infrastructure & Runtime** (100% Completed)
-- [ ] **Stage II: Front-End (Lexer, Parser & AST)** (In Progress)
-- [ ] **Stage III: Module Dependency Graph & Semantic Analysis**
-- [ ] **Stage IV: KeetIR Intermediate Representation & Optimizations**
+- [x] **Stage II: Front-End (Lexer, Parser & AST)** (100% Completed)
+- [x] **Stage III: Module Dependency Graph & Semantic Analysis** (100% Completed)
+- [ ] **Stage IV: KeetIR Intermediate Representation & Optimizations** (Next)
 - [ ] **Stage V: Back-End (C++17 Code Emission & Toolchain Linking)**
 - [ ] **Stage VI: CLI Driver, Conformance Test Suite & Benchmarks**
 
@@ -38,7 +38,7 @@ This document specifies the operational development plan for the `keety` compile
 
 ---
 
-### **Stage II: Front-End (Lexer, Parser & AST)**
+### **Stage II: Front-End (Lexer, Parser & AST)** `[COMPLETED]`
 
 #### **Phase 2.1: Lexical Analysis (`keety::lexer`)**
 - [x] **Task 2.1.1:** Define `TokenKind` (keywords, literals, operators, delimiters, special tokens) and the `Token` struct.
@@ -62,7 +62,7 @@ This document specifies the operational development plan for the `keety` compile
 
 ---
 
-### **Stage III: Module Dependency Graph & Semantic Analysis** `[CURRENT]`
+### **Stage III: Module Dependency Graph & Semantic Analysis** `[COMPLETED]`
 
 #### **Phase 3.1: Module Resolver & Cyclic Dependency Detection (`keety::resolver`)**
 - [x] **Task 3.1.1:** Implement module path resolution (standard library modules, third-party `keet_modules/`, local `./relative` paths).
@@ -96,7 +96,7 @@ This document specifies the operational development plan for the `keety` compile
 
 ---
 
-### **Stage IV: KeetIR Intermediate Representation & Optimizations**
+### **Stage IV: KeetIR Intermediate Representation & Optimizations** `[NEXT]`
 
 #### **Phase 4.1: AST Lowering to KeetIR**
 - [ ] **Task 4.1.1:** Define KeetIR instruction set and Control Flow Graph (CFG with Basic Blocks).
