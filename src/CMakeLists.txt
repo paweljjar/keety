@@ -6,6 +6,7 @@ add_library(keety_core STATIC
     lexer/token.cpp
     lexer/lexer.cpp
     parser/parser.cpp
+    resolver/module_path_resolver.cpp
 )
 
 target_include_directories(keety_core PUBLIC
