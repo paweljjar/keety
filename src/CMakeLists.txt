@@ -10,6 +10,7 @@ add_library(keety_core STATIC
     resolver/module_graph.cpp
     resolver/cycle_detector.cpp
     resolver/topological_sorter.cpp
+    sema/scope.cpp
 )
 
 target_include_directories(keety_core PUBLIC
