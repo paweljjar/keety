@@ -1140,5 +1140,201 @@ TEST_CASE("Task 3.4.1: Flow-Based Type Narrowing - Compound Conditions & Ternari
     }
 }
 
+TEST_CASE("Task 3.4.2: Mutation Watcher - Direct Reassignment Invalidation", "[cfa][narrowing][invalidation]") {
+    SECTION("Conformance Test 3.2: Reassignment inside guarded block compiles cleanly") {
+        ParseResult res(
+            "let item: int | string = 100;\n"
+            "if (typeof(item) == \"int\") {\n"
+            "    let doubled: int = item * 2;\n"
+            "    item = \"reassigned\";\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
 
+    SECTION("Using item as narrowed type after reassignment emits E3003") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    let item: int | string = 100;\n"
+            "    if (typeof(item) == \"int\") {\n"
+            "        let doubled: int = item * 2;\n"
+            "        item = \"reassigned\";\n"
+            "        let i: int = item;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
 
+    SECTION("Reassigning same-type value still invalidates narrowed type") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    let item: int | string = 100;\n"
+            "    if (typeof(item) == \"int\") {\n"
+            "        item = 200;\n"
+            "        let i: int = item;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Subsequent read accepts declared union type after reassignment") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    let item: int | string = 100;\n"
+            "    if (typeof(item) == \"int\") {\n"
+            "        let doubled: int = item * 2;\n"
+            "        item = \"reassigned\";\n"
+            "        let u: int | string = item;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Nullable variable reassignment invalidates non-null narrowing") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    let x: int | null = 42;\n"
+            "    if (x != null) {\n"
+            "        let a: int = x;\n"
+            "        x = null;\n"
+            "        let b: int = x;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Re-narrowing after reassignment invalidation succeeds") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    let item: int | string = 100;\n"
+            "    if (typeof(item) == \"int\") {\n"
+            "        item = \"reassigned\";\n"
+            "        if (typeof(item) == \"string\") {\n"
+            "            let s: string = item;\n"
+            "        }\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+}
+
+TEST_CASE("Task 3.4.2: Mutation Watcher - Compound Assignment & Unary Mutation", "[cfa][narrowing][invalidation]") {
+    SECTION("Compound assignment item += 5 invalidates narrowing") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    let item: int | string = 100;\n"
+            "    if (typeof(item) == \"int\") {\n"
+            "        item += 5;\n"
+            "        let i: int = item;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Unary prefix increment ++item invalidates narrowing") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    let item: int | string = 100;\n"
+            "    if (typeof(item) == \"int\") {\n"
+            "        ++item;\n"
+            "        let i: int = item;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Unary prefix decrement --item invalidates narrowing") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    let item: int | string = 100;\n"
+            "    if (typeof(item) == \"int\") {\n"
+            "        --item;\n"
+            "        let i: int = item;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+}
+
+TEST_CASE("Task 3.4.2: Mutation Watcher - Passing to mut Parameters", "[cfa][narrowing][invalidation]") {
+    SECTION("Passing narrowed variable to mut parameter invalidates narrowing") {
+        ParseResult res(
+            "fn modify(mut x: int | string): void {}\n"
+            "fn test(): void {\n"
+            "    let item: int | string = 100;\n"
+            "    if (typeof(item) == \"int\") {\n"
+            "        modify(mut item);\n"
+            "        let i: int = item;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Passing narrowed variable to mut parameter without assumption of int succeeds") {
+        ParseResult res(
+            "fn modify(mut x: int | string): void {}\n"
+            "fn test(): void {\n"
+            "    let item: int | string = 100;\n"
+            "    if (typeof(item) == \"int\") {\n"
+            "        modify(mut item);\n"
+            "        let u: int | string = item;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+}
+
+TEST_CASE("Task 3.4.2: Mutation Watcher - Closure Mutation & Enclosing Scopes", "[cfa][narrowing][invalidation]") {
+    SECTION("Mutation in nested inner block invalidates narrowing in enclosing scope") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    let item: int | string = 100;\n"
+            "    if (typeof(item) == \"int\") {\n"
+            "        {\n"
+            "            item = \"changed_in_inner\";\n"
+            "        }\n"
+            "        let i: int = item;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Mutation of captured variable inside closure invalidates enclosing scope") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    let item: int | string = 100;\n"
+            "    if (typeof(item) == \"int\") {\n"
+            "        let cl = fn(): void {\n"
+            "            item = \"closure_mutated\";\n"
+            "        };\n"
+            "        let i: int = item;\n"
+            "    }\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+}

@@ -1110,6 +1110,20 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
 
     if (const auto* unary = dynamic_cast<const ast::UnaryExpr*>(&expr)) {
         auto opType = unary->getOperand() ? inferType(*unary->getOperand(), scope) : Type::unknownType();
+
+        // Increment / Decrement mutation: ++x, --x, x++, x--
+        if (unary->getOp() == lexer::TokenKind::PlusPlus || unary->getOp() == lexer::TokenKind::MinusMinus) {
+            if (opType->isUnion()) {
+                reportTypeMismatch(Type::intType(), opType, unary->getSpan(), "unary increment/decrement");
+            }
+            if (unary->getOperand()) {
+                if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(unary->getOperand())) {
+                    scope.resetNarrowedType(ident->getName());
+                }
+            }
+            return opType;
+        }
+
         if (opType->isLiteral()) {
             const auto& lit = static_cast<const LiteralType&>(*opType);
             if (unary->getOp() == lexer::TokenKind::Minus) {
@@ -1131,11 +1145,42 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
         auto op = binary->getOp();
 
         if (lexer::isAssignmentOperator(op)) {
-            auto leftType = binary->getLeft() ? inferType(*binary->getLeft(), scope) : Type::unknownType();
+            std::string varName;
+            if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(binary->getLeft())) {
+                varName = ident->getName();
+            }
+
+            TypePtr leftType = nullptr;
+            if (op == lexer::TokenKind::Equal && !varName.empty()) {
+                // Direct reassignment: the target type checked for the assignment MUST be
+                // the variable's declared type, NOT the ephemeral narrowed type, because
+                // reassignment can change the active variant (e.g. from int to string).
+                if (auto sym = scope.lookup(varName)) {
+                    if (sym->getTypeAnnotation()) {
+                        leftType = Type::fromAnnotation(sym->getTypeAnnotation());
+                    }
+                }
+            }
+            if (!leftType) {
+                leftType = binary->getLeft() ? inferType(*binary->getLeft(), scope) : Type::unknownType();
+            }
+
+            if (op != lexer::TokenKind::Equal) {
+                if (leftType->isUnion()) {
+                    reportTypeMismatch(Type::intType(), leftType, binary->getSpan(), "compound assignment on union type");
+                }
+            }
+
             auto rightType = binary->getRight() ? inferType(*binary->getRight(), scope, leftType) : Type::unknownType();
             if (binary->getRight()) {
                 checkAssignment(leftType, rightType, binary->getRight()->getSpan(), "assignment");
             }
+
+            // Mutation Watcher: invalidate narrowed type in scope and all enclosing branches
+            if (!varName.empty()) {
+                scope.resetNarrowedType(varName);
+            }
+
             return leftType;
         }
 
@@ -1187,11 +1232,21 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
     }
 
     if (const auto* call = dynamic_cast<const ast::CallExpr*>(&expr)) {
+        std::vector<std::string> mutatedVars;
+
         // Built-in numeric conversion methods: .toFloat(), .toInt(), etc.
         if (const auto* member = dynamic_cast<const ast::MemberExpr*>(call->getCallee())) {
             auto objType = member->getObject() ? inferType(*member->getObject(), scope) : Type::unknownType();
             for (const auto& arg : call->getArgs()) {
                 if (arg.value) inferType(*arg.value, scope);
+                if (arg.isMut && arg.value) {
+                    if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(arg.value.get())) {
+                        mutatedVars.push_back(ident->getName());
+                    }
+                }
+            }
+            for (const auto& v : mutatedVars) {
+                scope.resetNarrowedType(v);
             }
             if (member->getMemberName() == "toFloat") return Type::floatType();
             if (member->getMemberName() == "toInt") return Type::intType();
@@ -1215,7 +1270,16 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                             if (pType) {
                                 checkAssignment(pType, argType, arg.value->getSpan(), "function argument");
                             }
+                            bool isMut = arg.isMut || (i < fnDecl->getParams().size() && fnDecl->getParams()[i].isMut);
+                            if (isMut) {
+                                if (const auto* argIdent = dynamic_cast<const ast::IdentExpr*>(arg.value.get())) {
+                                    mutatedVars.push_back(argIdent->getName());
+                                }
+                            }
                         }
+                    }
+                    for (const auto& v : mutatedVars) {
+                        scope.resetNarrowedType(v);
                     }
                     return Type::fromAnnotation(fnDecl->getReturnType());
                 }
@@ -1224,6 +1288,14 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
 
         for (const auto& arg : call->getArgs()) {
             if (arg.value) inferType(*arg.value, scope);
+            if (arg.isMut && arg.value) {
+                if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(arg.value.get())) {
+                    mutatedVars.push_back(ident->getName());
+                }
+            }
+        }
+        for (const auto& v : mutatedVars) {
+            scope.resetNarrowedType(v);
         }
         return Type::unknownType();
     }
