@@ -174,3 +174,166 @@ TEST_CASE("C++ Implementation Emitter handles single vs multiple storage allocat
         REQUIRE(cpp.find("// Storage definition") == std::string::npos);
     }
 }
+
+TEST_CASE("C++ Implementation Emitter translates function bodies to C++17 with containers", "[emitter][functions]") {
+    const std::string source = R"(
+        fn buildBuffer(initial: int): array<int> {
+            let buf: array<int> = [1, 2, 3];
+            buf.push(initial);
+            return buf;
+        }
+
+        fn lookupScore(scores: map<string, int>, key: string): int {
+            return scores[key];
+        }
+
+        fn parsePayload(val: int | string): string {
+            return val as string;
+        }
+    )";
+
+    keety::parser::ModuleAST ast = parseSource(source, "data_pipeline");
+    keety::emitter::CppEmitter emitter(ast);
+
+    std::string cpp = emitter.emit();
+
+    SECTION("Translates array functions using std::vector and push_back") {
+        REQUIRE(cpp.find("std::vector<int64_t> buildBuffer(int64_t initial) {") != std::string::npos);
+        REQUIRE(cpp.find("std::vector<int64_t> buf = {1, 2, 3};") != std::string::npos);
+        REQUIRE(cpp.find("buf.push_back(initial);") != std::string::npos);
+        REQUIRE(cpp.find("return buf;") != std::string::npos);
+    }
+
+    SECTION("Translates map functions using std::unordered_map indexing") {
+        REQUIRE(cpp.find("int64_t lookupScore(const std::unordered_map<std::string, int64_t>& scores, const std::string& key) {") != std::string::npos);
+        REQUIRE(cpp.find("return scores[key];") != std::string::npos);
+    }
+
+    SECTION("Translates union functions using std::variant and std::get") {
+        REQUIRE(cpp.find("std::string parsePayload(const std::variant<int64_t, std::string>& val) {") != std::string::npos);
+        REQUIRE(cpp.find("return std::get<std::string>(val);") != std::string::npos);
+    }
+}
+
+TEST_CASE("C++ Implementation Emitter translates functions accessing module-level mutable variables", "[emitter][functions]") {
+    const std::string source = R"(
+        export let activeRequests: int = 0;
+
+        fn recordHit(path: string): void {
+            activeRequests += 1;
+        }
+
+        fn computeRatio(hits: int, total: int): int {
+            if (total == 0) {
+                zonk "Cannot divide by zero in computeRatio";
+            }
+            return hits / total;
+        }
+    )";
+
+    keety::parser::ModuleAST ast = parseSource(source, "metrics");
+    keety::emitter::CppEmitter emitter(ast);
+
+    std::string cpp = emitter.emit();
+
+    SECTION("Module variable references within functions map to _internal_ storage") {
+        REQUIRE(cpp.find("int64_t _internal_activeRequests = 0;") != std::string::npos);
+        REQUIRE(cpp.find("void recordHit(const std::string& path) {") != std::string::npos);
+        REQUIRE(cpp.find("_internal_activeRequests += 1;") != std::string::npos);
+    }
+
+    SECTION("Conditional branches and zonk statements map to C++ if and throw keet::error") {
+        REQUIRE(cpp.find("int64_t computeRatio(int64_t hits, int64_t total) {") != std::string::npos);
+        REQUIRE(cpp.find("if (total == 0) {") != std::string::npos);
+        REQUIRE(cpp.find("throw keet::error(\"Error\", \"Cannot divide by zero in computeRatio\");") != std::string::npos);
+        REQUIRE(cpp.find("return hits / total;") != std::string::npos);
+    }
+}
+
+TEST_CASE("C++ Implementation Emitter translates class method definitions", "[emitter][methods]") {
+    const std::string source = R"(
+        class Counter {
+            pub let value: int = 0;
+
+            fn increment(): void {
+                this.value += 1;
+            }
+        }
+    )";
+
+    keety::parser::ModuleAST ast = parseSource(source, "domain");
+    keety::emitter::CppEmitter emitter(ast);
+
+    std::string cpp = emitter.emit();
+
+    SECTION("Emits qualified class method definitions with this-> pointer access") {
+        REQUIRE(cpp.find("void Counter::increment() {") != std::string::npos);
+        REQUIRE(cpp.find("this->value += 1;") != std::string::npos);
+    }
+}
+
+TEST_CASE("C++ Implementation Emitter translates for-in collection loops and structured bindings", "[emitter][loops]") {
+    const std::string source = R"(
+        fn sumEntries(scores: map<string, int>): int {
+            let total: int = 0;
+            for (const k, v in scores) {
+                total += v;
+            }
+            return total;
+        }
+
+        fn sumItems(items: array<int>): int {
+            let total: int = 0;
+            for (const item in items) {
+                total += item;
+            }
+            return total;
+        }
+    )";
+
+    keety::parser::ModuleAST ast = parseSource(source, "algorithms");
+    keety::emitter::CppEmitter emitter(ast);
+
+    std::string cpp = emitter.emit();
+
+    SECTION("Translates map iteration using C++17 structured bindings") {
+        REQUIRE(cpp.find("for (const auto& [k, v] : scores) {") != std::string::npos);
+        REQUIRE(cpp.find("total += v;") != std::string::npos);
+    }
+
+    SECTION("Translates array iteration using range-for") {
+        REQUIRE(cpp.find("for (const auto& item : items) {") != std::string::npos);
+        REQUIRE(cpp.find("total += item;") != std::string::npos);
+    }
+}
+
+TEST_CASE("C++ Implementation Emitter translates IR functions and instructions", "[emitter][ir_fn]") {
+    using namespace keety::typechecker;
+    keety::ir::Module irModule("ir_compute");
+
+    auto fn = std::make_unique<keety::ir::Function>("add_numbers", std::make_shared<Type>(TypeKind::Int));
+    fn->add_parameter(keety::ir::FunctionParameter{"a", std::make_shared<Type>(TypeKind::Int), false, false, false});
+    fn->add_parameter(keety::ir::FunctionParameter{"b", std::make_shared<Type>(TypeKind::Int), false, false, false});
+
+    auto* entry = fn->create_basic_block("entry");
+    auto res_temp = fn->create_temp(std::make_shared<Type>(TypeKind::Int));
+    entry->append_instruction(std::make_unique<keety::ir::BinaryInst>(
+        keety::ir::BinaryOpKind::Add,
+        res_temp,
+        keety::ir::Operand::create_var("a", std::make_shared<Type>(TypeKind::Int)),
+        keety::ir::Operand::create_var("b", std::make_shared<Type>(TypeKind::Int))
+    ));
+    entry->append_instruction(std::make_unique<keety::ir::ReturnInst>(res_temp));
+
+    irModule.add_function(std::move(fn));
+
+    keety::emitter::CppEmitter emitter(irModule);
+    std::string cpp = emitter.emit();
+
+    SECTION("Emits C++ function definition translating IR instructions") {
+        REQUIRE(cpp.find("int64_t add_numbers(int64_t a, int64_t b) {") != std::string::npos);
+        REQUIRE(cpp.find("auto _t0 = a + b;") != std::string::npos);
+        REQUIRE(cpp.find("return _t0;") != std::string::npos);
+    }
+}
+

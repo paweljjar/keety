@@ -24,7 +24,7 @@ struct CppEmitterOptions {
     std::vector<std::string> standard_headers = {
         "<iostream>"
     };
-    bool is_root_module{false};                 ///< Emits main() process wrapper if true (Task 5.2.3)
+    bool is_root_module{false};                 ///< Emits main() process entry wrapper if true
 };
 
 /// Emits standard-compliant C++17 module implementation files (<module>.cpp).
@@ -63,15 +63,32 @@ public:
     [[nodiscard]] const std::vector<std::string>& get_storage_allocations() const noexcept { return storage_allocations_; }
     void clear_storage_allocations() noexcept { storage_allocations_.clear(); }
 
+    // Function definition management
+    void add_function_definition(std::string function_def);
+    [[nodiscard]] const std::vector<std::string>& get_function_definitions() const noexcept { return function_definitions_; }
+    void clear_function_definitions() noexcept { function_definitions_.clear(); }
+
     // AST / IR declaration ingestion
     void collect_declarations(const parser::ModuleAST& ast);
     void collect_declarations(const std::vector<std::unique_ptr<ast::Decl>>& decls);
     void collect_ir_declarations(const ir::Module& ir_module);
 
+    // Function translation
+    [[nodiscard]] std::string translate_function(const ast::FnDecl& fn) const;
+    [[nodiscard]] std::string translate_method(std::string_view class_name, const ast::FnDecl& fn) const;
+    [[nodiscard]] std::string translate_statement(const ast::Stmt* stmt, int indent = 1) const;
+    [[nodiscard]] std::string translate_expression(const ast::Expr* expr) const;
+    [[nodiscard]] std::string translate_block(const ast::BlockStmt* block, int indent = 1) const;
+    [[nodiscard]] std::string translate_ir_function(const ir::Function& fn) const;
+
+    [[nodiscard]] bool is_module_var(const std::string& name) const;
+    void register_module_var(std::string name);
+
     // Emission sections
     [[nodiscard]] std::string emit_preamble() const;
     [[nodiscard]] std::string emit_namespace_begin() const;
     [[nodiscard]] std::string emit_storage_allocations() const;
+    [[nodiscard]] std::string emit_function_definitions() const;
     [[nodiscard]] std::string emit_namespace_body() const;
     [[nodiscard]] std::string emit_namespace_end() const;
     [[nodiscard]] std::string emit_main_wrapper() const;
@@ -80,6 +97,7 @@ public:
     void emit(std::ostream& os) const;
 
     // KeetIR Operand to C++ formatting
+    [[nodiscard]] std::string to_cpp_ir_operand(const ir::Operand& operand) const;
     [[nodiscard]] static std::string to_cpp_operand(const ir::Operand& operand);
 
 private:
@@ -89,6 +107,8 @@ private:
     const ir::Module* ir_module_{nullptr};
 
     std::vector<std::string> storage_allocations_;
+    std::vector<std::string> function_definitions_;
+    std::vector<std::string> module_vars_;
 };
 
 } // namespace keety::emitter
