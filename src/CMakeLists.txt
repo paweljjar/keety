@@ -28,6 +28,7 @@ add_library(keety_core STATIC
     ir/pipeline_reserve.cpp
     ir/recursive_boxing.cpp
     emitter/header_emitter.cpp
+    emitter/cpp_emitter.cpp
 )
 
 target_include_directories(keety_core PUBLIC

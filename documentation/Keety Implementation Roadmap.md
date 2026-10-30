@@ -121,7 +121,7 @@ This document specifies the operational development plan for the `keety` compile
 - [x] **Task 5.1.4:** Emit generic function templates, exported function prototypes, and `inline const T&` const-views for module variables.
 
 #### **Phase 5.2: C++ Implementation Emitter (`<module>.cpp`)**
-- [ ] **Task 5.2.1:** Emit storage allocations for module-level variables (`_internal_<name>`).
+- [x] **Task 5.2.1:** Emit storage allocations for module-level variables (`_internal_<name>`).
 - [ ] **Task 5.2.2:** Translate function bodies to C++17 using `std::variant`, `std::vector`, `std::unordered_map`.
 - [ ] **Task 5.2.3:** Emit root `main(int argc, char* argv[])` with uncaught `keet::error` and `std::exception` handlers.
 
