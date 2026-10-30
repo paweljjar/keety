@@ -26,6 +26,7 @@ add_library(keety_core STATIC
     ir/move_insertion.cpp
     ir/const_ref_promotion.cpp
     ir/pipeline_reserve.cpp
+    ir/recursive_boxing.cpp
 )
 
 target_include_directories(keety_core PUBLIC

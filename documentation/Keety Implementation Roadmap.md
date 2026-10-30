@@ -108,7 +108,7 @@ This document specifies the operational development plan for the `keety` compile
 - [x] **Task 4.2.2:** *Pass 2 (Last-Use Move Insertion):* Replace last reads of r-value eligible variables with `std::move`.
 - [x] **Task 4.2.3:** *Pass 3 (Const-Reference Parameter Promotion):* Promote unmutated composite parameters (`string`, `array`, `map`, `class`) to `const T&`.
 - [x] **Task 4.2.4:** *Pass 4 (Pipeline Capacity Pre-Allocation):* Detect functional chains (`.map()`, `.filter()`) and insert `.reserve()`.
-- [ ] **Task 4.2.5:** *Pass 5 (Recursive Smart-Pointer Boxing):* Detect self-referential class fields and insert `keet::deep_copy_ptr<T>`.
+- [x] **Task 4.2.5:** *Pass 5 (Recursive Smart-Pointer Boxing):* Detect self-referential class fields and insert `keet::deep_copy_ptr<T>`.
 
 ---
 
