@@ -2398,5 +2398,168 @@ TEST_CASE("Mutable Reference Borrow Checker - Container and Element Borrowing (E
     }
 }
 
+// =============================================================================
+// Mutable Reference Borrow Checker - Map Element Borrowing (E4003)
+// =============================================================================
 
+TEST_CASE("Mutable Reference Borrow Checker - Map Element Borrowing (E4003)", "[typechecker][borrow_checker][E4003]") {
+    SECTION("Reject passing map element to mut parameter: f(mut m[k]) (neg_map_mut)") {
+        ParseResult res(
+            "fn modify(mut val: int): void {\n"
+            "    val = val + 1;\n"
+            "}\n"
+            "fn test(): void {\n"
+            "    let m: map<string, int> = {\"count\": 10};\n"
+            "    modify(mut m[\"count\"]);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::MapElementMutableBorrow));
+    }
 
+    SECTION("Reject passing map element with variable key: f(mut m[key])") {
+        ParseResult res(
+            "fn update(mut item: int): void {}\n"
+            "fn test(): void {\n"
+            "    let m: map<string, int> = {\"x\": 1};\n"
+            "    let key: string = \"x\";\n"
+            "    update(mut m[key]);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::MapElementMutableBorrow));
+    }
+
+    SECTION("Reject passing map element when callee parameter is mut but call site omits mut") {
+        ParseResult res(
+            "fn update(mut item: int): void {}\n"
+            "fn test(): void {\n"
+            "    let m: map<string, int> = {\"x\": 1};\n"
+            "    update(m[\"x\"]);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::MapElementMutableBorrow));
+    }
+
+    SECTION("Reject nested map element borrow: mut grid[row][col]") {
+        ParseResult res(
+            "fn modify(mut val: int): void {}\n"
+            "fn test(): void {\n"
+            "    let grid: map<string, map<string, int>> = {\"r1\": {\"c1\": 5}};\n"
+            "    modify(mut grid[\"r1\"][\"c1\"]);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::MapElementMutableBorrow));
+    }
+
+    SECTION("Reject borrowing element of map inside class object field: mut obj.dict[k]") {
+        ParseResult res(
+            "class DictionaryHolder {\n"
+            "    pub let dict: map<string, int> = {\"alpha\": 1};\n"
+            "}\n"
+            "fn update(mut val: int): void {}\n"
+            "fn test(): void {\n"
+            "    let holder: DictionaryHolder = new DictionaryHolder();\n"
+            "    update(mut holder.dict[\"alpha\"]);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::MapElementMutableBorrow));
+    }
+
+    SECTION("Reject borrowing array element inside map: mut m[k][0]") {
+        ParseResult res(
+            "fn mutate(mut val: int): void {}\n"
+            "fn test(): void {\n"
+            "    let m: map<string, array<int>> = {\"list\": [1, 2, 3]};\n"
+            "    mutate(mut m[\"list\"][0]);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::MapElementMutableBorrow));
+    }
+
+    SECTION("Reject map element mutable borrow in class method call") {
+        ParseResult res(
+            "class Worker {\n"
+            "    pub fn process(mut val: int): void {}\n"
+            "}\n"
+            "fn test(): void {\n"
+            "    let w: Worker = new Worker();\n"
+            "    let m: map<string, int> = {\"num\": 42};\n"
+            "    w.process(mut m[\"num\"]);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::MapElementMutableBorrow));
+    }
+
+    SECTION("Reject map element mutable borrow in closure call") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    let cb: (mut val: int) => void = fn(mut val: int): void {};\n"
+            "    let m: map<string, int> = {\"num\": 42};\n"
+            "    cb(mut m[\"num\"]);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::MapElementMutableBorrow));
+    }
+
+    SECTION("Accept reading map element by value (parameter is not mut)") {
+        ParseResult res(
+            "fn inspect(val: int): void {}\n"
+            "fn test(): void {\n"
+            "    let m: map<string, int> = {\"key\": 10};\n"
+            "    inspect(m[\"key\"]);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::MapElementMutableBorrow));
+    }
+
+    SECTION("Accept passing whole map container as mut") {
+        ParseResult res(
+            "fn clearMap(mut m: map<string, int>): void {}\n"
+            "fn test(): void {\n"
+            "    let m: map<string, int> = {\"a\": 1};\n"
+            "    clearMap(mut m);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::MapElementMutableBorrow));
+    }
+
+    SECTION("Accept passing array element as mut") {
+        ParseResult res(
+            "fn inc(mut x: int): void {}\n"
+            "fn test(): void {\n"
+            "    let arr: array<int> = [1, 2, 3];\n"
+            "    inc(mut arr[0]);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::MapElementMutableBorrow));
+    }
+
+    SECTION("Verify diagnostic structure, labels, notes, and help footer") {
+        diag::SourceLocation loc1{5, 10, 50};
+        diag::SourceLocation loc2{5, 20, 60};
+        diag::SourceSpan span{loc1, loc2};
+
+        auto diag = typechecker::TypeChecker::createMapElementMutableBorrowDiagnostic("m[k]", span);
+
+        REQUIRE(diag.code == "E4003");
+        REQUIRE(diag.message == "cannot take mutable reference to map element: 'm[k]'");
+        REQUIRE(diag.labels.size() == 1);
+        REQUIRE(diag.labels[0].isPrimary);
+        REQUIRE(diag.labels[0].message == "mutable borrow of map element occurs here");
+        REQUIRE(diag.footers.size() == 2);
+        REQUIRE(diag.footers[0].kind == diag::DiagnosticFooter::Kind::Note);
+        REQUIRE(diag.footers[0].message == "Map elements cannot be borrowed mutably because map rehashing may invalidate storage references.");
+        REQUIRE(diag.footers[1].kind == diag::DiagnosticFooter::Kind::Help);
+        REQUIRE(diag.footers[1].message == "update map elements using direct assignment ('m[k] = val;') or map methods");
+    }
+}

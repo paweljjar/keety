@@ -176,6 +176,15 @@ public:
         diag::SourceSpan firstSpan,
         diag::SourceSpan secondSpan);
 
+    // --- Mutable Reference Borrow Checker (Map Element Borrowing - E4003) ---
+
+    /// Checks if an expression is a map element access (e.g. m[k]).
+    [[nodiscard]] bool isMapIndexExpr(const ast::Expr* expr, sema::Scope& scope);
+
+    [[nodiscard]] static diag::Diagnostic createMapElementMutableBorrowDiagnostic(
+        std::string_view path,
+        diag::SourceSpan span);
+
 private:
     diag::DiagnosticEmitter* emitter_{nullptr};
     bool hasErrors_{false};
@@ -191,6 +200,7 @@ private:
     void reportNonLValueMutableBorrow(std::string_view exprDesc, diag::SourceSpan span);
     void reportDuplicateMutableBorrow(std::string_view path, diag::SourceSpan firstSpan, diag::SourceSpan duplicateSpan);
     void reportContainerAndElementBorrow(std::string_view containerPath, std::string_view elementPath, diag::SourceSpan firstSpan, diag::SourceSpan secondSpan);
+    void reportMapElementMutableBorrow(std::string_view path, diag::SourceSpan span);
 };
 
 } // namespace keety::typechecker

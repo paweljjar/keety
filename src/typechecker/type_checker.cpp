@@ -663,6 +663,13 @@ bool TypeChecker::isMutableLValue(const ast::Expr* expr, sema::Scope& scope, std
             return false;
         }
 
+        // Map elements are unstable in storage and cannot be passed as mut
+        auto contType = inferType(*index->getContainer(), scope);
+        if (contType && contType->isMap()) {
+            if (outReason) *outReason = "map elements cannot be passed by mutable reference";
+            return false;
+        }
+
         // The container itself must be an addressable mutable l-value.
         // This enforces deep immutability: const arr[0] is rejected.
         std::string contReason;
@@ -1008,9 +1015,66 @@ void TypeChecker::reportContainerAndElementBorrow(
     }
 }
 
+// =============================================================================
+// Mutable Reference Borrow Checker (Map Element Borrowing - E4003)
+// =============================================================================
 
+bool TypeChecker::isMapIndexExpr(const ast::Expr* expr, sema::Scope& scope) {
+    if (!expr) return false;
+    if (const auto* index = dynamic_cast<const ast::IndexExpr*>(expr)) {
+        if (index->getContainer()) {
+            auto contType = inferType(*index->getContainer(), scope);
+            if (contType && contType->isMap()) {
+                return true;
+            }
+            return isMapIndexExpr(index->getContainer(), scope);
+        }
+    }
+    return false;
+}
 
+diag::Diagnostic TypeChecker::createMapElementMutableBorrowDiagnostic(
+    std::string_view path,
+    diag::SourceSpan span) {
+    std::string msg = "cannot take mutable reference to map element";
+    if (!path.empty()) {
+        msg += ": '" + std::string(path) + "'";
+    }
 
+    auto d = diag::Diagnostic::makeError(
+        diag::ErrorCode::MapElementMutableBorrow,
+        std::move(msg),
+        span.isValid() ? span.start : diag::SourceLocation{});
+
+    if (span.isValid()) {
+        d.labels.push_back(diag::DiagnosticLabel{
+            span,
+            "mutable borrow of map element occurs here",
+            true
+        });
+    }
+
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Note,
+        "Map elements cannot be borrowed mutably because map rehashing may invalidate storage references."
+    });
+
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Help,
+        "update map elements using direct assignment ('m[k] = val;') or map methods"
+    });
+
+    return d;
+}
+
+void TypeChecker::reportMapElementMutableBorrow(
+    std::string_view path,
+    diag::SourceSpan span) {
+    hasErrors_ = true;
+    if (emitter_ != nullptr) {
+        emitter_->report(createMapElementMutableBorrowDiagnostic(path, span));
+    }
+}
 bool TypeChecker::checkAssignment(
     TypePtr expectedType,
     TypePtr actualType,
@@ -1867,6 +1931,10 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             }
             diag::SourceSpan errSpan = arg.span.isValid() ? arg.span : arg.value->getSpan();
             if (isMut) {
+                if (isMapIndexExpr(arg.value.get(), scope)) {
+                    reportMapElementMutableBorrow(computeStoragePath(arg.value.get()), errSpan);
+                    return;
+                }
                 std::string reason;
                 if (!isMutableLValue(arg.value.get(), scope, &reason)) {
                     reportNonLValueMutableBorrow(reason, errSpan);
@@ -2172,7 +2240,28 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
     }
 
     if (const auto* member = dynamic_cast<const ast::MemberExpr*>(&expr)) {
-        if (member->getObject()) inferType(*member->getObject(), scope);
+        if (const auto* objIdent = dynamic_cast<const ast::IdentExpr*>(member->getObject())) {
+            if (objIdent->getName() == "this") {
+                auto fieldSym = scope.lookup(member->getMemberName());
+                if (fieldSym && fieldSym->isField() && fieldSym->getTypeAnnotation()) {
+                    return Type::fromAnnotation(fieldSym->getTypeAnnotation());
+                }
+            }
+        }
+        auto objType = member->getObject() ? inferType(*member->getObject(), scope) : Type::unknownType();
+        if (objType && objType->isCustom()) {
+            auto clsName = static_cast<const CustomType*>(objType.get())->getName();
+            auto clsSym = scope.lookup(clsName);
+            if (clsSym && clsSym->getAstNode()) {
+                if (const auto* clsDecl = dynamic_cast<const ast::ClassDecl*>(clsSym->getAstNode())) {
+                    for (const auto& f : clsDecl->getFields()) {
+                        if (f.name == member->getMemberName()) {
+                            return Type::fromAnnotation(f.type.get());
+                        }
+                    }
+                }
+            }
+        }
         return Type::unknownType();
     }
 

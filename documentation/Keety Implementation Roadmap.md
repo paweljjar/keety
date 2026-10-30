@@ -91,7 +91,7 @@ This document specifies the operational development plan for the `keety` compile
 - [x] **Task 3.5.1:** Validate l-values: reject r-values and literals passed to `mut` parameters (`E4005`).
 - [x] **Task 3.5.2:** Enforce exclusive mutable borrows: reject duplicate borrows `f(mut x, mut x)` (`E4001`).
 - [x] **Task 3.5.3:** Reject simultaneous borrowing of container and its element: `f(mut arr[i], mut arr)` (`E4002`).
-- [ ] **Task 3.5.4:** Forbid taking mutable references to map elements: `f(mut m[k])` (`E4003`).
+- [x] **Task 3.5.4:** Forbid taking mutable references to map elements: `f(mut m[k])` (`E4003`).
 - [ ] **Task 3.5.5:** Reject `mut` parameters in `async` functions (`E4004`) or default arguments (`E4006`).
 
 ---
