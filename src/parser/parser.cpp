@@ -141,6 +141,10 @@ std::unique_ptr<ast::Decl> Parser::parseDeclaration() {
         advance();
         return parseImportDecl(isExported);
     }
+    if (check(lexer::TokenKind::KwFrom)) {
+        advance();
+        return parseFromImportDecl(isExported);
+    }
 
     // Top-level statement or error
     auto stmt = parseStatement();
@@ -503,6 +507,43 @@ std::unique_ptr<ast::ImportDecl> Parser::parseImportDecl(bool isReExported) {
     diag::SourceSpan span{startLoc, semiTok.span.end};
 
     return std::make_unique<ast::ImportDecl>(span, std::move(path), std::move(alias), std::vector<ast::ImportedSymbol>{}, isReExported);
+}
+
+std::unique_ptr<ast::ImportDecl> Parser::parseFromImportDecl(bool isReExported) {
+    diag::SourceLocation startLoc = lastConsumed_.span.start;
+    // from "path" import id [as alias], ...;
+    std::string path;
+    if (check(lexer::TokenKind::StringLiteral) || check(lexer::TokenKind::Identifier)) {
+        path = std::string(advance().lexeme);
+        if (path.size() >= 2 && (path.front() == '"' || path.front() == '\'')) {
+            path = path.substr(1, path.size() - 2);
+        }
+    } else {
+        expect(lexer::TokenKind::StringLiteral, diag::ErrorCode::UnexpectedToken, "expected module path after 'from'");
+    }
+
+    expect(lexer::TokenKind::KwImport, diag::ErrorCode::UnexpectedToken, "expected 'import' after module path in from-import");
+
+    std::vector<ast::ImportedSymbol> symbols;
+    while (!check(lexer::TokenKind::Semicolon) && !check(lexer::TokenKind::Eof)) {
+        const auto& origTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected imported symbol identifier");
+        std::string origName = std::string(origTok.lexeme);
+        std::string symAlias;
+        if (match(lexer::TokenKind::KwAs)) {
+            const auto& aliasTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected alias identifier after 'as'");
+            symAlias = std::string(aliasTok.lexeme);
+        }
+        symbols.push_back(ast::ImportedSymbol{std::move(origName), std::move(symAlias), origTok.span});
+
+        if (!match(lexer::TokenKind::Comma)) {
+            break;
+        }
+    }
+
+    const auto& semiTok = expect(lexer::TokenKind::Semicolon, diag::ErrorCode::ExpectedSemicolon, "expected ';' after from-import statement");
+    diag::SourceSpan span{startLoc, semiTok.span.end};
+
+    return std::make_unique<ast::ImportDecl>(span, std::move(path), "", std::move(symbols), isReExported);
 }
 
 std::unique_ptr<ast::BlockStmt> Parser::parseBlockStatement() {

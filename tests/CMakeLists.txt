@@ -51,6 +51,7 @@ add_executable(keety_unit_tests
     unit/test_const_ref_promotion.cpp
     unit/test_pipeline_reserve.cpp
     unit/test_recursive_boxing.cpp
+    unit/test_header_emitter.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE

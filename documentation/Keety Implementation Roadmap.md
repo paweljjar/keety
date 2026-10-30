@@ -115,7 +115,7 @@ This document specifies the operational development plan for the `keety` compile
 ### **Stage V: Back-End (C++17 Code Emission & Toolchain Linking)** `[CURRENT]`
 
 #### **Phase 5.1: C++ Header Emitter (`<module>.hpp`)**
-- [ ] **Task 5.1.1:** Emit `#pragma once`, required standard headers, and imported module includes.
+- [x] **Task 5.1.1:** Emit `#pragma once`, required standard headers, and imported module includes.
 - [ ] **Task 5.1.2:** Emit module namespace encapsulation `namespace keet_module_<name> { ... }`.
 - [ ] **Task 5.1.3:** Emit forward declarations, `constexpr` definitions, and class/struct/enum definitions.
 - [ ] **Task 5.1.4:** Emit generic function templates, exported function prototypes, and `inline const T&` const-views for module variables.

@@ -68,6 +68,7 @@ private:
     std::unique_ptr<ast::EnumDecl> parseEnumDecl(bool isExported);
     std::unique_ptr<ast::ErrTypeDecl> parseErrTypeDecl(bool isExported);
     std::unique_ptr<ast::ImportDecl> parseImportDecl(bool isReExported);
+    std::unique_ptr<ast::ImportDecl> parseFromImportDecl(bool isReExported);
     std::unique_ptr<ast::ExportDecl> parseExportDecl();
 
     // --- Statements ---
