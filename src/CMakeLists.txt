@@ -16,6 +16,11 @@ add_library(keety_core STATIC
     sema/const_view_checker.cpp
     typechecker/type.cpp
     typechecker/type_checker.cpp
+    ir/operand.cpp
+    ir/instruction.cpp
+    ir/basic_block.cpp
+    ir/function.cpp
+    ir/module.cpp
 )
 
 target_include_directories(keety_core PUBLIC

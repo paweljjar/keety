@@ -43,6 +43,7 @@ add_executable(keety_unit_tests
     unit/test_no_shadowing.cpp
     unit/test_const_view.cpp
     unit/test_type_checker.cpp
+    unit/test_keet_ir.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE

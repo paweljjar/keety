@@ -96,10 +96,10 @@ This document specifies the operational development plan for the `keety` compile
 
 ---
 
-### **Stage IV: KeetIR Intermediate Representation & Optimizations** `[NEXT]`
+### **Stage IV: KeetIR Intermediate Representation & Optimizations** `[CURRENT]`
 
 #### **Phase 4.1: AST Lowering to KeetIR**
-- [ ] **Task 4.1.1:** Define KeetIR instruction set and Control Flow Graph (CFG with Basic Blocks).
+- [x] **Task 4.1.1:** Define KeetIR instruction set and Control Flow Graph (CFG with Basic Blocks).
 - [ ] **Task 4.1.2:** Lower expressions, loops, and pattern-matching switches to basic blocks and conditional branches.
 - [ ] **Task 4.1.3:** Lower `zonk` error recovery to exception landing pads and handlers.
 
