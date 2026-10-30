@@ -217,10 +217,13 @@ Token Lexer::scanToken() {
     size_t start = cursor_;
     char c = advance();
 
-    // Context-sensitive Blank Identifier vs regular Identifier starting with '_'
+    // Blank identifier (`_`) vs regular Identifier starting with `_`
+    // Section 'Letters and digits' & 'Blank identifier':
+    // Identifier = ascii_letter { letter | ascii_digit } | "_" ( letter | ascii_digit ) { letter | ascii_digit } .
+    // BlankIdent = "_" .
     if (c == '_') {
-        if (!isAtEnd() && isIdentifierPart(peek())) {
-            // Continues as regular identifier (e.g. `_count`, `_foo`)
+        if (!isAtEnd() && (isAsciiLetter(peek()) || isAsciiDigit(peek()) || peek() == '_')) {
+            // Continues as regular identifier (e.g. `_count`, `_foo`, `__init`)
             while (!isAtEnd() && isIdentifierPart(peek())) {
                 advance();
             }
