@@ -39,6 +39,9 @@ public:
     std::unique_ptr<ast::Expr> parseExpression(int minPrecedence = 0);
 
 private:
+    // --- Disambiguation helpers ---
+    bool hasTopLevelSemicolonInParens();
+
     // --- Pratt Expression Parsing ---
     std::unique_ptr<ast::Expr> parsePrimaryExpression();
     std::unique_ptr<ast::Expr> parsePrefixExpression();

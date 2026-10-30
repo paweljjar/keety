@@ -486,11 +486,63 @@ std::unique_ptr<ast::Stmt> Parser::parseStatement() {
     return std::make_unique<ast::ExprStmt>(span, std::move(expr));
 }
 
+bool Parser::hasTopLevelSemicolonInParens() {
+    // Note: Called immediately AFTER consuming the opening '(' of the header!
+    // We scan ahead within balanced parentheses until depth reaches 0 (the matching ')')
+    size_t k = 0;
+    int parenDepth = 1; // We are already inside the header's '('
+
+    while (true) {
+        const auto& tok = peek(k);
+        if (tok.is(lexer::TokenKind::Eof)) {
+            break;
+        }
+
+        if (tok.is(lexer::TokenKind::LParen)) {
+            parenDepth++;
+        } else if (tok.is(lexer::TokenKind::RParen)) {
+            parenDepth--;
+            if (parenDepth == 0) {
+                // Reached matching closing paren of the header without finding top-level ';'
+                return false;
+            }
+        } else if (tok.is(lexer::TokenKind::Semicolon) && parenDepth == 1) {
+            // Found top-level semicolon directly inside the header parentheses!
+            return true;
+        }
+
+        k++;
+    }
+    return false;
+}
+
 std::unique_ptr<ast::Stmt> Parser::parseIfStatement() {
     diag::SourceLocation startLoc = lastConsumed_.span.start;
     expect(lexer::TokenKind::LParen, diag::ErrorCode::UnexpectedToken, "expected '(' after 'if'");
 
-    // Simple condition expression (Task 2.3.3 will add full IfHeaderInit disambiguation)
+    std::unique_ptr<ast::Stmt> init = nullptr;
+    if (hasTopLevelSemicolonInParens()) {
+        // Section 'IfHeaderInit Disambiguation': header contains `init; condition`
+        if (check(lexer::TokenKind::KwLet) || check(lexer::TokenKind::KwConst)) {
+            advance();
+            const auto& nameTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected variable name in if-init");
+            std::string varName = std::string(nameTok.lexeme);
+            diag::SourceLocation varStart = nameTok.span.start;
+
+            expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' type annotation");
+            auto type = parseTypeAnnotation();
+            expect(lexer::TokenKind::Equal, diag::ErrorCode::UnexpectedToken, "expected '='");
+            auto val = parseExpression();
+            diag::SourceSpan s{varStart, val ? val->getSpan().end : lastConsumed_.span.end};
+            auto decl = std::make_unique<ast::VarDecl>(s, std::move(varName), std::move(type), std::move(val), false);
+            init = std::make_unique<ast::DeclStmt>(s, std::move(decl));
+        } else {
+            auto expr = parseExpression();
+            init = std::make_unique<ast::ExprStmt>(expr->getSpan(), std::move(expr));
+        }
+        expect(lexer::TokenKind::Semicolon, diag::ErrorCode::ExpectedSemicolon, "expected ';' after if-init statement");
+    }
+
     auto condition = parseExpression();
     expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after if condition");
 
@@ -504,12 +556,34 @@ std::unique_ptr<ast::Stmt> Parser::parseIfStatement() {
     }
 
     diag::SourceSpan span{startLoc, elseBranch ? elseBranch->getSpan().end : thenBranch->getSpan().end};
-    return std::make_unique<ast::IfStmt>(span, nullptr, std::move(condition), std::move(thenBranch), std::move(elseBranch));
+    return std::make_unique<ast::IfStmt>(span, std::move(init), std::move(condition), std::move(thenBranch), std::move(elseBranch));
 }
 
 std::unique_ptr<ast::Stmt> Parser::parseWhileStatement() {
     diag::SourceLocation startLoc = lastConsumed_.span.start;
     expect(lexer::TokenKind::LParen, diag::ErrorCode::UnexpectedToken, "expected '(' after 'while'");
+
+    std::unique_ptr<ast::Stmt> init = nullptr;
+    if (hasTopLevelSemicolonInParens()) {
+        if (check(lexer::TokenKind::KwLet) || check(lexer::TokenKind::KwConst)) {
+            advance();
+            const auto& nameTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected variable name in while-init");
+            std::string varName = std::string(nameTok.lexeme);
+            diag::SourceLocation varStart = nameTok.span.start;
+
+            expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' type annotation");
+            auto type = parseTypeAnnotation();
+            expect(lexer::TokenKind::Equal, diag::ErrorCode::UnexpectedToken, "expected '='");
+            auto val = parseExpression();
+            diag::SourceSpan s{varStart, val ? val->getSpan().end : lastConsumed_.span.end};
+            auto decl = std::make_unique<ast::VarDecl>(s, std::move(varName), std::move(type), std::move(val), false);
+            init = std::make_unique<ast::DeclStmt>(s, std::move(decl));
+        } else {
+            auto expr = parseExpression();
+            init = std::make_unique<ast::ExprStmt>(expr->getSpan(), std::move(expr));
+        }
+        expect(lexer::TokenKind::Semicolon, diag::ErrorCode::ExpectedSemicolon, "expected ';' after while-init statement");
+    }
 
     auto condition = parseExpression();
     expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after while condition");
@@ -523,7 +597,7 @@ std::unique_ptr<ast::Stmt> Parser::parseWhileStatement() {
     auto body = parseBlockStatement();
     diag::SourceSpan span{startLoc, body ? body->getSpan().end : lastConsumed_.span.end};
 
-    return std::make_unique<ast::WhileStmt>(span, nullptr, std::move(condition), std::move(body), std::move(label));
+    return std::make_unique<ast::WhileStmt>(span, std::move(init), std::move(condition), std::move(body), std::move(label));
 }
 
 std::unique_ptr<ast::Stmt> Parser::parseForStatement() {
@@ -535,12 +609,15 @@ std::unique_ptr<ast::Stmt> Parser::parseForStatement() {
     if (!check(lexer::TokenKind::Semicolon)) {
         if (match(lexer::TokenKind::KwLet) || match(lexer::TokenKind::KwConst)) {
             const auto& nameTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected loop variable");
+            std::string varName = std::string(nameTok.lexeme);
+            diag::SourceLocation varStart = nameTok.span.start;
+
             expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' type annotation");
             auto type = parseTypeAnnotation();
             expect(lexer::TokenKind::Equal, diag::ErrorCode::UnexpectedToken, "expected '='");
             auto val = parseExpression();
-            diag::SourceSpan s{nameTok.span.start, val->getSpan().end};
-            auto decl = std::make_unique<ast::VarDecl>(s, std::string(nameTok.lexeme), std::move(type), std::move(val), false);
+            diag::SourceSpan s{varStart, val ? val->getSpan().end : lastConsumed_.span.end};
+            auto decl = std::make_unique<ast::VarDecl>(s, std::move(varName), std::move(type), std::move(val), false);
             init = std::make_unique<ast::DeclStmt>(s, std::move(decl));
         } else {
             auto expr = parseExpression();
@@ -572,6 +649,28 @@ std::unique_ptr<ast::Stmt> Parser::parseForStatement() {
 std::unique_ptr<ast::Stmt> Parser::parseSwitchStatement() {
     diag::SourceLocation startLoc = lastConsumed_.span.start;
     expect(lexer::TokenKind::LParen, diag::ErrorCode::UnexpectedToken, "expected '(' after 'switch'");
+
+    std::unique_ptr<ast::Stmt> init = nullptr;
+    if (hasTopLevelSemicolonInParens()) {
+        if (check(lexer::TokenKind::KwLet) || check(lexer::TokenKind::KwConst)) {
+            advance();
+            const auto& nameTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected variable name in switch-init");
+            std::string varName = std::string(nameTok.lexeme);
+            diag::SourceLocation varStart = nameTok.span.start;
+
+            expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' type annotation");
+            auto type = parseTypeAnnotation();
+            expect(lexer::TokenKind::Equal, diag::ErrorCode::UnexpectedToken, "expected '='");
+            auto val = parseExpression();
+            diag::SourceSpan s{varStart, val ? val->getSpan().end : lastConsumed_.span.end};
+            auto decl = std::make_unique<ast::VarDecl>(s, std::move(varName), std::move(type), std::move(val), false);
+            init = std::make_unique<ast::DeclStmt>(s, std::move(decl));
+        } else {
+            auto expr = parseExpression();
+            init = std::make_unique<ast::ExprStmt>(expr->getSpan(), std::move(expr));
+        }
+        expect(lexer::TokenKind::Semicolon, diag::ErrorCode::ExpectedSemicolon, "expected ';' after switch-init statement");
+    }
 
     auto discriminant = parseExpression();
     expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after switch expression");
@@ -607,7 +706,7 @@ std::unique_ptr<ast::Stmt> Parser::parseSwitchStatement() {
     const auto& endBrace = expect(lexer::TokenKind::RBrace, diag::ErrorCode::ExpectedClosingBrace, "expected '}' after switch cases");
     diag::SourceSpan span{startLoc, endBrace.span.end};
 
-    return std::make_unique<ast::SwitchStmt>(span, nullptr, std::move(discriminant), std::move(cases), std::move(label));
+    return std::make_unique<ast::SwitchStmt>(span, std::move(init), std::move(discriminant), std::move(cases), std::move(label));
 }
 
 std::unique_ptr<ast::Stmt> Parser::parseReturnStatement() {
