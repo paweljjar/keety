@@ -39,6 +39,7 @@ add_executable(keety_unit_tests
     unit/test_cycle_detector.cpp
     unit/test_topological_sorter.cpp
     unit/test_symbol_scope.cpp
+    unit/test_universe_symbols.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE

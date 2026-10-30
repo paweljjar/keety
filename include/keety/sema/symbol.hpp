@@ -100,7 +100,7 @@ public:
     [[nodiscard]] bool isType() const noexcept {
         return kind_ == SymbolKind::TypeAlias || kind_ == SymbolKind::Class ||
                kind_ == SymbolKind::Enum || kind_ == SymbolKind::ErrType ||
-               kind_ == SymbolKind::BuiltinType;
+               kind_ == SymbolKind::BuiltinType || isType_;
     }
     [[nodiscard]] bool isClass() const noexcept { return kind_ == SymbolKind::Class; }
     [[nodiscard]] bool isEnum() const noexcept { return kind_ == SymbolKind::Enum; }
@@ -114,6 +114,15 @@ public:
     [[nodiscard]] bool isBuiltin() const noexcept {
         return kind_ == SymbolKind::BuiltinType || kind_ == SymbolKind::BuiltinConstant ||
                kind_ == SymbolKind::BuiltinOperator;
+    }
+    [[nodiscard]] bool isBuiltinType() const noexcept {
+        return kind_ == SymbolKind::BuiltinType || (isType_ && isBuiltin());
+    }
+    [[nodiscard]] bool isBuiltinConstant() const noexcept {
+        return kind_ == SymbolKind::BuiltinConstant;
+    }
+    [[nodiscard]] bool isBuiltinOperator() const noexcept {
+        return kind_ == SymbolKind::BuiltinOperator;
     }
 
     /// Returns true if this symbol binds a runtime or compile-time value.
@@ -135,6 +144,8 @@ public:
 
     [[nodiscard]] bool isConstView() const noexcept { return isConstView_; }
     void setConstView(bool cv) noexcept { isConstView_ = cv; }
+
+    void setIsType(bool t) noexcept { isType_ = t; }
 
     // --- AST Associations ---
     [[nodiscard]] const ast::AstNode* getAstNode() const noexcept { return astNode_; }
@@ -160,6 +171,7 @@ private:
     bool isMutable_{false};
     bool isConst_{false};
     bool isConstView_{false};
+    bool isType_{false};
     std::vector<std::shared_ptr<Symbol>> overloads_;
 };
 

@@ -68,7 +68,8 @@ public:
     explicit Scope(ScopeKind kind, std::shared_ptr<Scope> parent = nullptr);
 
     /// Creates the root Universe scope (depth 0, no parent).
-    [[nodiscard]] static std::shared_ptr<Scope> createUniverse();
+    /// If populatePredeclared is true, registers all built-in types, constants, and operators.
+    [[nodiscard]] static std::shared_ptr<Scope> createUniverse(bool populatePredeclared = true);
 
     /// Creates a child scope of the specified kind nested within this scope.
     [[nodiscard]] std::shared_ptr<Scope> createChild(ScopeKind kind);

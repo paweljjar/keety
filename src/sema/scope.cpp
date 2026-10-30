@@ -1,12 +1,17 @@
 #include <keety/sema/scope.hpp>
+#include <keety/sema/universe.hpp>
 
 namespace keety::sema {
 
 Scope::Scope(ScopeKind kind, std::shared_ptr<Scope> parent)
     : kind_(kind), parent_(parent), depth_(parent ? parent->getDepth() + 1 : 0) {}
 
-std::shared_ptr<Scope> Scope::createUniverse() {
-    return std::make_shared<Scope>(ScopeKind::Universe, nullptr);
+std::shared_ptr<Scope> Scope::createUniverse(bool populatePredeclared) {
+    auto scope = std::make_shared<Scope>(ScopeKind::Universe, nullptr);
+    if (populatePredeclared) {
+        registerUniverseSymbols(*scope);
+    }
+    return scope;
 }
 
 std::shared_ptr<Scope> Scope::createChild(ScopeKind kind) {

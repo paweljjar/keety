@@ -11,6 +11,7 @@ add_library(keety_core STATIC
     resolver/cycle_detector.cpp
     resolver/topological_sorter.cpp
     sema/scope.cpp
+    sema/universe.cpp
 )
 
 target_include_directories(keety_core PUBLIC

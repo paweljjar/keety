@@ -1,0 +1,38 @@
+#pragma once
+
+#include <keety/sema/scope.hpp>
+#include <keety/sema/symbol.hpp>
+
+#include <string_view>
+#include <vector>
+
+namespace keety::sema {
+
+/// Populates the given Universe scope with all predeclared KeetScript symbols:
+/// - Predeclared types: bool, int, float, char, string, void, null, error, array, map, never
+/// - Predeclared constants: true, false, null
+/// - Predeclared operators/builtins: typeof
+void registerUniverseSymbols(Scope& universe);
+
+/// Checks if an identifier name is a predeclared universe type.
+[[nodiscard]] bool isUniverseType(std::string_view name) noexcept;
+
+/// Checks if an identifier name is a predeclared universe constant.
+[[nodiscard]] bool isUniverseConstant(std::string_view name) noexcept;
+
+/// Checks if an identifier name is a predeclared universe operator or builtin.
+[[nodiscard]] bool isUniverseOperator(std::string_view name) noexcept;
+
+/// Checks if an identifier name is any predeclared universe symbol.
+[[nodiscard]] bool isUniverseSymbol(std::string_view name) noexcept;
+
+/// Returns the complete list of predeclared type names.
+[[nodiscard]] const std::vector<std::string_view>& getUniverseTypeNames() noexcept;
+
+/// Returns the complete list of predeclared constant names.
+[[nodiscard]] const std::vector<std::string_view>& getUniverseConstantNames() noexcept;
+
+/// Returns the complete list of all predeclared symbol names.
+[[nodiscard]] const std::vector<std::string_view>& getAllUniverseSymbolNames() noexcept;
+
+} // namespace keety::sema
