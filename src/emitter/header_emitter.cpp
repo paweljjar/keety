@@ -2,6 +2,7 @@
 #include <keety/ast/type.hpp>
 #include <keety/emitter/header_emitter.hpp>
 #include <keety/resolver/module_path_resolver.hpp>
+#include <keety/typechecker/type.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -27,6 +28,7 @@ HeaderEmitter::HeaderEmitter(const ir::Module& ir_module, HeaderEmitterOptions o
     if (!ir_module.get_name().empty()) {
         module_name_ = ir_module.get_name();
     }
+    collect_ir_declarations(ir_module);
 }
 
 HeaderEmitter::HeaderEmitter(const parser::ModuleAST& ast, const ir::Module& ir_module, HeaderEmitterOptions options)
@@ -38,6 +40,7 @@ HeaderEmitter::HeaderEmitter(const parser::ModuleAST& ast, const ir::Module& ir_
     }
     collect_imports(ast);
     collect_declarations(ast);
+    collect_ir_declarations(ir_module);
 }
 
 void HeaderEmitter::add_standard_header(std::string header) {
@@ -325,6 +328,62 @@ std::string HeaderEmitter::to_cpp_type(const ast::TypeAnnotation* type, const st
     return "auto";
 }
 
+std::string HeaderEmitter::to_cpp_type(const typechecker::TypePtr& type, const std::string& current_module) {
+    if (!type) {
+        return "void";
+    }
+
+    switch (type->getKind()) {
+    case typechecker::TypeKind::Int:    return "int64_t";
+    case typechecker::TypeKind::Float:  return "double";
+    case typechecker::TypeKind::Bool:   return "bool";
+    case typechecker::TypeKind::Char:   return "char";
+    case typechecker::TypeKind::String: return "std::string";
+    case typechecker::TypeKind::Void:   return "void";
+    case typechecker::TypeKind::Null:   return "std::monostate";
+    case typechecker::TypeKind::Error:  return "keet::error";
+    case typechecker::TypeKind::Array: {
+        const auto* arr = dynamic_cast<const typechecker::ArrayType*>(type.get());
+        return "std::vector<" + to_cpp_type(arr ? arr->getElementType() : nullptr, current_module) + ">";
+    }
+    case typechecker::TypeKind::Map: {
+        const auto* map = dynamic_cast<const typechecker::MapType*>(type.get());
+        return "std::unordered_map<" + to_cpp_type(map ? map->getKeyType() : nullptr, current_module) + ", " +
+               to_cpp_type(map ? map->getValueType() : nullptr, current_module) + ">";
+    }
+    case typechecker::TypeKind::Union: {
+        const auto* un = dynamic_cast<const typechecker::UnionType*>(type.get());
+        if (!un) return "std::variant<std::monostate>";
+        std::string res = "std::variant<";
+        for (size_t i = 0; i < un->getVariants().size(); ++i) {
+            if (i > 0) res += ", ";
+            res += to_cpp_type(un->getVariants()[i], current_module);
+        }
+        res += ">";
+        return res;
+    }
+    case typechecker::TypeKind::Function: {
+        const auto* fn = dynamic_cast<const typechecker::FunctionType*>(type.get());
+        if (!fn) return "std::function<void()>";
+        std::string ret = to_cpp_type(fn->getReturnType(), current_module);
+        std::string params;
+        for (size_t i = 0; i < fn->getParamTypes().size(); ++i) {
+            if (i > 0) params += ", ";
+            params += to_cpp_type(fn->getParamTypes()[i], current_module);
+        }
+        return "std::function<" + ret + "(" + params + ")>";
+    }
+    case typechecker::TypeKind::Custom: {
+        const auto* cust = dynamic_cast<const typechecker::CustomType*>(type.get());
+        return cust ? cust->getName() : "auto";
+    }
+    case typechecker::TypeKind::Literal:
+        return to_cpp_type(type->getBaseType(), current_module);
+    default:
+        return "auto";
+    }
+}
+
 std::string HeaderEmitter::to_cpp_expr(const ast::Expr* expr) {
     if (!expr) {
         return "";
@@ -358,18 +417,69 @@ std::string HeaderEmitter::to_cpp_expr(const ast::Expr* expr) {
     return "";
 }
 
-std::string HeaderEmitter::format_param(const ast::Param& param) {
+std::string HeaderEmitter::format_param(const ast::Param& param, const std::vector<std::string>& type_params) {
     std::string type_str = param.type ? to_cpp_type(param.type.get()) : "auto";
     if (param.isMut) {
         return type_str + "& " + param.name;
     }
-    if (type_str == "std::string" ||
+    bool is_tparam = false;
+    for (const auto& tp : type_params) {
+        if (type_str == tp) {
+            is_tparam = true;
+            break;
+        }
+    }
+    if (is_tparam ||
+        type_str == "std::string" ||
+        type_str == "keet::error" ||
         type_str.rfind("std::vector<", 0) == 0 ||
         type_str.rfind("std::unordered_map<", 0) == 0 ||
         type_str.rfind("std::variant<", 0) == 0) {
         return "const " + type_str + "& " + param.name;
     }
     return type_str + " " + param.name;
+}
+
+std::string HeaderEmitter::format_function_prototype(const ast::FnDecl& fn) {
+    std::string ret_type = fn.getReturnType() ? to_cpp_type(fn.getReturnType()) : "void";
+    std::string params_str;
+    for (size_t i = 0; i < fn.getParams().size(); ++i) {
+        if (i > 0) params_str += ", ";
+        params_str += format_param(fn.getParams()[i], fn.getTypeParams());
+    }
+    return ret_type + " " + fn.getName() + "(" + params_str + ");";
+}
+
+std::string HeaderEmitter::format_function_template(const ast::FnDecl& fn) {
+    std::string tparams = "template <";
+    for (size_t i = 0; i < fn.getTypeParams().size(); ++i) {
+        if (i > 0) tparams += ", ";
+        tparams += "typename " + fn.getTypeParams()[i];
+    }
+    tparams += ">\n    ";
+    return tparams + format_function_prototype(fn);
+}
+
+std::string HeaderEmitter::format_function_prototype(const ir::Function& fn) {
+    std::string ret_type = to_cpp_type(fn.get_return_type());
+    std::string params_str;
+    for (size_t i = 0; i < fn.get_parameters().size(); ++i) {
+        if (i > 0) params_str += ", ";
+        const auto& p = fn.get_parameters()[i];
+        std::string pt = to_cpp_type(p.type);
+        if (p.is_mut) {
+            params_str += pt + "& " + p.name;
+        } else if (p.is_const_ref ||
+                   pt == "std::string" ||
+                   pt.rfind("std::vector<", 0) == 0 ||
+                   pt.rfind("std::unordered_map<", 0) == 0 ||
+                   pt.rfind("std::variant<", 0) == 0) {
+            params_str += "const " + pt + "& " + p.name;
+        } else {
+            params_str += pt + " " + p.name;
+        }
+    }
+    return ret_type + " " + fn.get_name() + "(" + params_str + ");";
 }
 
 std::string HeaderEmitter::generate_enum_def(const ast::EnumDecl& enm) {
@@ -503,6 +613,31 @@ void HeaderEmitter::add_errtype_def(std::string def) {
     errtype_defs_.push_back(std::move(def));
 }
 
+void HeaderEmitter::add_const_view(std::string name, std::string cpp_type) {
+    std::string entry = "extern " + cpp_type + " _internal_" + name + ";\n"
+                        "    inline const " + cpp_type + "& " + name + " = _internal_" + name + ";";
+    for (const auto& existing : const_views_) {
+        if (existing == entry) return;
+    }
+    const_views_.push_back(std::move(entry));
+}
+
+void HeaderEmitter::add_function_template(std::string template_def) {
+    if (template_def.empty()) return;
+    for (const auto& existing : function_templates_) {
+        if (existing == template_def) return;
+    }
+    function_templates_.push_back(std::move(template_def));
+}
+
+void HeaderEmitter::add_function_prototype(std::string prototype) {
+    if (prototype.empty()) return;
+    for (const auto& existing : function_prototypes_) {
+        if (existing == prototype) return;
+    }
+    function_prototypes_.push_back(std::move(prototype));
+}
+
 void HeaderEmitter::collect_declarations(const parser::ModuleAST& ast) {
     collect_declarations(ast.declarations);
 }
@@ -525,6 +660,30 @@ void HeaderEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::
         } else if (const auto* err = dynamic_cast<const ast::ErrTypeDecl*>(decl.get())) {
             add_forward_decl("struct " + err->getName() + ";");
             add_errtype_def(generate_errtype_def(*err));
+        } else if (const auto* var = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+            if (var->isExported()) {
+                std::string cpp_type = var->getType() ? to_cpp_type(var->getType()) : "auto";
+                add_const_view(var->getName(), cpp_type);
+            }
+        } else if (const auto* fn = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+            if (fn->isGeneric()) {
+                add_function_template(format_function_template(*fn));
+            } else {
+                add_function_prototype(format_function_prototype(*fn));
+            }
+        }
+    }
+}
+
+void HeaderEmitter::collect_ir_declarations(const ir::Module& ir_mod) {
+    for (const auto& global : ir_mod.get_globals()) {
+        if (global.is_export) {
+            add_const_view(global.name, to_cpp_type(global.type));
+        }
+    }
+    for (const auto& fn : ir_mod.get_functions()) {
+        if (fn) {
+            add_function_prototype(format_function_prototype(*fn));
         }
     }
 }
@@ -592,43 +751,62 @@ std::string HeaderEmitter::emit_errtype_definitions() const {
     return ss.str();
 }
 
+std::string HeaderEmitter::emit_const_views() const {
+    if (const_views_.empty()) {
+        return "";
+    }
+    std::ostringstream ss;
+    ss << "    // --- Exported Variable Const-View Accessor ---\n";
+    for (const auto& view : const_views_) {
+        ss << "    " << view << "\n";
+    }
+    return ss.str();
+}
+
+std::string HeaderEmitter::emit_function_templates() const {
+    if (function_templates_.empty()) {
+        return "";
+    }
+    std::ostringstream ss;
+    ss << "    // --- Generic Function Templates ---\n";
+    for (const auto& tmpl : function_templates_) {
+        ss << "    " << tmpl << "\n";
+    }
+    return ss.str();
+}
+
+std::string HeaderEmitter::emit_function_prototypes() const {
+    if (function_prototypes_.empty()) {
+        return "";
+    }
+    std::ostringstream ss;
+    ss << "    // --- Exported Function Prototypes ---\n";
+    for (const auto& proto : function_prototypes_) {
+        ss << "    " << proto << "\n";
+    }
+    return ss.str();
+}
+
 std::string HeaderEmitter::emit_namespace_body() const {
     std::ostringstream ss;
     bool has_prev = false;
 
-    std::string fwd = emit_forward_declarations();
-    if (!fwd.empty()) {
-        ss << fwd;
-        has_prev = true;
-    }
+    auto append_section = [&](const std::string& section) {
+        if (!section.empty()) {
+            if (has_prev) ss << "\n";
+            ss << section;
+            has_prev = true;
+        }
+    };
 
-    std::string cexpr = emit_constexpr_definitions();
-    if (!cexpr.empty()) {
-        if (has_prev) ss << "\n";
-        ss << cexpr;
-        has_prev = true;
-    }
-
-    std::string enums = emit_enum_definitions();
-    if (!enums.empty()) {
-        if (has_prev) ss << "\n";
-        ss << enums;
-        has_prev = true;
-    }
-
-    std::string classes = emit_class_definitions();
-    if (!classes.empty()) {
-        if (has_prev) ss << "\n";
-        ss << classes;
-        has_prev = true;
-    }
-
-    std::string errs = emit_errtype_definitions();
-    if (!errs.empty()) {
-        if (has_prev) ss << "\n";
-        ss << errs;
-        has_prev = true;
-    }
+    append_section(emit_forward_declarations());
+    append_section(emit_constexpr_definitions());
+    append_section(emit_enum_definitions());
+    append_section(emit_class_definitions());
+    append_section(emit_errtype_definitions());
+    append_section(emit_const_views());
+    append_section(emit_function_templates());
+    append_section(emit_function_prototypes());
 
     return ss.str();
 }

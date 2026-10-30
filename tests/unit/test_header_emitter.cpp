@@ -405,3 +405,107 @@ TEST_CASE("C++ Header Emitter emits forward declarations, constexpr constants, e
         REQUIRE(header.find("void addScore(int64_t pts, std::vector<int64_t>& buffer);") != std::string::npos);
     }
 }
+
+TEST_CASE("C++ Header Emitter emits const-views for exported module variables", "[emitter][const_views]") {
+    const std::string source = R"(
+        export let activeRequests: int = 0;
+        export let serverConfig: string = "production";
+        let internalSecret: int = 1337;
+    )";
+
+    keety::parser::ModuleAST ast = parseSource(source, "telemetry");
+    keety::emitter::HeaderEmitter emitter(ast);
+
+    std::string header = emitter.emit();
+
+    SECTION("Emits extern storage and inline const-view reference for exported variables") {
+        REQUIRE(header.find("// --- Exported Variable Const-View Accessor ---") != std::string::npos);
+        REQUIRE(header.find("extern int64_t _internal_activeRequests;\n    inline const int64_t& activeRequests = _internal_activeRequests;") != std::string::npos);
+        REQUIRE(header.find("extern std::string _internal_serverConfig;\n    inline const std::string& serverConfig = _internal_serverConfig;") != std::string::npos);
+    }
+
+    SECTION("Does not emit const-views for unexported private module variables") {
+        REQUIRE(header.find("internalSecret") == std::string::npos);
+        REQUIRE(header.find("_internal_internalSecret") == std::string::npos);
+    }
+}
+
+TEST_CASE("C++ Header Emitter emits generic function templates and function prototypes", "[emitter][functions]") {
+    const std::string source = R"(
+        fn identity<T>(x: T): T {
+            return x;
+        }
+
+        fn pair<T, U>(first: T, second: U): T {
+            return first;
+        }
+
+        fn recordHit(path: string): void {
+        }
+
+        fn computeRatio(hits: int, total: int): float {
+            return 0.0;
+        }
+
+        fn modifyBuffer(mut buffer: array<int>, tag: string): void {
+        }
+    )";
+
+    keety::parser::ModuleAST ast = parseSource(source, "metrics");
+    keety::emitter::HeaderEmitter emitter(ast);
+
+    std::string header = emitter.emit();
+
+    SECTION("Emits generic function templates with typename parameters and const-ref formatting") {
+        REQUIRE(header.find("// --- Generic Function Templates ---") != std::string::npos);
+        REQUIRE(header.find("template <typename T>\n    T identity(const T& x);") != std::string::npos);
+        REQUIRE(header.find("template <typename T, typename U>\n    T pair(const T& first, const U& second);") != std::string::npos);
+    }
+
+    SECTION("Emits concrete function prototypes with canonical parameter conventions") {
+        REQUIRE(header.find("// --- Exported Function Prototypes ---") != std::string::npos);
+        REQUIRE(header.find("void recordHit(const std::string& path);") != std::string::npos);
+        REQUIRE(header.find("double computeRatio(int64_t hits, int64_t total);") != std::string::npos);
+        REQUIRE(header.find("void modifyBuffer(std::vector<int64_t>& buffer, const std::string& tag);") != std::string::npos);
+    }
+}
+
+TEST_CASE("C++ Header Emitter processes IR Module globals and functions", "[emitter][ir]") {
+    using namespace keety::typechecker;
+    keety::ir::Module irModule("network_runtime");
+
+    // Add exported global
+    keety::ir::GlobalVariable exportedVar;
+    exportedVar.name = "active_connections";
+    exportedVar.type = std::make_shared<Type>(TypeKind::Int);
+    exportedVar.is_export = true;
+    irModule.add_global(std::move(exportedVar));
+
+    // Add unexported global
+    keety::ir::GlobalVariable internalVar;
+    internalVar.name = "internal_cache_size";
+    internalVar.type = std::make_shared<Type>(TypeKind::Int);
+    internalVar.is_export = false;
+    irModule.add_global(std::move(internalVar));
+
+    // Add function
+    auto fn = std::make_unique<keety::ir::Function>("handle_request", std::make_shared<Type>(TypeKind::Bool));
+    fn->add_parameter(keety::ir::FunctionParameter{"endpoint", std::make_shared<Type>(TypeKind::String), false, true, false});
+    fn->add_parameter(keety::ir::FunctionParameter{"retries", std::make_shared<Type>(TypeKind::Int), true, false, false});
+    irModule.add_function(std::move(fn));
+
+    keety::emitter::HeaderEmitter emitter(irModule);
+    std::string header = emitter.emit();
+
+    SECTION("Emits const-views for exported IR globals only") {
+        REQUIRE(header.find("// --- Exported Variable Const-View Accessor ---") != std::string::npos);
+        REQUIRE(header.find("extern int64_t _internal_active_connections;\n    inline const int64_t& active_connections = _internal_active_connections;") != std::string::npos);
+        REQUIRE(header.find("internal_cache_size") == std::string::npos);
+    }
+
+    SECTION("Emits function prototypes for IR functions") {
+        REQUIRE(header.find("// --- Exported Function Prototypes ---") != std::string::npos);
+        REQUIRE(header.find("bool handle_request(const std::string& endpoint, int64_t& retries);") != std::string::npos);
+    }
+}
+

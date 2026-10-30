@@ -87,8 +87,12 @@ public:
 
     // Type and Expression mapping
     [[nodiscard]] static std::string to_cpp_type(const ast::TypeAnnotation* type, const std::string& current_module = "");
+    [[nodiscard]] static std::string to_cpp_type(const typechecker::TypePtr& type, const std::string& current_module = "");
     [[nodiscard]] static std::string to_cpp_expr(const ast::Expr* expr);
-    [[nodiscard]] static std::string format_param(const ast::Param& param);
+    [[nodiscard]] static std::string format_param(const ast::Param& param, const std::vector<std::string>& type_params = {});
+    [[nodiscard]] static std::string format_function_prototype(const ast::FnDecl& fn);
+    [[nodiscard]] static std::string format_function_template(const ast::FnDecl& fn);
+    [[nodiscard]] static std::string format_function_prototype(const ir::Function& fn);
 
     // Declaration emission sections
     [[nodiscard]] std::string emit_forward_declarations() const;
@@ -96,10 +100,14 @@ public:
     [[nodiscard]] std::string emit_enum_definitions() const;
     [[nodiscard]] std::string emit_class_definitions() const;
     [[nodiscard]] std::string emit_errtype_definitions() const;
+    [[nodiscard]] std::string emit_const_views() const;
+    [[nodiscard]] std::string emit_function_templates() const;
+    [[nodiscard]] std::string emit_function_prototypes() const;
 
-    // AST declaration ingestion
+    // AST / IR declaration ingestion
     void collect_declarations(const parser::ModuleAST& ast);
     void collect_declarations(const std::vector<std::unique_ptr<ast::Decl>>& decls);
+    void collect_ir_declarations(const ir::Module& ir_module);
 
     // Programmatic declaration addition
     void add_forward_decl(std::string decl);
@@ -107,6 +115,9 @@ public:
     void add_enum_def(std::string def);
     void add_class_def(std::string def);
     void add_errtype_def(std::string def);
+    void add_const_view(std::string name, std::string cpp_type);
+    void add_function_template(std::string template_def);
+    void add_function_prototype(std::string prototype);
 
     // Accessors for emitted declarations
     [[nodiscard]] const std::vector<std::string>& get_forward_decls() const noexcept { return forward_decls_; }
@@ -114,6 +125,9 @@ public:
     [[nodiscard]] const std::vector<std::string>& get_enum_defs() const noexcept { return enum_defs_; }
     [[nodiscard]] const std::vector<std::string>& get_class_defs() const noexcept { return class_defs_; }
     [[nodiscard]] const std::vector<std::string>& get_errtype_defs() const noexcept { return errtype_defs_; }
+    [[nodiscard]] const std::vector<std::string>& get_const_views() const noexcept { return const_views_; }
+    [[nodiscard]] const std::vector<std::string>& get_function_templates() const noexcept { return function_templates_; }
+    [[nodiscard]] const std::vector<std::string>& get_function_prototypes() const noexcept { return function_prototypes_; }
 
     // Full header generation
     [[nodiscard]] std::string emit() const;
@@ -134,6 +148,9 @@ private:
     std::vector<std::string> enum_defs_{};
     std::vector<std::string> class_defs_{};
     std::vector<std::string> errtype_defs_{};
+    std::vector<std::string> const_views_{};
+    std::vector<std::string> function_templates_{};
+    std::vector<std::string> function_prototypes_{};
 };
 
 } // namespace keety::emitter

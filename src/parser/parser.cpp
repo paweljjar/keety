@@ -256,6 +256,16 @@ std::unique_ptr<ast::FnDecl> Parser::parseFnDecl(bool isAsync, bool isExported) 
     const auto& nameTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected function name");
     std::string name = std::string(nameTok.lexeme);
 
+    std::vector<std::string> typeParams;
+    if (check(lexer::TokenKind::Less)) {
+        advance();
+        do {
+            const auto& tTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected generic type parameter");
+            typeParams.push_back(std::string(tTok.lexeme));
+        } while (match(lexer::TokenKind::Comma));
+        expect(lexer::TokenKind::Greater, diag::ErrorCode::UnexpectedToken, "expected '>' after generic type parameters");
+    }
+
     expect(lexer::TokenKind::LParen, diag::ErrorCode::UnexpectedToken, "expected '(' after function name");
     auto params = parseParamList();
     expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after parameters");
@@ -280,7 +290,7 @@ std::unique_ptr<ast::FnDecl> Parser::parseFnDecl(bool isAsync, bool isExported) 
     diag::SourceSpan span{startLoc, body ? body->getSpan().end : lastConsumed_.span.end};
 
     return std::make_unique<ast::FnDecl>(span, std::move(name), std::move(params), std::move(returnType),
-                                         std::move(body), isAsync, isExported);
+                                         std::move(body), isAsync, isExported, ast::Visibility::Default, std::move(typeParams));
 }
 
 std::vector<ast::Param> Parser::parseParamList() {

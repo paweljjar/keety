@@ -99,10 +99,12 @@ class FnDecl : public Decl {
 public:
     FnDecl(diag::SourceSpan span, std::string name, std::vector<Param> params,
            std::unique_ptr<TypeAnnotation> returnType, std::unique_ptr<Stmt> body,
-           bool isAsync = false, bool isExported = false, Visibility vis = Visibility::Default)
+           bool isAsync = false, bool isExported = false, Visibility vis = Visibility::Default,
+           std::vector<std::string> typeParams = {})
         : Decl(span), name_(std::move(name)), params_(std::move(params)),
           returnType_(std::move(returnType)), body_(std::move(body)),
-          isAsync_(isAsync), isExported_(isExported), visibility_(vis) {}
+          isAsync_(isAsync), isExported_(isExported), visibility_(vis),
+          typeParams_(std::move(typeParams)) {}
 
     [[nodiscard]] const std::string& getName() const noexcept { return name_; }
     [[nodiscard]] const std::vector<Param>& getParams() const noexcept { return params_; }
@@ -111,6 +113,8 @@ public:
     [[nodiscard]] bool isAsync() const noexcept { return isAsync_; }
     [[nodiscard]] bool isExported() const noexcept { return isExported_; }
     [[nodiscard]] Visibility getVisibility() const noexcept { return visibility_; }
+    [[nodiscard]] const std::vector<std::string>& getTypeParams() const noexcept { return typeParams_; }
+    [[nodiscard]] bool isGeneric() const noexcept { return !typeParams_.empty(); }
 
 private:
     std::string name_;
@@ -120,6 +124,7 @@ private:
     bool isAsync_{false};
     bool isExported_{false};
     Visibility visibility_{Visibility::Default};
+    std::vector<std::string> typeParams_;
 };
 
 /// Represents a class member field: `pub let name: string;`
