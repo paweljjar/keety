@@ -7,7 +7,7 @@ TypeChecker::TypeChecker(diag::DiagnosticEmitter* emitter)
     : emitter_(emitter), hasErrors_(false) {}
 
 // =============================================================================
-// Task 3.3.1: Explicit Type Annotation Validation
+// Explicit Type Annotation Validation
 // =============================================================================
 
 diag::Diagnostic TypeChecker::createMissingTypeDiagnostic(
@@ -285,7 +285,7 @@ bool TypeChecker::checkExplicitTypeAnnotations(const ast::Expr& expr) {
 }
 
 // =============================================================================
-// Task 3.3.2: Strict Zero-Coercion Policy (E3002)
+// Strict Zero-Coercion Policy (E3002)
 // =============================================================================
 
 diag::Diagnostic TypeChecker::createImplicitWideningDiagnostic(
@@ -393,7 +393,7 @@ void TypeChecker::reportBinaryCoercion(
 }
 
 // =============================================================================
-// Task 3.3.3: Contextual Typing of Empty Collection Literals (E3009 / E3003)
+// Contextual Typing of Empty Collection Literals (E3009 / E3003)
 // =============================================================================
 
 diag::Diagnostic TypeChecker::createCannotInferCollectionTypeDiagnostic(
@@ -482,7 +482,7 @@ void TypeChecker::reportTypeMismatch(TypePtr expectedType, TypePtr actualType, d
 }
 
 // =============================================================================
-// Task 3.4.3: Exhaustiveness & Reachability Analysis (E5001 / E5002)
+// Exhaustiveness & Reachability Analysis (E5001 / E5002)
 // =============================================================================
 
 diag::Diagnostic TypeChecker::createMissingReturnDiagnostic(
@@ -556,6 +556,251 @@ void TypeChecker::reportUnreachableCode(diag::SourceSpan span) {
     }
 }
 
+// =============================================================================
+// Mutable Reference Borrow Checker (L-Value Validation - E4005)
+// =============================================================================
+
+diag::Diagnostic TypeChecker::createNonLValueMutableBorrowDiagnostic(
+    std::string_view exprDesc,
+    diag::SourceSpan span) {
+    std::string msg = "cannot pass non-l-value to mutable reference parameter ('mut')";
+    if (!exprDesc.empty()) {
+        msg += ": " + std::string(exprDesc);
+    }
+
+    auto d = diag::Diagnostic::makeError(
+        diag::ErrorCode::NonLValueMutableBorrow,
+        std::move(msg),
+        span.isValid() ? span.start : diag::SourceLocation{});
+
+    if (span.isValid()) {
+        d.labels.push_back(diag::DiagnosticLabel{
+            span,
+            "expected mutable addressable l-value (e.g. 'let' variable, array element, or class field)",
+            true
+        });
+    }
+
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Help,
+        "only mutable variables ('let'), array indices, and mutable fields can be passed by mutable reference"
+    });
+    return d;
+}
+
+void TypeChecker::reportNonLValueMutableBorrow(std::string_view exprDesc, diag::SourceSpan span) {
+    hasErrors_ = true;
+    if (emitter_ != nullptr) {
+        emitter_->report(createNonLValueMutableBorrowDiagnostic(exprDesc, span));
+    }
+}
+
+bool TypeChecker::isMutableLValue(const ast::Expr* expr, sema::Scope& scope, std::string* outReason) {
+    if (!expr) {
+        if (outReason) *outReason = "null expression";
+        return false;
+    }
+
+    // 1. Variable or Parameter identifier
+    if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(expr)) {
+        if (ident->getName() == "this") {
+            return true;
+        }
+
+        auto sym = scope.lookup(ident->getName());
+        if (!sym) {
+            if (outReason) *outReason = "unresolved identifier '" + ident->getName() + "'";
+            return false;
+        }
+
+        if (sym->isConstant() || sym->isConst()) {
+            if (outReason) *outReason = "constant '" + ident->getName() + "' is immutable";
+            return false;
+        }
+
+        if (sym->isDefine()) {
+            if (outReason) *outReason = "compile-time constant '" + ident->getName() + "' is immutable";
+            return false;
+        }
+
+        if (sym->isConstView()) {
+            if (outReason) *outReason = "imported binding '" + ident->getName() + "' is a read-only const-view";
+            return false;
+        }
+
+        if (sym->isParameter()) {
+            if (!sym->isMutable()) {
+                if (outReason) *outReason = "parameter '" + ident->getName() + "' is immutable (not declared 'mut')";
+                return false;
+            }
+            return true;
+        }
+
+        if (sym->isVariable()) {
+            if (sym->isConst() || sym->isConstView()) {
+                if (outReason) *outReason = "variable '" + ident->getName() + "' is immutable";
+                return false;
+            }
+            return true;
+        }
+
+        if (sym->isField()) {
+            if (sym->isConst() || !sym->isMutable()) {
+                if (outReason) *outReason = "field '" + ident->getName() + "' is immutable";
+                return false;
+            }
+            return true;
+        }
+
+        if (outReason) *outReason = "'" + ident->getName() + "' (" + std::string(sym->getKindName()) + ") is not an addressable mutable variable";
+        return false;
+    }
+
+    // 2. Index expression: arr[i]
+    if (const auto* index = dynamic_cast<const ast::IndexExpr*>(expr)) {
+        if (!index->getContainer()) {
+            if (outReason) *outReason = "invalid index container";
+            return false;
+        }
+
+        // The container itself must be an addressable mutable l-value.
+        // This enforces deep immutability: const arr[0] is rejected.
+        std::string contReason;
+        if (!isMutableLValue(index->getContainer(), scope, &contReason)) {
+            if (outReason) {
+                *outReason = "container is not a mutable l-value (" + contReason + ")";
+            }
+            return false;
+        }
+
+        return true;
+    }
+
+    // 3. Member expression: obj.field
+    if (const auto* member = dynamic_cast<const ast::MemberExpr*>(expr)) {
+        if (!member->getObject()) {
+            if (outReason) *outReason = "invalid member object";
+            return false;
+        }
+
+        std::string objReason;
+        if (!isMutableLValue(member->getObject(), scope, &objReason)) {
+            if (outReason) {
+                *outReason = "object is not a mutable l-value (" + objReason + ")";
+            }
+            return false;
+        }
+
+        // Check if member access is on 'this'
+        if (const auto* objIdent = dynamic_cast<const ast::IdentExpr*>(member->getObject())) {
+            if (objIdent->getName() == "this") {
+                auto fieldSym = scope.lookup(member->getMemberName());
+                if (fieldSym && fieldSym->isField()) {
+                    if (fieldSym->isConst() || !fieldSym->isMutable()) {
+                        if (outReason) *outReason = "field '" + member->getMemberName() + "' is immutable";
+                        return false;
+                    }
+                    return true;
+                }
+            }
+        }
+
+        // Check if field itself is const in the object's class declaration
+        auto objType = inferType(*member->getObject(), scope);
+        if (objType && objType->isCustom()) {
+            auto clsName = static_cast<const CustomType*>(objType.get())->getName();
+            auto clsSym = scope.lookup(clsName);
+            if (clsSym && clsSym->getAstNode()) {
+                if (const auto* clsDecl = dynamic_cast<const ast::ClassDecl*>(clsSym->getAstNode())) {
+                    for (const auto& f : clsDecl->getFields()) {
+                        if (f.name == member->getMemberName()) {
+                            if (f.isConst) {
+                                if (outReason) *outReason = "field '" + member->getMemberName() + "' of class '" + clsName + "' is declared const";
+                                return false;
+                            }
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        return true;
+    }
+
+    // 4. Literals
+    if (dynamic_cast<const ast::LiteralExpr*>(expr)) {
+        if (outReason) *outReason = "literal value is not an l-value";
+        return false;
+    }
+    if (dynamic_cast<const ast::ArrayLitExpr*>(expr)) {
+        if (outReason) *outReason = "array literal is not an l-value";
+        return false;
+    }
+    if (dynamic_cast<const ast::MapLitExpr*>(expr)) {
+        if (outReason) *outReason = "map literal is not an l-value";
+        return false;
+    }
+
+    // 5. Binary expressions (a + b, a == b, etc.)
+    if (dynamic_cast<const ast::BinaryExpr*>(expr)) {
+        if (outReason) *outReason = "binary expression result is a temporary value";
+        return false;
+    }
+
+    // 6. Unary expressions (-x, !b, etc.)
+    if (dynamic_cast<const ast::UnaryExpr*>(expr)) {
+        if (outReason) *outReason = "unary expression result is a temporary value";
+        return false;
+    }
+
+    // 7. Function / method call results: f()
+    if (dynamic_cast<const ast::CallExpr*>(expr)) {
+        if (outReason) *outReason = "function call return value is a temporary value";
+        return false;
+    }
+
+    // 8. Conditional expressions: a ? b : c
+    if (dynamic_cast<const ast::TernaryExpr*>(expr)) {
+        if (outReason) *outReason = "conditional expression result is a temporary value";
+        return false;
+    }
+
+    // 9. Cast expressions: x as int
+    if (dynamic_cast<const ast::TypeCastExpr*>(expr)) {
+        if (outReason) *outReason = "type cast result is a temporary value";
+        return false;
+    }
+
+    // 10. Zonk expressions: a ?? b
+    if (dynamic_cast<const ast::ZonkExpr*>(expr)) {
+        if (outReason) *outReason = "zonk expression result is a temporary value";
+        return false;
+    }
+
+    // 11. Typeof expressions: typeof(x)
+    if (dynamic_cast<const ast::TypeofExpr*>(expr)) {
+        if (outReason) *outReason = "typeof expression result is a temporary string";
+        return false;
+    }
+
+    // 12. Await expressions: await t
+    if (dynamic_cast<const ast::AwaitExpr*>(expr)) {
+        if (outReason) *outReason = "await expression result is a temporary value";
+        return false;
+    }
+
+    // 13. Closure literals: fn(x) { ... }
+    if (dynamic_cast<const ast::ClosureExpr*>(expr)) {
+        if (outReason) *outReason = "closure literal is not an l-value";
+        return false;
+    }
+
+    if (outReason) *outReason = "expression is not an addressable mutable l-value";
+    return false;
+}
+
+
 bool TypeChecker::checkAssignment(
     TypePtr expectedType,
     TypePtr actualType,
@@ -602,16 +847,19 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
             auto sym = std::make_shared<sema::Symbol>(varDecl->getName(), sema::SymbolKind::Variable, varDecl->getSpan());
             sym->setTypeAnnotation(varDecl->getType());
             sym->setAstNode(varDecl);
+            sym->setMutable(true);
             targetScope->define(sym);
         } else if (const auto* constDecl = dynamic_cast<const ast::ConstDecl*>(decl.get())) {
             auto sym = std::make_shared<sema::Symbol>(constDecl->getName(), sema::SymbolKind::Constant, constDecl->getSpan());
             sym->setTypeAnnotation(constDecl->getType());
             sym->setAstNode(constDecl);
+            sym->setConst(true);
             targetScope->define(sym);
         } else if (const auto* defDecl = dynamic_cast<const ast::DefineDecl*>(decl.get())) {
             auto sym = std::make_shared<sema::Symbol>(defDecl->getName(), sema::SymbolKind::Define, defDecl->getSpan());
             sym->setTypeAnnotation(defDecl->getType());
             sym->setAstNode(defDecl);
+            sym->setConst(true);
             targetScope->define(sym);
         } else if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
             auto sym = std::make_shared<sema::Symbol>(fnDecl->getName(), sema::SymbolKind::Function, fnDecl->getSpan());
@@ -641,6 +889,7 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
         auto sym = std::make_shared<sema::Symbol>(varDecl->getName(), sema::SymbolKind::Variable, varDecl->getSpan());
         sym->setTypeAnnotation(varDecl->getType());
         sym->setAstNode(varDecl);
+        sym->setMutable(true);
         scope.define(sym);
 
         if (varDecl->hasInitializer()) {
@@ -652,6 +901,7 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
         auto sym = std::make_shared<sema::Symbol>(constDecl->getName(), sema::SymbolKind::Constant, constDecl->getSpan());
         sym->setTypeAnnotation(constDecl->getType());
         sym->setAstNode(constDecl);
+        sym->setConst(true);
         scope.define(sym);
 
         if (constDecl->getInitializer()) {
@@ -663,6 +913,7 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
         auto sym = std::make_shared<sema::Symbol>(defDecl->getName(), sema::SymbolKind::Define, defDecl->getSpan());
         sym->setTypeAnnotation(defDecl->getType());
         sym->setAstNode(defDecl);
+        sym->setConst(true);
         scope.define(sym);
 
         if (defDecl->getValue()) {
@@ -677,6 +928,8 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
             auto pType = Type::fromAnnotation(param.type.get());
             auto pSym = std::make_shared<sema::Symbol>(param.name, sema::SymbolKind::Parameter, param.span);
             pSym->setTypeAnnotation(param.type.get());
+            pSym->setMutable(param.isMut);
+            pSym->setConst(!param.isMut);
             fnScope->define(pSym);
 
             if (param.defaultValue) {
@@ -699,6 +952,8 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
             auto fType = Type::fromAnnotation(field.type.get());
             auto fSym = std::make_shared<sema::Symbol>(field.name, sema::SymbolKind::Field, field.span);
             fSym->setTypeAnnotation(field.type.get());
+            fSym->setMutable(!field.isConst);
+            fSym->setConst(field.isConst);
             classScope->define(fSym);
 
             if (field.initializer) {
@@ -1118,6 +1373,27 @@ bool TypeChecker::checkZeroCoercion(const ast::Stmt& stmt, sema::Scope& scope) {
         }
     } else if (const auto* forInStmt = dynamic_cast<const ast::ForInStmt*>(&stmt)) {
         auto forScope = scope.createChild(sema::ScopeKind::Block);
+        if (forInStmt->isKeyValue()) {
+            if (forInStmt->getKeyType()) {
+                auto kSym = std::make_shared<sema::Symbol>(forInStmt->getKeyName(), sema::SymbolKind::Variable, forInStmt->getSpan());
+                kSym->setTypeAnnotation(forInStmt->getKeyType());
+                kSym->setMutable(true);
+                forScope->define(kSym);
+            }
+            if (forInStmt->getValueType()) {
+                auto vSym = std::make_shared<sema::Symbol>(forInStmt->getValueName(), sema::SymbolKind::Variable, forInStmt->getSpan());
+                vSym->setTypeAnnotation(forInStmt->getValueType());
+                vSym->setMutable(true);
+                forScope->define(vSym);
+            }
+        } else {
+            if (forInStmt->getValueType()) {
+                auto vSym = std::make_shared<sema::Symbol>(forInStmt->getValueName(), sema::SymbolKind::Variable, forInStmt->getSpan());
+                vSym->setTypeAnnotation(forInStmt->getValueType());
+                vSym->setMutable(true);
+                forScope->define(vSym);
+            }
+        }
         if (forInStmt->getCollection()) {
             inferType(*forInStmt->getCollection(), scope);
         }
@@ -1365,55 +1641,164 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
     if (const auto* call = dynamic_cast<const ast::CallExpr*>(&expr)) {
         std::vector<std::string> mutatedVars;
 
-        // Built-in numeric conversion methods: .toFloat(), .toInt(), etc.
+        // Member call: built-in numeric conversions (.toFloat(), .toInt(), etc.) or class method call
         if (const auto* member = dynamic_cast<const ast::MemberExpr*>(call->getCallee())) {
             auto objType = member->getObject() ? inferType(*member->getObject(), scope) : Type::unknownType();
-            for (const auto& arg : call->getArgs()) {
-                if (arg.value) inferType(*arg.value, scope);
-                if (arg.isMut && arg.value) {
-                    if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(arg.value.get())) {
-                        mutatedVars.push_back(ident->getName());
+
+            if (member->getMemberName() == "toFloat" ||
+                member->getMemberName() == "toInt" ||
+                member->getMemberName() == "toString" ||
+                member->getMemberName() == "toChar") {
+                for (const auto& arg : call->getArgs()) {
+                    if (arg.value) inferType(*arg.value, scope);
+                    if (arg.isMut && arg.value) {
+                        if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(arg.value.get())) {
+                            mutatedVars.push_back(ident->getName());
+                        }
+                        std::string reason;
+                        if (!isMutableLValue(arg.value.get(), scope, &reason)) {
+                            reportNonLValueMutableBorrow(reason, arg.span.isValid() ? arg.span : arg.value->getSpan());
+                        }
+                    }
+                }
+                for (const auto& v : mutatedVars) {
+                    scope.resetNarrowedType(v);
+                }
+                if (member->getMemberName() == "toFloat") return Type::floatType();
+                if (member->getMemberName() == "toInt") return Type::intType();
+                if (member->getMemberName() == "toString") return Type::stringType();
+                return Type::charType();
+            }
+
+            // Method call on a class instance
+            const ast::FnDecl* methodDecl = nullptr;
+            if (objType && objType->isCustom()) {
+                auto clsName = static_cast<const CustomType*>(objType.get())->getName();
+                auto clsSym = scope.lookup(clsName);
+                if (clsSym && clsSym->getAstNode()) {
+                    if (const auto* clsDecl = dynamic_cast<const ast::ClassDecl*>(clsSym->getAstNode())) {
+                        for (const auto& m : clsDecl->getMethods()) {
+                            if (m && m->getName() == member->getMemberName()) {
+                                methodDecl = m.get();
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (size_t i = 0; i < call->getArgs().size(); ++i) {
+                const auto& arg = call->getArgs()[i];
+                if (arg.value) {
+                    TypePtr pType = (methodDecl && i < methodDecl->getParams().size())
+                        ? Type::fromAnnotation(methodDecl->getParams()[i].type.get())
+                        : nullptr;
+                    auto argType = inferType(*arg.value, scope, pType);
+                    if (pType) {
+                        checkAssignment(pType, argType, arg.value->getSpan(), "method argument");
+                    }
+                    bool isMut = arg.isMut || (methodDecl && i < methodDecl->getParams().size() && methodDecl->getParams()[i].isMut);
+                    if (isMut) {
+                        if (const auto* argIdent = dynamic_cast<const ast::IdentExpr*>(arg.value.get())) {
+                            mutatedVars.push_back(argIdent->getName());
+                        }
+                        std::string reason;
+                        if (!isMutableLValue(arg.value.get(), scope, &reason)) {
+                            reportNonLValueMutableBorrow(reason, arg.span.isValid() ? arg.span : arg.value->getSpan());
+                        }
                     }
                 }
             }
             for (const auto& v : mutatedVars) {
                 scope.resetNarrowedType(v);
             }
-            if (member->getMemberName() == "toFloat") return Type::floatType();
-            if (member->getMemberName() == "toInt") return Type::intType();
-            if (member->getMemberName() == "toString") return Type::stringType();
-            if (member->getMemberName() == "toChar") return Type::charType();
+            if (methodDecl) {
+                return Type::fromAnnotation(methodDecl->getReturnType());
+            }
             return Type::unknownType();
         }
 
         // Function call: lookup in scope and check arguments
         if (const auto* calleeIdent = dynamic_cast<const ast::IdentExpr*>(call->getCallee())) {
             auto sym = scope.lookup(calleeIdent->getName());
+            const ast::FnDecl* fnDecl = nullptr;
             if (sym && sym->getAstNode()) {
-                if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(sym->getAstNode())) {
-                    for (size_t i = 0; i < call->getArgs().size(); ++i) {
-                        const auto& arg = call->getArgs()[i];
-                        if (arg.value) {
-                            TypePtr pType = (i < fnDecl->getParams().size())
-                                ? Type::fromAnnotation(fnDecl->getParams()[i].type.get())
-                                : nullptr;
-                            auto argType = inferType(*arg.value, scope, pType);
-                            if (pType) {
-                                checkAssignment(pType, argType, arg.value->getSpan(), "function argument");
-                            }
-                            bool isMut = arg.isMut || (i < fnDecl->getParams().size() && fnDecl->getParams()[i].isMut);
-                            if (isMut) {
-                                if (const auto* argIdent = dynamic_cast<const ast::IdentExpr*>(arg.value.get())) {
-                                    mutatedVars.push_back(argIdent->getName());
-                                }
+                fnDecl = dynamic_cast<const ast::FnDecl*>(sym->getAstNode());
+            }
+
+            // Check overloads if sym itself is not a matching FnDecl
+            if (!fnDecl && sym && sym->hasOverloads()) {
+                for (const auto& ov : sym->getOverloads()) {
+                    if (ov && ov->getAstNode()) {
+                        if (const auto* fd = dynamic_cast<const ast::FnDecl*>(ov->getAstNode())) {
+                            if (fd->getParams().size() == call->getArgs().size()) {
+                                fnDecl = fd;
+                                break;
                             }
                         }
                     }
-                    for (const auto& v : mutatedVars) {
-                        scope.resetNarrowedType(v);
-                    }
-                    return Type::fromAnnotation(fnDecl->getReturnType());
                 }
+            }
+
+            const ast::FunctionType* funcTypeAnnotation = nullptr;
+            if (sym && sym->getTypeAnnotation()) {
+                funcTypeAnnotation = dynamic_cast<const ast::FunctionType*>(sym->getTypeAnnotation());
+            }
+
+            if (fnDecl) {
+                for (size_t i = 0; i < call->getArgs().size(); ++i) {
+                    const auto& arg = call->getArgs()[i];
+                    if (arg.value) {
+                        TypePtr pType = (i < fnDecl->getParams().size())
+                            ? Type::fromAnnotation(fnDecl->getParams()[i].type.get())
+                            : nullptr;
+                        auto argType = inferType(*arg.value, scope, pType);
+                        if (pType) {
+                            checkAssignment(pType, argType, arg.value->getSpan(), "function argument");
+                        }
+                        bool isMut = arg.isMut || (i < fnDecl->getParams().size() && fnDecl->getParams()[i].isMut);
+                        if (isMut) {
+                            if (const auto* argIdent = dynamic_cast<const ast::IdentExpr*>(arg.value.get())) {
+                                mutatedVars.push_back(argIdent->getName());
+                            }
+                            std::string reason;
+                            if (!isMutableLValue(arg.value.get(), scope, &reason)) {
+                                reportNonLValueMutableBorrow(reason, arg.span.isValid() ? arg.span : arg.value->getSpan());
+                            }
+                        }
+                    }
+                }
+                for (const auto& v : mutatedVars) {
+                    scope.resetNarrowedType(v);
+                }
+                return Type::fromAnnotation(fnDecl->getReturnType());
+            } else if (funcTypeAnnotation) {
+                for (size_t i = 0; i < call->getArgs().size(); ++i) {
+                    const auto& arg = call->getArgs()[i];
+                    if (arg.value) {
+                        TypePtr pType = (i < funcTypeAnnotation->getParams().size())
+                            ? Type::fromAnnotation(funcTypeAnnotation->getParams()[i].type.get())
+                            : nullptr;
+                        auto argType = inferType(*arg.value, scope, pType);
+                        if (pType) {
+                            checkAssignment(pType, argType, arg.value->getSpan(), "function argument");
+                        }
+                        bool isMut = arg.isMut || (i < funcTypeAnnotation->getParams().size() && funcTypeAnnotation->getParams()[i].isMut);
+                        if (isMut) {
+                            if (const auto* argIdent = dynamic_cast<const ast::IdentExpr*>(arg.value.get())) {
+                                mutatedVars.push_back(argIdent->getName());
+                            }
+                            std::string reason;
+                            if (!isMutableLValue(arg.value.get(), scope, &reason)) {
+                                reportNonLValueMutableBorrow(reason, arg.span.isValid() ? arg.span : arg.value->getSpan());
+                            }
+                        }
+                    }
+                }
+                for (const auto& v : mutatedVars) {
+                    scope.resetNarrowedType(v);
+                }
+                return Type::fromAnnotation(funcTypeAnnotation->getReturnType());
             }
         }
 
@@ -1422,6 +1807,10 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             if (arg.isMut && arg.value) {
                 if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(arg.value.get())) {
                     mutatedVars.push_back(ident->getName());
+                }
+                std::string reason;
+                if (!isMutableLValue(arg.value.get(), scope, &reason)) {
+                    reportNonLValueMutableBorrow(reason, arg.span.isValid() ? arg.span : arg.value->getSpan());
                 }
             }
         }
@@ -1540,6 +1929,8 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             paramTypes.push_back(pType ? pType : Type::unknownType());
             auto pSym = std::make_shared<sema::Symbol>(p.name, sema::SymbolKind::Parameter, p.span);
             pSym->setTypeAnnotation(p.type.get());
+            pSym->setMutable(p.isMut);
+            pSym->setConst(!p.isMut);
             fnScope->define(pSym);
         }
         auto retType = Type::fromAnnotation(closure->getReturnType());

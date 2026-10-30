@@ -39,7 +39,7 @@ struct ParseResult {
 
 } // namespace
 
-TEST_CASE("Task 3.3.1: Explicit Type Annotations - Variable declarations (E3001)", "[typechecker][E3001]") {
+TEST_CASE("Explicit Type Annotations - Variable declarations (E3001)", "[typechecker][E3001]") {
     SECTION("Variable declaration without type annotation emits E3001") {
         ParseResult res("let x = 10;");
         REQUIRE(res.hasError(diag::ErrorCode::MissingTypeAnnotation));
@@ -59,7 +59,7 @@ TEST_CASE("Task 3.3.1: Explicit Type Annotations - Variable declarations (E3001)
     }
 }
 
-TEST_CASE("Task 3.3.1: Explicit Type Annotations - Constant and Define declarations (E3001)", "[typechecker][E3001]") {
+TEST_CASE("Explicit Type Annotations - Constant and Define declarations (E3001)", "[typechecker][E3001]") {
     SECTION("Const declaration without type annotation emits E3001") {
         ParseResult res("const PI = 3.14;");
         REQUIRE(res.hasError(diag::ErrorCode::MissingTypeAnnotation));
@@ -87,7 +87,7 @@ TEST_CASE("Task 3.3.1: Explicit Type Annotations - Constant and Define declarati
     }
 }
 
-TEST_CASE("Task 3.3.1: Explicit Type Annotations - Function declarations and parameters (E3001)", "[typechecker][E3001]") {
+TEST_CASE("Explicit Type Annotations - Function declarations and parameters (E3001)", "[typechecker][E3001]") {
     SECTION("Function parameter without type annotation emits E3001") {
         ParseResult res("fn add(a, b: int): int { return a + b; }");
         REQUIRE(res.hasError(diag::ErrorCode::MissingTypeAnnotation));
@@ -108,7 +108,7 @@ TEST_CASE("Task 3.3.1: Explicit Type Annotations - Function declarations and par
     }
 }
 
-TEST_CASE("Task 3.3.1: Explicit Type Annotations - Closures and Function Literals (E3001)", "[typechecker][E3001]") {
+TEST_CASE("Explicit Type Annotations - Closures and Function Literals (E3001)", "[typechecker][E3001]") {
     SECTION("Closure parameter without type annotation emits E3001") {
         ParseResult resUntypedParam("let f: Handler = fn(x): int { return x; };");
         REQUIRE(resUntypedParam.hasError(diag::ErrorCode::MissingTypeAnnotation));
@@ -128,7 +128,7 @@ TEST_CASE("Task 3.3.1: Explicit Type Annotations - Closures and Function Literal
     }
 }
 
-TEST_CASE("Task 3.3.1: Explicit Type Annotations - Class and ErrType fields (E3001)", "[typechecker][E3001]") {
+TEST_CASE("Explicit Type Annotations - Class and ErrType fields (E3001)", "[typechecker][E3001]") {
     SECTION("Class field without type annotation emits E3001") {
         ParseResult res("class User { pub let name; }");
         REQUIRE(res.hasError(diag::ErrorCode::MissingTypeAnnotation));
@@ -156,7 +156,7 @@ TEST_CASE("Task 3.3.1: Explicit Type Annotations - Class and ErrType fields (E30
     }
 }
 
-TEST_CASE("Task 3.3.1: Explicit Type Annotations - For-in loop variable bindings (E3001)", "[typechecker][E3001]") {
+TEST_CASE("Explicit Type Annotations - For-in loop variable bindings (E3001)", "[typechecker][E3001]") {
     SECTION("For-in loop variable without type annotation emits E3001") {
         ParseResult res("fn run(): void { let arr: array<int> = [1, 2]; for (let x in arr) { } }");
         REQUIRE(res.hasError(diag::ErrorCode::MissingTypeAnnotation));
@@ -176,7 +176,7 @@ TEST_CASE("Task 3.3.1: Explicit Type Annotations - For-in loop variable bindings
     }
 }
 
-TEST_CASE("Task 3.3.1: TypeChecker standalone AST check emits E3001", "[typechecker][E3001]") {
+TEST_CASE("TypeChecker standalone AST check emits E3001", "[typechecker][E3001]") {
     diag::SourceManager sm;
     diag::DiagnosticEmitter emitter(sm);
     typechecker::TypeChecker checker(&emitter);
@@ -193,10 +193,10 @@ TEST_CASE("Task 3.3.1: TypeChecker standalone AST check emits E3001", "[typechec
 }
 
 // =============================================================================
-// Task 3.3.2: Strict Zero-Coercion Policy (E3002)
+// Strict Zero-Coercion Policy (E3002)
 // =============================================================================
 
-TEST_CASE("Task 3.3.2: Strict Zero-Coercion - neg_implicit_widening (E3002)", "[typechecker][E3002]") {
+TEST_CASE("Strict Zero-Coercion - neg_implicit_widening (E3002)", "[typechecker][E3002]") {
     SECTION("Assigning integer directly to float without cast emits E3002") {
         ParseResult res("let f: float = 42;");
         REQUIRE_FALSE(res.checkZeroCoercion());
@@ -235,7 +235,7 @@ TEST_CASE("Task 3.3.2: Strict Zero-Coercion - neg_implicit_widening (E3002)", "[
     }
 }
 
-TEST_CASE("Task 3.3.2: Strict Zero-Coercion - Constants and Defines (E3002)", "[typechecker][E3002]") {
+TEST_CASE("Strict Zero-Coercion - Constants and Defines (E3002)", "[typechecker][E3002]") {
     SECTION("Constant float initialized with int emits E3002") {
         ParseResult res("const MAX_THRESHOLD: float = 100;");
         REQUIRE_FALSE(res.checkZeroCoercion());
@@ -261,7 +261,7 @@ TEST_CASE("Task 3.3.2: Strict Zero-Coercion - Constants and Defines (E3002)", "[
     }
 }
 
-TEST_CASE("Task 3.3.2: Strict Zero-Coercion - Reassignment and Compound Assignment (E3002)", "[typechecker][E3002]") {
+TEST_CASE("Strict Zero-Coercion - Reassignment and Compound Assignment (E3002)", "[typechecker][E3002]") {
     SECTION("Assigning int to float variable emits E3002") {
         ParseResult res("fn run(): void { let f: float = 1.0; f = 42; }");
         REQUIRE_FALSE(res.checkZeroCoercion());
@@ -287,7 +287,7 @@ TEST_CASE("Task 3.3.2: Strict Zero-Coercion - Reassignment and Compound Assignme
     }
 }
 
-TEST_CASE("Task 3.3.2: Strict Zero-Coercion - Function Calls and Returns (E3002)", "[typechecker][E3002]") {
+TEST_CASE("Strict Zero-Coercion - Function Calls and Returns (E3002)", "[typechecker][E3002]") {
     SECTION("Passing int argument to float parameter emits E3002") {
         ParseResult res(
             "fn compute(scale: float): void {}\n"
@@ -325,7 +325,7 @@ TEST_CASE("Task 3.3.2: Strict Zero-Coercion - Function Calls and Returns (E3002)
     }
 }
 
-TEST_CASE("Task 3.3.2: Strict Zero-Coercion - Binary Operators Mixing int and float (E3002)", "[typechecker][E3002]") {
+TEST_CASE("Strict Zero-Coercion - Binary Operators Mixing int and float (E3002)", "[typechecker][E3002]") {
     SECTION("Addition 42 + 3.14 emits E3002") {
         ParseResult res("fn run(): void { let x: float = 42 + 3.14; }");
         REQUIRE_FALSE(res.checkZeroCoercion());
@@ -369,7 +369,7 @@ TEST_CASE("Task 3.3.2: Strict Zero-Coercion - Binary Operators Mixing int and fl
     }
 }
 
-TEST_CASE("Task 3.3.2: Strict Zero-Coercion - Narrowing float to int (E3002)", "[typechecker][E3002]") {
+TEST_CASE("Strict Zero-Coercion - Narrowing float to int (E3002)", "[typechecker][E3002]") {
     SECTION("Assigning float literal directly to int emits E3002") {
         ParseResult res("let i: int = 3.14;");
         REQUIRE_FALSE(res.checkZeroCoercion());
@@ -389,7 +389,7 @@ TEST_CASE("Task 3.3.2: Strict Zero-Coercion - Narrowing float to int (E3002)", "
     }
 }
 
-TEST_CASE("Task 3.3.2: Strict Zero-Coercion - Class Field Initializers (E3002)", "[typechecker][E3002]") {
+TEST_CASE("Strict Zero-Coercion - Class Field Initializers (E3002)", "[typechecker][E3002]") {
     SECTION("Class float field initialized with int emits E3002") {
         ParseResult res("class Account { pub let balance: float = 100; }");
         REQUIRE_FALSE(res.checkZeroCoercion());
@@ -404,10 +404,10 @@ TEST_CASE("Task 3.3.2: Strict Zero-Coercion - Class Field Initializers (E3002)",
 }
 
 // =============================================================================
-// Task 3.3.3: Contextual Typing of Empty Collection Literals (E3009 / E3003)
+// Contextual Typing of Empty Collection Literals (E3009 / E3003)
 // =============================================================================
 
-TEST_CASE("Task 3.3.3: Contextual Typing - Empty Array Literals '[]'", "[typechecker][contextual]") {
+TEST_CASE("Contextual Typing - Empty Array Literals '[]'", "[typechecker][contextual]") {
     SECTION("Variable declaration context: let a: array<int> = [] succeeds") {
         ParseResult res("let a: array<int> = [];");
         REQUIRE(res.checkZeroCoercion());
@@ -460,7 +460,7 @@ TEST_CASE("Task 3.3.3: Contextual Typing - Empty Array Literals '[]'", "[typeche
     }
 }
 
-TEST_CASE("Task 3.3.3: Contextual Typing - Empty Map Literals '{}'", "[typechecker][contextual]") {
+TEST_CASE("Contextual Typing - Empty Map Literals '{}'", "[typechecker][contextual]") {
     SECTION("Variable declaration context: let m: map<string, int> = {} succeeds") {
         ParseResult res("let m: map<string, int> = {};");
         REQUIRE(res.checkZeroCoercion());
@@ -513,7 +513,7 @@ TEST_CASE("Task 3.3.3: Contextual Typing - Empty Map Literals '{}'", "[typecheck
     }
 }
 
-TEST_CASE("Task 3.3.3: Contextual Typing - Nested Empty Collections", "[typechecker][contextual]") {
+TEST_CASE("Contextual Typing - Nested Empty Collections", "[typechecker][contextual]") {
     SECTION("Nested empty arrays in array<array<int>> succeed") {
         ParseResult res("let matrix: array<array<int>> = [[], [1, 2], []];");
         REQUIRE(res.checkZeroCoercion());
@@ -533,7 +533,7 @@ TEST_CASE("Task 3.3.3: Contextual Typing - Nested Empty Collections", "[typechec
     }
 }
 
-TEST_CASE("Task 3.3.3: Contextual Typing - Ternary and Zonk Fallback Collections", "[typechecker][contextual]") {
+TEST_CASE("Contextual Typing - Ternary and Zonk Fallback Collections", "[typechecker][contextual]") {
     SECTION("Empty array in ternary conditional succeeds") {
         ParseResult res(
             "fn run(flag: bool): void {\n"
@@ -554,7 +554,7 @@ TEST_CASE("Task 3.3.3: Contextual Typing - Ternary and Zonk Fallback Collections
     }
 }
 
-TEST_CASE("Task 3.3.3: Contextual Typing - Untyped Empty Collections Emit E3009", "[typechecker][E3009]") {
+TEST_CASE("Contextual Typing - Untyped Empty Collections Emit E3009", "[typechecker][E3009]") {
     SECTION("typeof([]) without contextual type emits E3009") {
         ParseResult res("fn run(): void { let s: string = typeof([]); }");
         REQUIRE_FALSE(res.checkZeroCoercion());
@@ -576,7 +576,7 @@ TEST_CASE("Task 3.3.3: Contextual Typing - Untyped Empty Collections Emit E3009"
     }
 }
 
-TEST_CASE("Task 3.3.3: Contextual Typing - Incompatible Collection Types Emit E3003", "[typechecker][E3003]") {
+TEST_CASE("Contextual Typing - Incompatible Collection Types Emit E3003", "[typechecker][E3003]") {
     SECTION("Empty array assigned to scalar int emits E3003") {
         ParseResult res("let x: int = [];");
         REQUIRE_FALSE(res.checkZeroCoercion());
@@ -606,7 +606,7 @@ TEST_CASE("Task 3.3.3: Contextual Typing - Incompatible Collection Types Emit E3
     }
 }
 
-TEST_CASE("Task 3.3.3: Contextual Typing - Non-Empty Collection Elements Checked", "[typechecker]") {
+TEST_CASE("Contextual Typing - Non-Empty Collection Elements Checked", "[typechecker]") {
     SECTION("Array elements checked for zero-coercion (E3002)") {
         ParseResult res("let a: array<float> = [42];");
         REQUIRE_FALSE(res.checkZeroCoercion());
@@ -627,10 +627,10 @@ TEST_CASE("Task 3.3.3: Contextual Typing - Non-Empty Collection Elements Checked
 }
 
 // =============================================================================
-// Task 3.3.4: Canonical Union Algebra Normalization
+// Canonical Union Algebra Normalization
 // =============================================================================
 
-TEST_CASE("Task 3.3.4: Union Algebra - Flattening (Associativity)", "[typechecker][union]") {
+TEST_CASE("Union Algebra - Flattening (Associativity)", "[typechecker][union]") {
     SECTION("Direct API: A | (B | C) flattens to A | B | C") {
         auto tA = typechecker::Type::intType();
         auto tB = typechecker::Type::stringType();
@@ -670,7 +670,7 @@ TEST_CASE("Task 3.3.4: Union Algebra - Flattening (Associativity)", "[typechecke
     }
 }
 
-TEST_CASE("Task 3.3.4: Union Algebra - Commutativity and Deduplication", "[typechecker][union]") {
+TEST_CASE("Union Algebra - Commutativity and Deduplication", "[typechecker][union]") {
     SECTION("Direct API: int | string is equal to string | int") {
         auto u1 = typechecker::Type::unionOf({typechecker::Type::intType(), typechecker::Type::stringType()});
         auto u2 = typechecker::Type::unionOf({typechecker::Type::stringType(), typechecker::Type::intType()});
@@ -718,7 +718,7 @@ TEST_CASE("Task 3.3.4: Union Algebra - Commutativity and Deduplication", "[typec
     }
 }
 
-TEST_CASE("Task 3.3.4: Union Algebra - Subtype and Literal Absorption", "[typechecker][union]") {
+TEST_CASE("Union Algebra - Subtype and Literal Absorption", "[typechecker][union]") {
     SECTION("Direct API: 200 | 404 | int normalizes canonically to int") {
         auto u = typechecker::Type::unionOf({
             typechecker::Type::literalInt(200),
@@ -803,7 +803,7 @@ TEST_CASE("Task 3.3.4: Union Algebra - Subtype and Literal Absorption", "[typech
     }
 }
 
-TEST_CASE("Task 3.3.4: Union Algebra - Single-Variant Unwrapping", "[typechecker][union]") {
+TEST_CASE("Union Algebra - Single-Variant Unwrapping", "[typechecker][union]") {
     SECTION("Direct API: int | int unwraps to int") {
         auto u = typechecker::Type::unionOf({
             typechecker::Type::intType(),
@@ -834,7 +834,7 @@ TEST_CASE("Task 3.3.4: Union Algebra - Single-Variant Unwrapping", "[typechecker
     }
 }
 
-TEST_CASE("Task 3.3.4: Union and Literal Types - Positive Conformance", "[typechecker][union][literal]") {
+TEST_CASE("Union and Literal Types - Positive Conformance", "[typechecker][union][literal]") {
     SECTION("Integer literal union: 200 | 404 | 500") {
         ParseResult res("let httpStatus: 200 | 404 | 500 = 200;");
         REQUIRE(res.checkZeroCoercion());
@@ -888,7 +888,7 @@ TEST_CASE("Task 3.3.4: Union and Literal Types - Positive Conformance", "[typech
     }
 }
 
-TEST_CASE("Task 3.3.4: Union and Literal Types - Negative Rejection (E3003)", "[typechecker][union][literal][E3003]") {
+TEST_CASE("Union and Literal Types - Negative Rejection (E3003)", "[typechecker][union][literal][E3003]") {
     SECTION("Integer value not in literal union emits E3003") {
         ParseResult res("let httpStatus: 200 | 404 = 500;");
         REQUIRE_FALSE(res.checkZeroCoercion());
@@ -936,7 +936,7 @@ TEST_CASE("Task 3.3.4: Union and Literal Types - Negative Rejection (E3003)", "[
 // Phase 3.4: Control-Flow Analysis (CFA) & Type Narrowing
 // =============================================================================
 
-TEST_CASE("Task 3.4.1: Flow-Based Type Narrowing - typeof(x) == \"T\"", "[cfa][narrowing]") {
+TEST_CASE("Flow-Based Type Narrowing - typeof(x) == \"T\"", "[cfa][narrowing]") {
     SECTION("Variable narrowed to int inside then branch") {
         ParseResult res(
             "fn test(x: int | string): void {\n"
@@ -1021,7 +1021,7 @@ TEST_CASE("Task 3.4.1: Flow-Based Type Narrowing - typeof(x) == \"T\"", "[cfa][n
     }
 }
 
-TEST_CASE("Task 3.4.1: Flow-Based Type Narrowing - Non-Null Checks (x != null)", "[cfa][narrowing]") {
+TEST_CASE("Flow-Based Type Narrowing - Non-Null Checks (x != null)", "[cfa][narrowing]") {
     SECTION("Nullable variable narrowed to non-null inside if (x != null)") {
         ParseResult res(
             "fn test(x: int | null): void {\n"
@@ -1102,7 +1102,7 @@ TEST_CASE("Task 3.4.1: Flow-Based Type Narrowing - Non-Null Checks (x != null)",
     }
 }
 
-TEST_CASE("Task 3.4.1: Flow-Based Type Narrowing - Compound Conditions & Ternaries", "[cfa][narrowing]") {
+TEST_CASE("Flow-Based Type Narrowing - Compound Conditions & Ternaries", "[cfa][narrowing]") {
     SECTION("Compound condition with && narrows multiple constraints") {
         ParseResult res(
             "fn test(x: int | string | null): void {\n"
@@ -1140,7 +1140,7 @@ TEST_CASE("Task 3.4.1: Flow-Based Type Narrowing - Compound Conditions & Ternari
     }
 }
 
-TEST_CASE("Task 3.4.2: Mutation Watcher - Direct Reassignment Invalidation", "[cfa][narrowing][invalidation]") {
+TEST_CASE("Mutation Watcher - Direct Reassignment Invalidation", "[cfa][narrowing][invalidation]") {
     SECTION("Conformance Test 3.2: Reassignment inside guarded block compiles cleanly") {
         ParseResult res(
             "let item: int | string = 100;\n"
@@ -1229,7 +1229,7 @@ TEST_CASE("Task 3.4.2: Mutation Watcher - Direct Reassignment Invalidation", "[c
     }
 }
 
-TEST_CASE("Task 3.4.2: Mutation Watcher - Compound Assignment & Unary Mutation", "[cfa][narrowing][invalidation]") {
+TEST_CASE("Mutation Watcher - Compound Assignment & Unary Mutation", "[cfa][narrowing][invalidation]") {
     SECTION("Compound assignment item += 5 invalidates narrowing") {
         ParseResult res(
             "fn test(): void {\n"
@@ -1273,7 +1273,7 @@ TEST_CASE("Task 3.4.2: Mutation Watcher - Compound Assignment & Unary Mutation",
     }
 }
 
-TEST_CASE("Task 3.4.2: Mutation Watcher - Passing to mut Parameters", "[cfa][narrowing][invalidation]") {
+TEST_CASE("Mutation Watcher - Passing to mut Parameters", "[cfa][narrowing][invalidation]") {
     SECTION("Passing narrowed variable to mut parameter invalidates narrowing") {
         ParseResult res(
             "fn modify(mut x: int | string): void {}\n"
@@ -1305,7 +1305,7 @@ TEST_CASE("Task 3.4.2: Mutation Watcher - Passing to mut Parameters", "[cfa][nar
     }
 }
 
-TEST_CASE("Task 3.4.2: Mutation Watcher - Closure Mutation & Enclosing Scopes", "[cfa][narrowing][invalidation]") {
+TEST_CASE("Mutation Watcher - Closure Mutation & Enclosing Scopes", "[cfa][narrowing][invalidation]") {
     SECTION("Mutation in nested inner block invalidates narrowing in enclosing scope") {
         ParseResult res(
             "fn test(): void {\n"
@@ -1339,7 +1339,7 @@ TEST_CASE("Task 3.4.2: Mutation Watcher - Closure Mutation & Enclosing Scopes", 
     }
 }
 
-TEST_CASE("Task 3.4.3: Exhaustiveness Analysis - Missing Return in Non-Void Functions (E5001)", "[cfa][exhaustiveness][E5001]") {
+TEST_CASE("Exhaustiveness Analysis - Missing Return in Non-Void Functions (E5001)", "[cfa][exhaustiveness][E5001]") {
     SECTION("Empty body in non-void function emits E5001") {
         ParseResult res("fn compute(): int {}");
         REQUIRE_FALSE(res.checkZeroCoercion());
@@ -1432,7 +1432,7 @@ TEST_CASE("Task 3.4.3: Exhaustiveness Analysis - Missing Return in Non-Void Func
     }
 }
 
-TEST_CASE("Task 3.4.3: Exhaustiveness Analysis - Exhaustive Control Paths Succeed", "[cfa][exhaustiveness]") {
+TEST_CASE("Exhaustiveness Analysis - Exhaustive Control Paths Succeed", "[cfa][exhaustiveness]") {
     SECTION("Straight-line return in non-void function succeeds") {
         ParseResult res("fn add(a: int, b: int): int { return a + b; }");
         REQUIRE(res.checkZeroCoercion());
@@ -1574,7 +1574,7 @@ TEST_CASE("Task 3.4.3: Exhaustiveness Analysis - Exhaustive Control Paths Succee
     }
 }
 
-TEST_CASE("Task 3.4.3: Reachability Analysis - Dead Code Detection (E5002)", "[cfa][reachability][E5002]") {
+TEST_CASE("Reachability Analysis - Dead Code Detection (E5002)", "[cfa][reachability][E5002]") {
     SECTION("Statement following return in same block emits E5002") {
         ParseResult res(
             "fn test(): int {\n"
@@ -1668,4 +1668,306 @@ TEST_CASE("Task 3.4.3: Reachability Analysis - Dead Code Detection (E5002)", "[c
         REQUIRE(res.hasError(diag::ErrorCode::UnreachableCode));
     }
 }
+
+// =============================================================================
+// Validate l-values: reject r-values and literals passed to mut (E4005)
+// =============================================================================
+
+TEST_CASE("Mutable Reference Borrow Checker - Validate L-Values (E4005)", "[typechecker][borrow_checker][E4005]") {
+    SECTION("Reject integer literal passed to mut parameter") {
+        ParseResult res(
+            "fn f(mut x: int): void {}\n"
+            "fn test(): void {\n"
+            "    f(mut 10);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Reject string literal passed to mut parameter") {
+        ParseResult res(
+            "fn f(mut s: string): void {}\n"
+            "fn test(): void {\n"
+            "    f(mut \"hello\");\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Reject boolean literal passed to mut parameter") {
+        ParseResult res(
+            "fn f(mut b: bool): void {}\n"
+            "fn test(): void {\n"
+            "    f(mut true);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Reject array literal passed to mut parameter") {
+        ParseResult res(
+            "fn f(mut a: array<int>): void {}\n"
+            "fn test(): void {\n"
+            "    f(mut [1, 2]);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Reject binary expression passed to mut parameter") {
+        ParseResult res(
+            "fn f(mut x: int): void {}\n"
+            "fn test(): void {\n"
+            "    let a: int = 1;\n"
+            "    let b: int = 2;\n"
+            "    f(mut (a + b));\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Reject unary expression passed to mut parameter") {
+        ParseResult res(
+            "fn f(mut x: int): void {}\n"
+            "fn test(): void {\n"
+            "    let a: int = 1;\n"
+            "    f(mut -a);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Reject function call return temporary passed to mut parameter") {
+        ParseResult res(
+            "fn getVal(): int { return 1; }\n"
+            "fn f(mut x: int): void {}\n"
+            "fn test(): void {\n"
+            "    f(mut getVal());\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Reject type cast temporary passed to mut parameter") {
+        ParseResult res(
+            "fn f(mut x: int): void {}\n"
+            "fn test(): void {\n"
+            "    let a: float = 1.0;\n"
+            "    f(mut (a as int));\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Reject const binding passed to mut parameter") {
+        ParseResult res(
+            "const MAX: int = 100;\n"
+            "fn f(mut x: int): void {}\n"
+            "fn test(): void {\n"
+            "    f(mut MAX);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Reject define constant passed to mut parameter") {
+        ParseResult res(
+            "define PI: float = 3.14;\n"
+            "fn f(mut x: float): void {}\n"
+            "fn test(): void {\n"
+            "    f(mut PI);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Reject immutable (non-mut) parameter forwarded to mut parameter") {
+        ParseResult res(
+            "fn f(mut x: int): void {}\n"
+            "fn caller(p: int): void {\n"
+            "    f(mut p);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Reject element of const array (deep immutability)") {
+        ParseResult res(
+            "const arr: array<int> = [1, 2, 3];\n"
+            "fn f(mut x: int): void {}\n"
+            "fn test(): void {\n"
+            "    f(mut arr[0]);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Reject element of temporary array literal") {
+        ParseResult res(
+            "fn f(mut x: int): void {}\n"
+            "fn test(): void {\n"
+            "    f(mut [1, 2][0]);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Reject const class field passed to mut parameter") {
+        ParseResult res(
+            "class Config {\n"
+            "    pub const max: int = 100;\n"
+            "    pub let current: int = 0;\n"
+            "}\n"
+            "fn f(mut x: int): void {}\n"
+            "fn test(): void {\n"
+            "    let c: Config = new Config();\n"
+            "    f(mut c.max);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Reject field of const class instance passed to mut parameter") {
+        ParseResult res(
+            "class Config {\n"
+            "    pub let current: int = 0;\n"
+            "}\n"
+            "fn f(mut x: int): void {}\n"
+            "fn test(): void {\n"
+            "    const c: Config = new Config();\n"
+            "    f(mut c.current);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Reject non-l-value without mut keyword at call site matching mut parameter") {
+        ParseResult res(
+            "fn f(mut x: int): void {}\n"
+            "fn test(): void {\n"
+            "    f(10);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Reject non-l-value in class method call taking mut parameter") {
+        ParseResult res(
+            "class Modifier {\n"
+            "    pub fn modify(mut val: int): void {}\n"
+            "}\n"
+            "fn test(): void {\n"
+            "    let m: Modifier = new Modifier();\n"
+            "    m.modify(10);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Reject non-l-value in closure with mut parameter") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    let cb: (mut x: int) => void = fn(mut x: int): void {};\n"
+            "    cb(mut 42);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Accept mutable let variable passed to mut parameter") {
+        ParseResult res(
+            "fn f(mut x: int): void {}\n"
+            "fn test(): void {\n"
+            "    let a: int = 10;\n"
+            "    f(mut a);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Accept mutable let variable passed without mut keyword at call site") {
+        ParseResult res(
+            "fn f(mut x: int): void {}\n"
+            "fn test(): void {\n"
+            "    let a: int = 10;\n"
+            "    f(a);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Accept mut parameter forwarded to another mut parameter") {
+        ParseResult res(
+            "fn target(mut x: int): void {}\n"
+            "fn forwarder(mut p: int): void {\n"
+            "    target(mut p);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Accept mutable array element passed to mut parameter") {
+        ParseResult res(
+            "fn f(mut x: int): void {}\n"
+            "fn test(): void {\n"
+            "    let arr: array<int> = [10, 20];\n"
+            "    f(mut arr[0]);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Accept mutable class field passed to mut parameter") {
+        ParseResult res(
+            "class Player {\n"
+            "    pub let hp: int = 100;\n"
+            "}\n"
+            "fn f(mut x: int): void {}\n"
+            "fn test(): void {\n"
+            "    let p: Player = new Player();\n"
+            "    f(mut p.hp);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+
+    SECTION("Accept mutable class field in method call") {
+        ParseResult res(
+            "class Modifier {\n"
+            "    pub fn modify(mut target: int): void {}\n"
+            "}\n"
+            "fn test(): void {\n"
+            "    let m: Modifier = new Modifier();\n"
+            "    let val: int = 5;\n"
+            "    m.modify(mut val);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::NonLValueMutableBorrow));
+    }
+}
+
 

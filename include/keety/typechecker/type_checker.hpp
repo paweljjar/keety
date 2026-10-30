@@ -24,7 +24,7 @@ public:
     [[nodiscard]] diag::DiagnosticEmitter* getEmitter() const noexcept { return emitter_; }
     [[nodiscard]] bool hasErrors() const noexcept { return hasErrors_; }
 
-    // --- Task 3.3.1: Explicit Type Annotation Validation ---
+    // --- Explicit Type Annotation Validation ---
 
     /// Validates that all declarations in the parsed module AST have explicit type annotations.
     /// Emits E3001 (MissingTypeAnnotation) for any declaration with an omitted type.
@@ -46,7 +46,7 @@ public:
         std::string_view entityName,
         diag::SourceSpan span);
 
-    // --- Task 3.3.2: Strict Zero-Coercion Policy (E3002) ---
+    // --- Strict Zero-Coercion Policy (E3002) ---
 
     /// Validates zero-coercion across declarations, statements, expressions, assignments,
     /// returns, and function calls. Emits E3002 (ImplicitTypeWidening) on implicit
@@ -72,7 +72,7 @@ public:
         lexer::TokenKind op,
         diag::SourceSpan span);
 
-    // --- Task 3.3.3: Contextual Typing of Empty Collection Literals (E3009 / E3003) ---
+    // --- Contextual Typing of Empty Collection Literals (E3009 / E3003) ---
 
     /// Evaluates/infers the static semantic type of an expression within a given scope,
     /// taking an optional expected contextual type into account (e.g. for [] and {}).
@@ -85,7 +85,7 @@ public:
     /// Complete type check validating explicit annotations, zero-coercion, and contextual collections.
     bool checkTypes(const parser::ModuleAST& module, sema::Scope* rootScope = nullptr);
 
-    // Factory methods for Task 3.3.3 diagnostics
+    // Factory methods for Contextual Typing diagnostics
     [[nodiscard]] static diag::Diagnostic createCannotInferCollectionTypeDiagnostic(
         std::string_view literalKind,
         diag::SourceSpan span);
@@ -96,7 +96,7 @@ public:
         diag::SourceSpan span,
         std::string_view contextDesc = "");
 
-    // --- Task 3.4.1: Control-Flow Analysis (CFA) & Type Narrowing ---
+    // --- Control-Flow Analysis (CFA) & Type Narrowing ---
 
     struct NarrowingFact {
         std::string varName;
@@ -112,7 +112,7 @@ public:
     /// and extracts flow-based type narrowing facts for the 'then' and 'else' branches.
     BranchNarrowing analyzeCondition(const ast::Expr* condition, sema::Scope& scope);
 
-    // --- Task 3.4.3: Exhaustiveness & Reachability Analysis ---
+    // --- Exhaustiveness & Reachability Analysis ---
 
     struct ReachabilityResult {
         bool locallyTerminates{false}; // Cannot reach statement textually following in same block
@@ -128,13 +128,23 @@ public:
     /// Checks nested closures within expressions for return exhaustiveness and dead code
     void checkClosuresInExpr(const ast::Expr* expr);
 
-    // Factory methods for Task 3.4.3 diagnostics
+    // Factory methods for Exhaustiveness & Reachability diagnostics
     [[nodiscard]] static diag::Diagnostic createMissingReturnDiagnostic(
         std::string_view functionName,
         TypePtr returnType,
         diag::SourceSpan span);
 
     [[nodiscard]] static diag::Diagnostic createUnreachableCodeDiagnostic(
+        diag::SourceSpan span);
+
+    // --- Mutable Reference Borrow Checker (L-Value Validation - E4005) ---
+
+    /// Validates whether an expression is an addressable mutable l-value.
+    /// Returns false if expr is an r-value, literal, const binding, or temporary.
+    bool isMutableLValue(const ast::Expr* expr, sema::Scope& scope, std::string* outReason = nullptr);
+
+    [[nodiscard]] static diag::Diagnostic createNonLValueMutableBorrowDiagnostic(
+        std::string_view exprDesc,
         diag::SourceSpan span);
 
 private:
@@ -149,6 +159,7 @@ private:
     void reportTypeMismatch(TypePtr expectedType, TypePtr actualType, diag::SourceSpan span, std::string_view contextDesc);
     void reportMissingReturn(std::string_view functionName, TypePtr returnType, diag::SourceSpan span);
     void reportUnreachableCode(diag::SourceSpan span);
+    void reportNonLValueMutableBorrow(std::string_view exprDesc, diag::SourceSpan span);
 };
 
 } // namespace keety::typechecker

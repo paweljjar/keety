@@ -88,7 +88,7 @@ This document specifies the operational development plan for the `keety` compile
 - [x] **Task 3.4.3:** Exhaustiveness and reachability analysis for non-void functions, flagging dead code after terminating statements.
 
 #### **Phase 3.5: Mutable Reference Borrow Checker (`mut`)**
-- [ ] **Task 3.5.1:** Validate l-values: reject r-values and literals passed to `mut` parameters (`E4005`).
+- [x] **Task 3.5.1:** Validate l-values: reject r-values and literals passed to `mut` parameters (`E4005`).
 - [ ] **Task 3.5.2:** Enforce exclusive mutable borrows: reject duplicate borrows `f(mut x, mut x)` (`E4001`).
 - [ ] **Task 3.5.3:** Reject simultaneous borrowing of container and its element: `f(mut arr[i], mut arr)` (`E4002`).
 - [ ] **Task 3.5.4:** Forbid taking mutable references to map elements: `f(mut m[k])` (`E4003`).
