@@ -233,18 +233,21 @@ private:
 class ClosureExpr : public Expr {
 public:
     ClosureExpr(diag::SourceSpan span, std::vector<Param> params,
-                std::unique_ptr<TypeAnnotation> returnType, std::unique_ptr<BlockStmt> body)
+                std::unique_ptr<TypeAnnotation> returnType, std::unique_ptr<BlockStmt> body,
+                bool isAsync = false)
         : Expr(span), params_(std::move(params)), returnType_(std::move(returnType)),
-          body_(std::move(body)) {}
+          body_(std::move(body)), isAsync_(isAsync) {}
 
     [[nodiscard]] const std::vector<Param>& getParams() const noexcept { return params_; }
     [[nodiscard]] const TypeAnnotation* getReturnType() const noexcept { return returnType_.get(); }
     [[nodiscard]] const BlockStmt* getBody() const noexcept { return body_.get(); }
+    [[nodiscard]] bool isAsync() const noexcept { return isAsync_; }
 
 private:
     std::vector<Param> params_;
     std::unique_ptr<TypeAnnotation> returnType_;
     std::unique_ptr<BlockStmt> body_;
+    bool isAsync_{false};
 };
 
 /// Await asynchronous expression: `await fetchUser(id)`

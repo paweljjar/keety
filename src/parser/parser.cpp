@@ -381,6 +381,10 @@ std::unique_ptr<ast::ClassDecl> Parser::parseClassDecl(bool isExported) {
             expect(lexer::TokenKind::Semicolon, diag::ErrorCode::ExpectedSemicolon, "expected ';' after field declaration");
 
             fields.push_back(ast::ClassField{fieldSpan, vis, isConst, std::move(fieldName), std::move(fType), std::move(fInit)});
+        } else if (check(lexer::TokenKind::KwAsync)) {
+            advance();
+            expect(lexer::TokenKind::KwFn, diag::ErrorCode::UnexpectedToken, "expected 'fn' after 'async'");
+            methods.push_back(parseFnDecl(true, false));
         } else if (check(lexer::TokenKind::KwFn)) {
             advance();
             methods.push_back(parseFnDecl(false, false));
@@ -1048,12 +1052,76 @@ std::unique_ptr<ast::Stmt> Parser::parseZonkStatement() {
 std::unique_ptr<ast::TypeAnnotation> Parser::parseSingleTypeAnnotation() {
     diag::SourceLocation startLoc = peek().span.start;
 
-    // 1. Parenthesized type: `(A | B)`
+    // 0. Async function type: `async (params) => Ret`
+    if (match(lexer::TokenKind::KwAsync)) {
+        diag::SourceLocation asyncLoc = lastConsumed_.span.start;
+        expect(lexer::TokenKind::LParen, diag::ErrorCode::UnexpectedToken, "expected '(' after async");
+        std::vector<ast::FuncTypeParam> fnParams;
+        if (!check(lexer::TokenKind::RParen)) {
+            do {
+                bool isMut = match(lexer::TokenKind::KwMut);
+                std::string pName;
+                std::unique_ptr<ast::TypeAnnotation> pType = nullptr;
+                if (check(lexer::TokenKind::Identifier, 0) && check(lexer::TokenKind::Colon, 1)) {
+                    pName = std::string(advance().lexeme);
+                    advance(); // consume ':'
+                    pType = parseTypeAnnotation();
+                } else {
+                    pType = parseTypeAnnotation();
+                }
+                fnParams.push_back(ast::FuncTypeParam{std::move(pName), std::move(pType), isMut});
+            } while (match(lexer::TokenKind::Comma));
+        }
+        expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after parameters");
+        expect(lexer::TokenKind::Arrow, diag::ErrorCode::UnexpectedToken, "expected '=>' after function type parameters");
+        auto retType = parseTypeAnnotation();
+        diag::SourceSpan span{asyncLoc, retType ? retType->getSpan().end : lastConsumed_.span.end};
+        return std::make_unique<ast::FunctionType>(span, std::move(fnParams), std::move(retType), true);
+    }
+
+    // 1. Parenthesized type `(A | B)` or Function type `(params) => Ret`
     if (match(lexer::TokenKind::LParen)) {
+        diag::SourceLocation parenStart = lastConsumed_.span.start;
+        bool isFnType = check(lexer::TokenKind::RParen) ||
+                        check(lexer::TokenKind::KwMut) ||
+                        (check(lexer::TokenKind::Identifier, 0) && check(lexer::TokenKind::Colon, 1));
+
+        if (isFnType) {
+            std::vector<ast::FuncTypeParam> fnParams;
+            if (!check(lexer::TokenKind::RParen)) {
+                do {
+                    bool isMut = match(lexer::TokenKind::KwMut);
+                    std::string pName;
+                    std::unique_ptr<ast::TypeAnnotation> pType = nullptr;
+                    if (check(lexer::TokenKind::Identifier, 0) && check(lexer::TokenKind::Colon, 1)) {
+                        pName = std::string(advance().lexeme);
+                        advance(); // consume ':'
+                        pType = parseTypeAnnotation();
+                    } else {
+                        pType = parseTypeAnnotation();
+                    }
+                    fnParams.push_back(ast::FuncTypeParam{std::move(pName), std::move(pType), isMut});
+                } while (match(lexer::TokenKind::Comma));
+            }
+            expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after parameters");
+            expect(lexer::TokenKind::Arrow, diag::ErrorCode::UnexpectedToken, "expected '=>' after function type parameters");
+            auto retType = parseTypeAnnotation();
+            diag::SourceSpan span{parenStart, retType ? retType->getSpan().end : lastConsumed_.span.end};
+            return std::make_unique<ast::FunctionType>(span, std::move(fnParams), std::move(retType), false);
+        }
+
         auto inner = parseTypeAnnotation();
         const auto& rParen = expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after parenthesized type");
+        if (match(lexer::TokenKind::Arrow)) {
+            auto retType = parseTypeAnnotation();
+            diag::SourceSpan span{parenStart, retType ? retType->getSpan().end : lastConsumed_.span.end};
+            std::vector<ast::FuncTypeParam> fnParams;
+            fnParams.push_back(ast::FuncTypeParam{"", std::move(inner), false});
+            return std::make_unique<ast::FunctionType>(span, std::move(fnParams), std::move(retType), false);
+        }
+
         if (inner) {
-            inner->setSpan(diag::SourceSpan{startLoc, rParen.span.end});
+            inner->setSpan(diag::SourceSpan{parenStart, rParen.span.end});
         }
         return inner;
     }
@@ -1380,8 +1448,29 @@ std::unique_ptr<ast::Expr> Parser::parsePrimaryExpression() {
         return std::make_unique<ast::TypeofExpr>(span, std::move(target));
     }
 
-    // 7. Lambda / Function literal: `fn (params): RetType { body }`
-    if (match(lexer::TokenKind::KwFn)) {
+    // 7. Lambda / Function literal: `[async] fn (params): RetType { body }`
+    bool isAsyncClosure = false;
+    bool hasClosure = false;
+    if (check(lexer::TokenKind::KwAsync)) {
+        advance();
+        if (check(lexer::TokenKind::KwFn)) {
+            advance();
+            isAsyncClosure = true;
+            hasClosure = true;
+        } else {
+            if (emitter_ && !panicMode_) {
+                diag::SourceSpan span = lastConsumed_.span;
+                emitter_->report(diag::Diagnostic::makeError(diag::ErrorCode::UnexpectedToken,
+                                                            "expected 'fn' after 'async'", span.start)
+                                     .withLabel(span, "unexpected token"));
+            }
+            return nullptr;
+        }
+    } else if (match(lexer::TokenKind::KwFn)) {
+        hasClosure = true;
+    }
+
+    if (hasClosure) {
         expect(lexer::TokenKind::LParen, diag::ErrorCode::UnexpectedToken, "expected '(' after fn");
         auto params = parseParamList();
         expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after parameters");
@@ -1402,7 +1491,7 @@ std::unique_ptr<ast::Expr> Parser::parsePrimaryExpression() {
         }
         auto body = parseBlockStatement();
         diag::SourceSpan span{startLoc, body ? body->getSpan().end : lastConsumed_.span.end};
-        return std::make_unique<ast::ClosureExpr>(span, std::move(params), std::move(retType), std::move(body));
+        return std::make_unique<ast::ClosureExpr>(span, std::move(params), std::move(retType), std::move(body), isAsyncClosure);
     }
 
     if (emitter_ && !panicMode_) {

@@ -2563,3 +2563,186 @@ TEST_CASE("Mutable Reference Borrow Checker - Map Element Borrowing (E4003)", "[
         REQUIRE(diag.footers[1].message == "update map elements using direct assignment ('m[k] = val;') or map methods");
     }
 }
+
+// =============================================================================
+// Mutable Reference Borrow Checker - Async Mutable Parameter (E4004)
+// =============================================================================
+
+TEST_CASE("Mutable Reference Borrow Checker - Async Mutable Parameter (E4004)", "[typechecker][borrow_checker][E4004]") {
+    SECTION("Reject mut parameter in async function (neg_async_mut)") {
+        ParseResult res(
+            "async fn process(mut x: int): void {}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::AsyncMutableParameter));
+    }
+
+    SECTION("Reject mut parameter in async function with multiple parameters") {
+        ParseResult res(
+            "async fn compute(id: int, mut buffer: array<int>): void {}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::AsyncMutableParameter));
+    }
+
+    SECTION("Reject mut parameter in async class method") {
+        ParseResult res(
+            "class NetworkService {\n"
+            "    pub async fn send(mut payload: array<int>): void {}\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::AsyncMutableParameter));
+    }
+
+    SECTION("Reject mut parameter in async closure literal") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    let f: (x: int) => void = async fn(mut x: int): void {};\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::AsyncMutableParameter));
+    }
+
+    SECTION("Reject mut parameter in async function type annotation") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    let handler: async (mut x: int) => void;\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::AsyncMutableParameter));
+    }
+
+    SECTION("Accept synchronous function with mut parameter") {
+        ParseResult res(
+            "fn modify(mut x: int): void {\n"
+            "    x = x + 1;\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::AsyncMutableParameter));
+    }
+
+    SECTION("Accept async function with by-value parameters") {
+        ParseResult res(
+            "async fn fetch(id: int, url: string): int {\n"
+            "    return id;\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::AsyncMutableParameter));
+    }
+
+    SECTION("Accept async function type with by-value parameters") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    let handler: async (id: int) => int;\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::AsyncMutableParameter));
+    }
+
+    SECTION("Verify diagnostic structure, labels, notes, and help footer") {
+        diag::SourceLocation loc1{2, 10, 20};
+        diag::SourceLocation loc2{2, 18, 28};
+        diag::SourceSpan span{loc1, loc2};
+
+        auto diag = typechecker::TypeChecker::createAsyncMutableParameterDiagnostic("x", span);
+
+        REQUIRE(diag.code == "E4004");
+        REQUIRE(diag.message == "mutable reference parameter in async callable: 'x'");
+        REQUIRE(diag.labels.size() == 1);
+        REQUIRE(diag.labels[0].isPrimary);
+        REQUIRE(diag.labels[0].message == "mutable reference parameter not allowed in async callable");
+        REQUIRE(diag.footers.size() == 2);
+        REQUIRE(diag.footers[0].kind == diag::DiagnosticFooter::Kind::Note);
+        REQUIRE(diag.footers[0].message == "Async functions cannot accept 'mut' parameters due to asynchronous lifetime extensions.");
+        REQUIRE(diag.footers[1].kind == diag::DiagnosticFooter::Kind::Help);
+        REQUIRE(diag.footers[1].message == "parameters of async callables must be passed by value to ensure thread-safety");
+    }
+}
+
+// =============================================================================
+// Mutable Reference Borrow Checker - Default Argument Mutable Borrow (E4006)
+// =============================================================================
+
+TEST_CASE("Mutable Reference Borrow Checker - Default Argument Mutable Borrow (E4006)", "[typechecker][borrow_checker][E4006]") {
+    SECTION("Reject default argument on mut parameter in free function") {
+        ParseResult res(
+            "fn reset(mut x: int = 0): void {}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::DefaultArgMutableBorrow));
+    }
+
+    SECTION("Reject default argument on mut parameter with preceding parameters") {
+        ParseResult res(
+            "fn configure(name: string, mut flag: bool = true): void {}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::DefaultArgMutableBorrow));
+    }
+
+    SECTION("Reject default argument on mut parameter in class method") {
+        ParseResult res(
+            "class Counter {\n"
+            "    pub fn tick(mut step: int = 1): void {}\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::DefaultArgMutableBorrow));
+    }
+
+    SECTION("Reject default argument on mut parameter in closure literal") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    let f: (mut x: int) => void = fn(mut x: int = 42): void {};\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::DefaultArgMutableBorrow));
+    }
+
+    SECTION("Accept default argument on by-value parameter") {
+        ParseResult res(
+            "fn compute(x: int = 10, y: int = 20): int {\n"
+            "    return x + y;\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::DefaultArgMutableBorrow));
+    }
+
+    SECTION("Accept mut parameter without default alongside by-value parameter with default") {
+        ParseResult res(
+            "fn process(mut x: int, delta: int = 1): void {\n"
+            "    x = x + delta;\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::DefaultArgMutableBorrow));
+    }
+
+    SECTION("Verify diagnostic structure, labels, notes, and help footer") {
+        diag::SourceLocation loc1{1, 10, 10};
+        diag::SourceLocation loc2{1, 20, 20};
+        diag::SourceSpan span{loc1, loc2};
+
+        auto diag = typechecker::TypeChecker::createDefaultArgMutableBorrowDiagnostic("x", span);
+
+        REQUIRE(diag.code == "E4006");
+        REQUIRE(diag.message == "mutable reference parameter cannot have default value: 'x'");
+        REQUIRE(diag.labels.size() == 1);
+        REQUIRE(diag.labels[0].isPrimary);
+        REQUIRE(diag.labels[0].message == "default value not allowed on 'mut' parameter");
+        REQUIRE(diag.footers.size() == 2);
+        REQUIRE(diag.footers[0].kind == diag::DiagnosticFooter::Kind::Note);
+        REQUIRE(diag.footers[0].message == "Default arguments cannot be supplied to mutable reference parameters.");
+        REQUIRE(diag.footers[1].kind == diag::DiagnosticFooter::Kind::Help);
+        REQUIRE(diag.footers[1].message == "mutable reference parameters ('mut') must bind to an explicit mutable l-value argument at the call site");
+    }
+}
+

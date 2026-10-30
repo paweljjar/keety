@@ -1075,6 +1075,124 @@ void TypeChecker::reportMapElementMutableBorrow(
         emitter_->report(createMapElementMutableBorrowDiagnostic(path, span));
     }
 }
+
+// =============================================================================
+// Mutable Reference Borrow Checker (Async & Default Args - E4004, E4006)
+// =============================================================================
+
+diag::Diagnostic TypeChecker::createAsyncMutableParameterDiagnostic(
+    std::string_view paramName,
+    diag::SourceSpan span) {
+    std::string msg = "mutable reference parameter in async callable";
+    if (!paramName.empty()) {
+        msg += ": '" + std::string(paramName) + "'";
+    }
+
+    auto d = diag::Diagnostic::makeError(
+        diag::ErrorCode::AsyncMutableParameter,
+        std::move(msg),
+        span.isValid() ? span.start : diag::SourceLocation{});
+
+    if (span.isValid()) {
+        d.labels.push_back(diag::DiagnosticLabel{
+            span,
+            "mutable reference parameter not allowed in async callable",
+            true
+        });
+    }
+
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Note,
+        "Async functions cannot accept 'mut' parameters due to asynchronous lifetime extensions."
+    });
+
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Help,
+        "parameters of async callables must be passed by value to ensure thread-safety"
+    });
+
+    return d;
+}
+
+void TypeChecker::reportAsyncMutableParameter(
+    std::string_view paramName,
+    diag::SourceSpan span) {
+    hasErrors_ = true;
+    if (emitter_ != nullptr) {
+        emitter_->report(createAsyncMutableParameterDiagnostic(paramName, span));
+    }
+}
+
+diag::Diagnostic TypeChecker::createDefaultArgMutableBorrowDiagnostic(
+    std::string_view paramName,
+    diag::SourceSpan span) {
+    std::string msg = "mutable reference parameter cannot have default value";
+    if (!paramName.empty()) {
+        msg += ": '" + std::string(paramName) + "'";
+    }
+
+    auto d = diag::Diagnostic::makeError(
+        diag::ErrorCode::DefaultArgMutableBorrow,
+        std::move(msg),
+        span.isValid() ? span.start : diag::SourceLocation{});
+
+    if (span.isValid()) {
+        d.labels.push_back(diag::DiagnosticLabel{
+            span,
+            "default value not allowed on 'mut' parameter",
+            true
+        });
+    }
+
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Note,
+        "Default arguments cannot be supplied to mutable reference parameters."
+    });
+
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Help,
+        "mutable reference parameters ('mut') must bind to an explicit mutable l-value argument at the call site"
+    });
+
+    return d;
+}
+
+void TypeChecker::reportDefaultArgMutableBorrow(
+    std::string_view paramName,
+    diag::SourceSpan span) {
+    hasErrors_ = true;
+    if (emitter_ != nullptr) {
+        emitter_->report(createDefaultArgMutableBorrowDiagnostic(paramName, span));
+    }
+}
+
+void TypeChecker::checkTypeAnnotationValidity(const ast::TypeAnnotation* annot) {
+    if (!annot) return;
+    if (const auto* fnType = dynamic_cast<const ast::FunctionType*>(annot)) {
+        if (fnType->isAsync()) {
+            for (const auto& p : fnType->getParams()) {
+                if (p.isMut) {
+                    reportAsyncMutableParameter(p.name, fnType->getSpan());
+                }
+            }
+        }
+        for (const auto& p : fnType->getParams()) {
+            checkTypeAnnotationValidity(p.type.get());
+        }
+        checkTypeAnnotationValidity(fnType->getReturnType());
+    } else if (const auto* u = dynamic_cast<const ast::UnionType*>(annot)) {
+        for (const auto& v : u->getVariants()) {
+            checkTypeAnnotationValidity(v.get());
+        }
+    } else if (const auto* arr = dynamic_cast<const ast::ArrayType*>(annot)) {
+        checkTypeAnnotationValidity(arr->getElementType());
+    } else if (const auto* map = dynamic_cast<const ast::MapType*>(annot)) {
+        checkTypeAnnotationValidity(map->getKeyType());
+        checkTypeAnnotationValidity(map->getValueType());
+    }
+}
+
+
 bool TypeChecker::checkAssignment(
     TypePtr expectedType,
     TypePtr actualType,
@@ -1159,6 +1277,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
 
 bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
     if (const auto* varDecl = dynamic_cast<const ast::VarDecl*>(&decl)) {
+        checkTypeAnnotationValidity(varDecl->getType());
         auto declType = Type::fromAnnotation(varDecl->getType());
         auto sym = std::make_shared<sema::Symbol>(varDecl->getName(), sema::SymbolKind::Variable, varDecl->getSpan());
         sym->setTypeAnnotation(varDecl->getType());
@@ -1171,6 +1290,7 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
             checkAssignment(declType, initType, varDecl->getInitializer()->getSpan(), "variable initialization");
         }
     } else if (const auto* constDecl = dynamic_cast<const ast::ConstDecl*>(&decl)) {
+        checkTypeAnnotationValidity(constDecl->getType());
         auto declType = Type::fromAnnotation(constDecl->getType());
         auto sym = std::make_shared<sema::Symbol>(constDecl->getName(), sema::SymbolKind::Constant, constDecl->getSpan());
         sym->setTypeAnnotation(constDecl->getType());
@@ -1183,6 +1303,7 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
             checkAssignment(declType, initType, constDecl->getInitializer()->getSpan(), "constant initialization");
         }
     } else if (const auto* defDecl = dynamic_cast<const ast::DefineDecl*>(&decl)) {
+        checkTypeAnnotationValidity(defDecl->getType());
         auto declType = Type::fromAnnotation(defDecl->getType());
         auto sym = std::make_shared<sema::Symbol>(defDecl->getName(), sema::SymbolKind::Define, defDecl->getSpan());
         sym->setTypeAnnotation(defDecl->getType());
@@ -1195,10 +1316,20 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
             checkAssignment(declType, initType, defDecl->getValue()->getSpan(), "define initialization");
         }
     } else if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(&decl)) {
+        checkTypeAnnotationValidity(fnDecl->getReturnType());
         auto retType = Type::fromAnnotation(fnDecl->getReturnType());
         auto fnScope = scope.createChild(sema::ScopeKind::Function);
 
         for (const auto& param : fnDecl->getParams()) {
+            checkTypeAnnotationValidity(param.type.get());
+            if (param.isMut) {
+                if (fnDecl->isAsync()) {
+                    reportAsyncMutableParameter(param.name, param.span);
+                }
+                if (param.defaultValue) {
+                    reportDefaultArgMutableBorrow(param.name, param.defaultValue->getSpan().isValid() ? param.defaultValue->getSpan() : param.span);
+                }
+            }
             auto pType = Type::fromAnnotation(param.type.get());
             auto pSym = std::make_shared<sema::Symbol>(param.name, sema::SymbolKind::Parameter, param.span);
             pSym->setTypeAnnotation(param.type.get());
@@ -1223,6 +1354,7 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
         auto classScope = scope.createChild(sema::ScopeKind::Class);
 
         for (const auto& field : classDecl->getFields()) {
+            checkTypeAnnotationValidity(field.type.get());
             auto fType = Type::fromAnnotation(field.type.get());
             auto fSym = std::make_shared<sema::Symbol>(field.name, sema::SymbolKind::Field, field.span);
             fSym->setTypeAnnotation(field.type.get());
@@ -2204,7 +2336,17 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
     if (const auto* closure = dynamic_cast<const ast::ClosureExpr*>(&expr)) {
         auto fnScope = scope.createChild(sema::ScopeKind::Function);
         std::vector<TypePtr> paramTypes;
+        checkTypeAnnotationValidity(closure->getReturnType());
         for (const auto& p : closure->getParams()) {
+            checkTypeAnnotationValidity(p.type.get());
+            if (p.isMut) {
+                if (closure->isAsync()) {
+                    reportAsyncMutableParameter(p.name, p.span);
+                }
+                if (p.defaultValue) {
+                    reportDefaultArgMutableBorrow(p.name, p.defaultValue->getSpan().isValid() ? p.defaultValue->getSpan() : p.span);
+                }
+            }
             auto pType = Type::fromAnnotation(p.type.get());
             paramTypes.push_back(pType ? pType : Type::unknownType());
             auto pSym = std::make_shared<sema::Symbol>(p.name, sema::SymbolKind::Parameter, p.span);
@@ -2212,6 +2354,11 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             pSym->setMutable(p.isMut);
             pSym->setConst(!p.isMut);
             fnScope->define(pSym);
+
+            if (p.defaultValue) {
+                auto defType = inferType(*p.defaultValue, *fnScope, pType);
+                checkAssignment(pType, defType, p.defaultValue->getSpan(), "parameter default value");
+            }
         }
         auto retType = Type::fromAnnotation(closure->getReturnType());
         if (closure->getBody()) {
@@ -2221,7 +2368,7 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             checkExhaustiveness(closure->getBody(), "<anonymous closure>", retType, closure->getSpan());
             currentFunctionReturnType_ = prevRet;
         }
-        return Type::function(std::move(paramTypes), retType ? retType : Type::voidType());
+        return Type::function(std::move(paramTypes), retType ? retType : Type::voidType(), closure->isAsync());
     }
 
     if (const auto* index = dynamic_cast<const ast::IndexExpr*>(&expr)) {

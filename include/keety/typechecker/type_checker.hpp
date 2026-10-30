@@ -185,6 +185,16 @@ public:
         std::string_view path,
         diag::SourceSpan span);
 
+    // --- Mutable Reference Borrow Checker (Async & Default Args - E4004, E4006) ---
+
+    [[nodiscard]] static diag::Diagnostic createAsyncMutableParameterDiagnostic(
+        std::string_view paramName,
+        diag::SourceSpan span);
+
+    [[nodiscard]] static diag::Diagnostic createDefaultArgMutableBorrowDiagnostic(
+        std::string_view paramName,
+        diag::SourceSpan span);
+
 private:
     diag::DiagnosticEmitter* emitter_{nullptr};
     bool hasErrors_{false};
@@ -201,6 +211,9 @@ private:
     void reportDuplicateMutableBorrow(std::string_view path, diag::SourceSpan firstSpan, diag::SourceSpan duplicateSpan);
     void reportContainerAndElementBorrow(std::string_view containerPath, std::string_view elementPath, diag::SourceSpan firstSpan, diag::SourceSpan secondSpan);
     void reportMapElementMutableBorrow(std::string_view path, diag::SourceSpan span);
+    void reportAsyncMutableParameter(std::string_view paramName, diag::SourceSpan span);
+    void reportDefaultArgMutableBorrow(std::string_view paramName, diag::SourceSpan span);
+    void checkTypeAnnotationValidity(const ast::TypeAnnotation* annot);
 };
 
 } // namespace keety::typechecker
