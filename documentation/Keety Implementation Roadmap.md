@@ -66,7 +66,7 @@ This document specifies the operational development plan for the `keety` compile
 
 #### **Phase 3.1: Module Resolver & Cyclic Dependency Detection (`keety::resolver`)**
 - [x] **Task 3.1.1:** Implement module path resolution (standard library modules, third-party `keet_modules/`, local `./relative` paths).
-- [ ] **Task 3.1.2:** Construct directed dependency graph $G = (V, E)$.
+- [x] **Task 3.1.2:** Construct directed dependency graph $G = (V, E)$.
 - [ ] **Task 3.1.3:** Implement Tarjan's Strongly Connected Components (SCC) algorithm to detect cycles and emit `E1001`.
 - [ ] **Task 3.1.4:** Compute deterministic topological initialization order (post-order DFS) and single-instantiation deduplication for diamond imports.
 

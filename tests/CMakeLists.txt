@@ -35,6 +35,7 @@ add_executable(keety_unit_tests
     unit/test_zonk_disambiguation.cpp
     unit/test_loop_switch_labels.cpp
     unit/test_module_path_resolver.cpp
+    unit/test_module_graph.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE

@@ -7,6 +7,7 @@ add_library(keety_core STATIC
     lexer/lexer.cpp
     parser/parser.cpp
     resolver/module_path_resolver.cpp
+    resolver/module_graph.cpp
 )
 
 target_include_directories(keety_core PUBLIC
