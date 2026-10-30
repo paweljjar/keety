@@ -23,6 +23,7 @@ add_library(keety_core STATIC
     ir/module.cpp
     ir/ast_lowerer.cpp
     ir/liveness_analysis.cpp
+    ir/move_insertion.cpp
 )
 
 target_include_directories(keety_core PUBLIC
