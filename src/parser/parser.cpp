@@ -516,6 +516,38 @@ bool Parser::hasTopLevelSemicolonInParens() {
     return false;
 }
 
+bool Parser::isZonkRecoveryBlock() {
+    // A scoped recovery block always requires parentheses: `zonk ( [ err ] ) { ... }`
+    // Consequently, `expr zonk {}` is unambiguously parsed as a fallback MapLit.
+    if (!check(lexer::TokenKind::LParen)) {
+        return false;
+    }
+
+    size_t k = 0;
+    int parenDepth = 0;
+
+    while (true) {
+        const auto& tok = peek(k);
+        if (tok.is(lexer::TokenKind::Eof) || tok.is(lexer::TokenKind::Semicolon)) {
+            return false;
+        }
+
+        if (tok.is(lexer::TokenKind::LParen)) {
+            parenDepth++;
+        } else if (tok.is(lexer::TokenKind::RParen)) {
+            parenDepth--;
+            if (parenDepth == 0) {
+                // Found matching closing paren of `zonk (...)`
+                // If '{' follows ')', it is parsed as a recovery Block.
+                // Otherwise it is parsed as a parenthesized fallback expression.
+                return peek(k + 1).is(lexer::TokenKind::LBrace);
+            }
+        }
+
+        k++;
+    }
+}
+
 std::unique_ptr<ast::Stmt> Parser::parseIfStatement() {
     diag::SourceLocation startLoc = lastConsumed_.span.start;
     expect(lexer::TokenKind::LParen, diag::ErrorCode::UnexpectedToken, "expected '(' after 'if'");
@@ -1114,18 +1146,20 @@ std::unique_ptr<ast::Expr> Parser::parseExpression(int minPrecedence) {
         }
 
         if (op == lexer::TokenKind::KwZonk) {
-            // Error recovery expression: fallback or block form
-            if (check(lexer::TokenKind::LParen) && check(lexer::TokenKind::LBrace, 2)) {
-                // Scoped block: expr zonk (err) { ... }
+            // Error recovery expression: fallback or scoped recovery block form
+            if (isZonkRecoveryBlock()) {
+                // Scoped block form: `expr zonk ( [ err ] ) Block`
                 advance(); // consume '('
-                const auto& errTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected error variable");
-                std::string errName = std::string(errTok.lexeme);
-                expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')'");
+                std::string errName;
+                if (check(lexer::TokenKind::Identifier) || check(lexer::TokenKind::BlankIdent)) {
+                    errName = std::string(advance().lexeme);
+                }
+                expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after zonk error parameter");
                 auto block = parseBlockStatement();
                 diag::SourceSpan span{startLoc, block ? block->getSpan().end : lastConsumed_.span.end};
                 left = std::make_unique<ast::ZonkExpr>(span, std::move(left), nullptr, std::move(errName), std::move(block));
             } else {
-                // Fallback value: expr zonk fallbackExpr
+                // Fallback value form: `expr zonk fallbackExpr`
                 auto fallback = parseExpression(prec);
                 diag::SourceSpan span{startLoc, fallback ? fallback->getSpan().end : lastConsumed_.span.end};
                 left = std::make_unique<ast::ZonkExpr>(span, std::move(left), std::move(fallback));

@@ -41,6 +41,7 @@ public:
 private:
     // --- Disambiguation helpers ---
     bool hasTopLevelSemicolonInParens();
+    bool isZonkRecoveryBlock();
 
     // --- Pratt Expression Parsing ---
     std::unique_ptr<ast::Expr> parsePrimaryExpression();
