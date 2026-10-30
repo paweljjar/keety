@@ -429,6 +429,10 @@ std::unique_ptr<ast::BlockStmt> Parser::parseBlockStatement() {
 }
 
 std::unique_ptr<ast::Stmt> Parser::parseStatement() {
+    if (match(lexer::TokenKind::Semicolon)) {
+        // Empty statement: `;`
+        return nullptr;
+    }
     if (check(lexer::TokenKind::LBrace)) {
         return parseBlockStatement();
     }
@@ -546,6 +550,38 @@ bool Parser::isZonkRecoveryBlock() {
 
         k++;
     }
+    return false;
+}
+
+bool Parser::isForInLoop() {
+    // Note: Called immediately AFTER consuming the opening '(' of the for header!
+    size_t k = 0;
+    int parenDepth = 1;
+
+    while (true) {
+        const auto& tok = peek(k);
+        if (tok.is(lexer::TokenKind::Eof) || tok.is(lexer::TokenKind::LBrace) || tok.is(lexer::TokenKind::RBrace)) {
+            return false;
+        }
+
+        if (tok.is(lexer::TokenKind::LParen)) {
+            parenDepth++;
+        } else if (tok.is(lexer::TokenKind::RParen)) {
+            parenDepth--;
+            if (parenDepth == 0) {
+                return false;
+            }
+        } else if (parenDepth == 1) {
+            if (tok.is(lexer::TokenKind::KwIn)) {
+                return true;
+            }
+            if (tok.is(lexer::TokenKind::Semicolon)) {
+                return false;
+            }
+        }
+
+        k++;
+    }
 }
 
 std::unique_ptr<ast::Stmt> Parser::parseIfStatement() {
@@ -636,7 +672,83 @@ std::unique_ptr<ast::Stmt> Parser::parseForStatement() {
     diag::SourceLocation startLoc = lastConsumed_.span.start;
     expect(lexer::TokenKind::LParen, diag::ErrorCode::UnexpectedToken, "expected '(' after 'for'");
 
-    // Simple for loop: for (init; cond; post)
+    if (isForInLoop()) {
+        // ForInClause = ForInBinding "in" Expression .
+        bool isConst = false;
+        bool hasBindingKw = false;
+        if (match(lexer::TokenKind::KwConst)) {
+            isConst = true;
+            hasBindingKw = true;
+        } else if (match(lexer::TokenKind::KwLet)) {
+            isConst = false;
+            hasBindingKw = true;
+        }
+
+        // First binding
+        std::string firstIdent;
+        if (check(lexer::TokenKind::Identifier) || check(lexer::TokenKind::BlankIdent)) {
+            firstIdent = std::string(advance().lexeme);
+        } else {
+            expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected variable name in for-in loop");
+        }
+
+        std::unique_ptr<ast::TypeAnnotation> firstType = nullptr;
+        if (hasBindingKw) {
+            expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' type annotation in for-in loop");
+            firstType = parseTypeAnnotation();
+        }
+
+        // Optional second binding (key-value pair or index-value pair)
+        std::string secondIdent;
+        std::unique_ptr<ast::TypeAnnotation> secondType = nullptr;
+        if (match(lexer::TokenKind::Comma)) {
+            if (check(lexer::TokenKind::Identifier) || check(lexer::TokenKind::BlankIdent)) {
+                secondIdent = std::string(advance().lexeme);
+            } else {
+                expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected second variable name in for-in loop");
+            }
+
+            if (hasBindingKw) {
+                expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' type annotation for second for-in variable");
+                secondType = parseTypeAnnotation();
+            }
+        }
+
+        expect(lexer::TokenKind::KwIn, diag::ErrorCode::UnexpectedToken, "expected 'in' in for-in loop");
+        auto collection = parseExpression();
+        expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after for-in header");
+
+        std::string label;
+        if (match(lexer::TokenKind::KwAs)) {
+            const auto& lTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected for loop label");
+            label = std::string(lTok.lexeme);
+        }
+
+        auto body = parseBlockStatement();
+        diag::SourceSpan span{startLoc, body ? body->getSpan().end : lastConsumed_.span.end};
+
+        std::string keyName;
+        std::string valueName;
+        std::unique_ptr<ast::TypeAnnotation> keyType = nullptr;
+        std::unique_ptr<ast::TypeAnnotation> valueType = nullptr;
+
+        if (secondIdent.empty()) {
+            keyName = "";
+            valueName = std::move(firstIdent);
+            valueType = std::move(firstType);
+        } else {
+            keyName = std::move(firstIdent);
+            keyType = std::move(firstType);
+            valueName = std::move(secondIdent);
+            valueType = std::move(secondType);
+        }
+
+        return std::make_unique<ast::ForInStmt>(span, isConst, std::move(keyName), std::move(valueName),
+                                                std::move(collection), std::move(body), std::move(label),
+                                                std::move(keyType), std::move(valueType));
+    }
+
+    // Classic 3-part for loop: for (init; cond; post)
     std::unique_ptr<ast::Stmt> init = nullptr;
     if (!check(lexer::TokenKind::Semicolon)) {
         if (match(lexer::TokenKind::KwLet) || match(lexer::TokenKind::KwConst)) {
@@ -658,11 +770,17 @@ std::unique_ptr<ast::Stmt> Parser::parseForStatement() {
     }
     expect(lexer::TokenKind::Semicolon, diag::ErrorCode::ExpectedSemicolon, "expected ';' after for-init");
 
-    auto cond = parseExpression();
+    std::unique_ptr<ast::Expr> cond = nullptr;
+    if (!check(lexer::TokenKind::Semicolon)) {
+        cond = parseExpression();
+    }
     expect(lexer::TokenKind::Semicolon, diag::ErrorCode::ExpectedSemicolon, "expected ';' after for-condition");
 
-    auto postExpr = parseExpression();
-    auto post = std::make_unique<ast::ExprStmt>(postExpr->getSpan(), std::move(postExpr));
+    std::unique_ptr<ast::Stmt> post = nullptr;
+    if (!check(lexer::TokenKind::RParen)) {
+        auto postExpr = parseExpression();
+        post = std::make_unique<ast::ExprStmt>(postExpr->getSpan(), std::move(postExpr));
+    }
 
     expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after for-header");
 
@@ -721,7 +839,9 @@ std::unique_ptr<ast::Stmt> Parser::parseSwitchStatement() {
         if (match(lexer::TokenKind::KwCase)) {
             expect(lexer::TokenKind::LParen, diag::ErrorCode::UnexpectedToken, "expected '(' after 'case'");
             std::vector<std::unique_ptr<ast::Expr>> vals;
-            vals.push_back(parseExpression());
+            do {
+                vals.push_back(parseExpression());
+            } while (match(lexer::TokenKind::Comma));
             expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after case value");
             auto caseBody = parseBlockStatement();
             diag::SourceSpan caseSpan{caseStart, caseBody->getSpan().end};

@@ -121,10 +121,13 @@ class ForInStmt : public Stmt {
 public:
     ForInStmt(diag::SourceSpan span, bool isConst, std::string keyName, std::string valueName,
               std::unique_ptr<Expr> collection, std::unique_ptr<BlockStmt> body,
-              std::string label = "")
+              std::string label = "",
+              std::unique_ptr<TypeAnnotation> keyType = nullptr,
+              std::unique_ptr<TypeAnnotation> valueType = nullptr)
         : Stmt(span), isConst_(isConst), keyName_(std::move(keyName)),
           valueName_(std::move(valueName)), collection_(std::move(collection)),
-          body_(std::move(body)), label_(std::move(label)) {}
+          body_(std::move(body)), label_(std::move(label)),
+          keyType_(std::move(keyType)), valueType_(std::move(valueType)) {}
 
     [[nodiscard]] bool isConst() const noexcept { return isConst_; }
     [[nodiscard]] const std::string& getKeyName() const noexcept { return keyName_; }
@@ -134,6 +137,8 @@ public:
     [[nodiscard]] const BlockStmt* getBody() const noexcept { return body_.get(); }
     [[nodiscard]] const std::string& getLabel() const noexcept { return label_; }
     [[nodiscard]] bool hasLabel() const noexcept { return !label_.empty(); }
+    [[nodiscard]] const TypeAnnotation* getKeyType() const noexcept { return keyType_.get(); }
+    [[nodiscard]] const TypeAnnotation* getValueType() const noexcept { return valueType_.get(); }
 
 private:
     bool isConst_{true};
@@ -142,6 +147,8 @@ private:
     std::unique_ptr<Expr> collection_;
     std::unique_ptr<BlockStmt> body_;
     std::string label_;
+    std::unique_ptr<TypeAnnotation> keyType_;
+    std::unique_ptr<TypeAnnotation> valueType_;
 };
 
 /// Switch case branch: `case (val) { ... }` or `default { ... }`

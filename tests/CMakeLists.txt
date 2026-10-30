@@ -33,6 +33,7 @@ add_executable(keety_unit_tests
     unit/test_pratt_parser.cpp
     unit/test_header_disambiguation.cpp
     unit/test_zonk_disambiguation.cpp
+    unit/test_loop_switch_labels.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE

@@ -38,7 +38,7 @@ This document specifies the operational development plan for the `keety` compile
 
 ---
 
-### **Stage II: Front-End (Lexer, Parser & AST)** `[CURRENT]`
+### **Stage II: Front-End (Lexer, Parser & AST)**
 
 #### **Phase 2.1: Lexical Analysis (`keety::lexer`)**
 - [x] **Task 2.1.1:** Define `TokenKind` (keywords, literals, operators, delimiters, special tokens) and the `Token` struct.
@@ -58,11 +58,11 @@ This document specifies the operational development plan for the `keety` compile
 - [x] **Task 2.3.2:** Implement Pratt / Precedence Climbing parser for binary and unary expressions according to formal operator precedence tables.
 - [x] **Task 2.3.3:** Implement header disambiguation for `if`, `while`, and `switch` statements (`IfHeaderInit` with semicolon vs simple conditional expression).
 - [x] **Task 2.3.4:** Implement `zonk` suffix disambiguation: fallback expression `expr zonk (fallback)` vs recovery block `expr zonk (err) { ... }`.
-- [ ] **Task 2.3.5:** Parse loops and switch statements with labels (`as labelName`) and enforce mandatory statement-terminating semicolons (`;`).
+- [x] **Task 2.3.5:** Parse loops and switch statements with labels (`as labelName`) and enforce mandatory statement-terminating semicolons (`;`).
 
 ---
 
-### **Stage III: Module Dependency Graph & Semantic Analysis**
+### **Stage III: Module Dependency Graph & Semantic Analysis** `[CURRENT]`
 
 #### **Phase 3.1: Module Resolver & Cyclic Dependency Detection (`keety::resolver`)**
 - [ ] **Task 3.1.1:** Implement module path resolution (standard library modules, third-party `keet_modules/`, local `./relative` paths).
