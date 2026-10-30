@@ -293,8 +293,8 @@ diag::Diagnostic TypeChecker::createImplicitWideningDiagnostic(
     TypePtr toType,
     diag::SourceSpan span,
     std::string_view contextDesc) {
-    std::string fromStr = fromType ? fromType->toString() : "<unknown>";
-    std::string toStr = toType ? toType->toString() : "<unknown>";
+    std::string fromStr = fromType ? (fromType->isLiteral() ? fromType->getBaseType()->toString() : fromType->toString()) : "<unknown>";
+    std::string toStr = toType ? (toType->isLiteral() ? toType->getBaseType()->toString() : toType->toString()) : "<unknown>";
     std::string msg = "implicit numeric conversion from '" + fromStr + "' to '" + toStr + "' is disallowed";
     if (!contextDesc.empty()) {
         msg += " in " + std::string(contextDesc);
@@ -338,8 +338,8 @@ diag::Diagnostic TypeChecker::createBinaryCoercionDiagnostic(
     lexer::TokenKind op,
     diag::SourceSpan span) {
     std::string opStr = std::string(lexer::getTokenKindName(op));
-    std::string leftStr = leftType ? leftType->toString() : "<unknown>";
-    std::string rightStr = rightType ? rightType->toString() : "<unknown>";
+    std::string leftStr = leftType ? (leftType->isLiteral() ? leftType->getBaseType()->toString() : leftType->toString()) : "<unknown>";
+    std::string rightStr = rightType ? (rightType->isLiteral() ? rightType->getBaseType()->toString() : rightType->toString()) : "<unknown>";
 
     std::string msg = "implicit numeric conversion between '" + leftStr +
                       "' and '" + rightStr + "' in binary expression is disallowed";
@@ -496,18 +496,8 @@ bool TypeChecker::checkAssignment(
         return false;
     }
 
-    // Check union compatibility (if expectedType is a union containing actualType)
-    if (expectedType->isUnion()) {
-        const auto& unionT = static_cast<const UnionType&>(*expectedType);
-        for (const auto& variant : unionT.getVariants()) {
-            if (variant && variant->equals(*actualType)) {
-                return true;
-            }
-        }
-    }
-
-    // Exact structural type equality
-    if (!expectedType->equals(*actualType)) {
+    // Check assignability using union subtyping & canonical algebra
+    if (!actualType->isAssignableTo(*expectedType)) {
         reportTypeMismatch(expectedType, actualType, span, contextDesc);
         return false;
     }
@@ -744,17 +734,51 @@ bool TypeChecker::checkZeroCoercion(const ast::Stmt& stmt, sema::Scope& scope) {
 TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePtr contextualType) {
     if (const auto* lit = dynamic_cast<const ast::LiteralExpr*>(&expr)) {
         switch (lit->getLiteralKind()) {
-        case lexer::TokenKind::IntLiteral:
-            return Type::intType();
-        case lexer::TokenKind::FloatLiteral:
-            return Type::floatType();
-        case lexer::TokenKind::StringLiteral:
-            return Type::stringType();
-        case lexer::TokenKind::CharLiteral:
-            return Type::charType();
+        case lexer::TokenKind::IntLiteral: {
+            int64_t val = 0;
+            try {
+                val = std::stoll(lit->getRawText(), nullptr, 0);
+            } catch (...) {}
+            return Type::literalInt(val);
+        }
+        case lexer::TokenKind::FloatLiteral: {
+            double val = 0.0;
+            try {
+                val = std::stod(lit->getRawText());
+            } catch (...) {}
+            return Type::literalFloat(val);
+        }
+        case lexer::TokenKind::CharLiteral: {
+            char c = lit->getRawText().empty() ? '\0' : lit->getRawText()[0];
+            return Type::literalChar(c);
+        }
+        case lexer::TokenKind::StringLiteral: {
+            std::string raw = lit->getRawText();
+            // Quote delimiter rule: 1-char in single quotes is char
+            if (raw.size() >= 2 && raw.front() == '\'' && raw.back() == '\'') {
+                std::string inner = raw.substr(1, raw.size() - 2);
+                if (inner.size() == 1) {
+                    return Type::literalChar(inner[0]);
+                }
+                if (inner.size() == 2 && inner[0] == '\\') {
+                    char c = inner[1];
+                    if (c == 'n') c = '\n';
+                    else if (c == 't') c = '\t';
+                    else if (c == 'r') c = '\r';
+                    else if (c == '0') c = '\0';
+                    return Type::literalChar(c);
+                }
+                return Type::literalString(inner);
+            }
+            if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') {
+                raw = raw.substr(1, raw.size() - 2);
+            }
+            return Type::literalString(raw);
+        }
         case lexer::TokenKind::KwTrue:
+            return Type::literalBool(true);
         case lexer::TokenKind::KwFalse:
-            return Type::boolType();
+            return Type::literalBool(false);
         case lexer::TokenKind::KwNull:
             return Type::nullType();
         default:
@@ -791,6 +815,17 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
 
     if (const auto* unary = dynamic_cast<const ast::UnaryExpr*>(&expr)) {
         auto opType = unary->getOperand() ? inferType(*unary->getOperand(), scope) : Type::unknownType();
+        if (opType->isLiteral()) {
+            const auto& lit = static_cast<const LiteralType&>(*opType);
+            if (unary->getOp() == lexer::TokenKind::Minus) {
+                if (lit.getLiteralKind() == LiteralKind::Int) return Type::literalInt(-lit.getIntValue());
+                if (lit.getLiteralKind() == LiteralKind::Float) return Type::literalFloat(-lit.getFloatValue());
+            } else if (unary->getOp() == lexer::TokenKind::Plus) {
+                return opType;
+            } else if (unary->getOp() == lexer::TokenKind::Exclaim) {
+                if (lit.getLiteralKind() == LiteralKind::Bool) return Type::literalBool(!lit.getBoolValue());
+            }
+        }
         if (unary->getOp() == lexer::TokenKind::Exclaim) {
             return Type::boolType();
         }

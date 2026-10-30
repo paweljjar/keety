@@ -36,6 +36,7 @@ public:
     std::unique_ptr<ast::Stmt> parseStatement();
     std::unique_ptr<ast::BlockStmt> parseBlockStatement();
     std::unique_ptr<ast::TypeAnnotation> parseTypeAnnotation();
+    std::unique_ptr<ast::TypeAnnotation> parseSingleTypeAnnotation();
     std::unique_ptr<ast::Expr> parseExpression(int minPrecedence = 0);
 
 private:

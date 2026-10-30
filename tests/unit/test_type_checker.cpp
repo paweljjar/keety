@@ -626,4 +626,310 @@ TEST_CASE("Task 3.3.3: Contextual Typing - Non-Empty Collection Elements Checked
     }
 }
 
+// =============================================================================
+// Task 3.3.4: Canonical Union Algebra Normalization
+// =============================================================================
+
+TEST_CASE("Task 3.3.4: Union Algebra - Flattening (Associativity)", "[typechecker][union]") {
+    SECTION("Direct API: A | (B | C) flattens to A | B | C") {
+        auto tA = typechecker::Type::intType();
+        auto tB = typechecker::Type::stringType();
+        auto tC = typechecker::Type::boolType();
+
+        auto innerUnion = typechecker::Type::unionOf({tB, tC});
+        auto outerUnion = typechecker::Type::unionOf({tA, innerUnion});
+
+        REQUIRE(outerUnion->isUnion());
+        const auto& u = static_cast<const typechecker::UnionType&>(*outerUnion);
+        REQUIRE(u.getVariants().size() == 3);
+
+        // Flattened directly
+        auto directUnion = typechecker::Type::unionOf({tA, tB, tC});
+        REQUIRE(outerUnion->equals(*directUnion));
+    }
+
+    SECTION("Direct API: ((A | B) | (C | D)) flattens recursively") {
+        auto tA = typechecker::Type::intType();
+        auto tB = typechecker::Type::stringType();
+        auto tC = typechecker::Type::boolType();
+        auto tD = typechecker::Type::charType();
+
+        auto u1 = typechecker::Type::unionOf({tA, tB});
+        auto u2 = typechecker::Type::unionOf({tC, tD});
+        auto total = typechecker::Type::unionOf({u1, u2});
+
+        REQUIRE(total->isUnion());
+        const auto& u = static_cast<const typechecker::UnionType&>(*total);
+        REQUIRE(u.getVariants().size() == 4);
+    }
+
+    SECTION("Source AST: Parenthesized union in declaration flattens") {
+        ParseResult res("let x: int | (string | bool) = 1;");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+}
+
+TEST_CASE("Task 3.3.4: Union Algebra - Commutativity and Deduplication", "[typechecker][union]") {
+    SECTION("Direct API: int | string is equal to string | int") {
+        auto u1 = typechecker::Type::unionOf({typechecker::Type::intType(), typechecker::Type::stringType()});
+        auto u2 = typechecker::Type::unionOf({typechecker::Type::stringType(), typechecker::Type::intType()});
+
+        REQUIRE(u1->equals(*u2));
+        REQUIRE(u2->equals(*u1));
+        REQUIRE(u1->toString() == u2->toString());
+    }
+
+    SECTION("Direct API: int | string | int deduplicates to int | string") {
+        auto u = typechecker::Type::unionOf({
+            typechecker::Type::intType(),
+            typechecker::Type::stringType(),
+            typechecker::Type::intType()
+        });
+
+        REQUIRE(u->isUnion());
+        const auto& unionT = static_cast<const typechecker::UnionType&>(*u);
+        REQUIRE(unionT.getVariants().size() == 2);
+
+        auto expected = typechecker::Type::unionOf({typechecker::Type::intType(), typechecker::Type::stringType()});
+        REQUIRE(u->equals(*expected));
+    }
+
+    SECTION("Direct API: complex commutativity with null") {
+        auto u1 = typechecker::Type::unionOf({
+            typechecker::Type::intType(),
+            typechecker::Type::stringType(),
+            typechecker::Type::nullType()
+        });
+        auto u2 = typechecker::Type::unionOf({
+            typechecker::Type::nullType(),
+            typechecker::Type::intType(),
+            typechecker::Type::stringType()
+        });
+
+        REQUIRE(u1->equals(*u2));
+        REQUIRE(u1->toString() == u2->toString());
+    }
+
+    SECTION("Source AST: Duplicate variants in type annotation parse and succeed") {
+        ParseResult res("let x: int | string | int = 10;");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+}
+
+TEST_CASE("Task 3.3.4: Union Algebra - Subtype and Literal Absorption", "[typechecker][union]") {
+    SECTION("Direct API: 200 | 404 | int normalizes canonically to int") {
+        auto u = typechecker::Type::unionOf({
+            typechecker::Type::literalInt(200),
+            typechecker::Type::literalInt(404),
+            typechecker::Type::intType()
+        });
+
+        // Subtype absorption reduces the union to int
+        REQUIRE(u->isInt());
+        REQUIRE_FALSE(u->isUnion());
+        REQUIRE(u->equals(*typechecker::Type::intType()));
+        REQUIRE(u->toString() == "int");
+    }
+
+    SECTION("Direct API: 'a' | 'b' | char normalizes to char") {
+        auto u = typechecker::Type::unionOf({
+            typechecker::Type::literalChar('a'),
+            typechecker::Type::literalChar('b'),
+            typechecker::Type::charType()
+        });
+
+        REQUIRE(u->isChar());
+        REQUIRE_FALSE(u->isUnion());
+        REQUIRE(u->equals(*typechecker::Type::charType()));
+    }
+
+    SECTION("Direct API: \"read\" | \"write\" | string normalizes to string") {
+        auto u = typechecker::Type::unionOf({
+            typechecker::Type::literalString("read"),
+            typechecker::Type::literalString("write"),
+            typechecker::Type::stringType()
+        });
+
+        REQUIRE(u->isString());
+        REQUIRE_FALSE(u->isUnion());
+        REQUIRE(u->equals(*typechecker::Type::stringType()));
+    }
+
+    SECTION("Direct API: true | false absorbs into bool") {
+        auto u = typechecker::Type::unionOf({
+            typechecker::Type::literalBool(true),
+            typechecker::Type::literalBool(false)
+        });
+
+        REQUIRE(u->isBool());
+        REQUIRE_FALSE(u->isUnion());
+        REQUIRE(u->equals(*typechecker::Type::boolType()));
+    }
+
+    SECTION("Direct API: true | bool absorbs into bool") {
+        auto u = typechecker::Type::unionOf({
+            typechecker::Type::literalBool(true),
+            typechecker::Type::boolType()
+        });
+
+        REQUIRE(u->isBool());
+        REQUIRE_FALSE(u->isUnion());
+        REQUIRE(u->equals(*typechecker::Type::boolType()));
+    }
+
+    SECTION("Direct API: 3.14 | float absorbs into float") {
+        auto u = typechecker::Type::unionOf({
+            typechecker::Type::literalFloat(3.14),
+            typechecker::Type::floatType()
+        });
+
+        REQUIRE(u->isFloat());
+        REQUIRE_FALSE(u->isUnion());
+        REQUIRE(u->equals(*typechecker::Type::floatType()));
+    }
+
+    SECTION("Source AST: 200 | 404 | int annotation absorbs into int") {
+        ParseResult res("let statusCode: 200 | 404 | int = 200;");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Source AST: true | false annotation absorbs into bool") {
+        ParseResult res("let flag: true | false = true;");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+}
+
+TEST_CASE("Task 3.3.4: Union Algebra - Single-Variant Unwrapping", "[typechecker][union]") {
+    SECTION("Direct API: int | int unwraps to int") {
+        auto u = typechecker::Type::unionOf({
+            typechecker::Type::intType(),
+            typechecker::Type::intType()
+        });
+
+        REQUIRE(u->isInt());
+        REQUIRE_FALSE(u->isUnion());
+        REQUIRE(u->equals(*typechecker::Type::intType()));
+    }
+
+    SECTION("Direct API: union of 1 element unwraps to that element") {
+        auto u = typechecker::Type::unionOf({typechecker::Type::stringType()});
+
+        REQUIRE(u->isString());
+        REQUIRE_FALSE(u->isUnion());
+        REQUIRE(u->equals(*typechecker::Type::stringType()));
+    }
+
+    SECTION("Direct API: nested redundant unions unwrap completely") {
+        auto u = typechecker::Type::unionOf({
+            typechecker::Type::unionOf({typechecker::Type::intType()}),
+            typechecker::Type::unionOf({typechecker::Type::intType()})
+        });
+
+        REQUIRE(u->isInt());
+        REQUIRE_FALSE(u->isUnion());
+    }
+}
+
+TEST_CASE("Task 3.3.4: Union and Literal Types - Positive Conformance", "[typechecker][union][literal]") {
+    SECTION("Integer literal union: 200 | 404 | 500") {
+        ParseResult res("let httpStatus: 200 | 404 | 500 = 200;");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Signed integer literal union: -1 | 0 | 1") {
+        ParseResult res(
+            "let d1: -1 | 0 | 1 = -1;\n"
+            "let d2: -1 | 0 | 1 = 0;\n"
+            "let d3: -1 | 0 | 1 = 1;\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Char literal union: 'y' | 'n'") {
+        ParseResult res("let confirmation: 'y' | 'n' = 'y';");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("String literal union: \"read\" | \"write\"") {
+        ParseResult res("let mode: \"read\" | \"write\" = \"read\";");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Mixed literal and primitive union: \"read\" | \"write\" | bool") {
+        ParseResult res("let mode: \"read\" | \"write\" | bool = false;");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Assigning literal union to base primitive succeeds") {
+        ParseResult res(
+            "let httpStatus: 200 | 404 = 200;\n"
+            "let code: int = httpStatus;\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Assigning narrower union to wider union succeeds") {
+        ParseResult res(
+            "let x: int | string = 42;\n"
+            "let y: int | string | null = x;\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+}
+
+TEST_CASE("Task 3.3.4: Union and Literal Types - Negative Rejection (E3003)", "[typechecker][union][literal][E3003]") {
+    SECTION("Integer value not in literal union emits E3003") {
+        ParseResult res("let httpStatus: 200 | 404 = 500;");
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Unconstrained int assigned to literal union emits E3003") {
+        ParseResult res(
+            "let code: int = 200;\n"
+            "let httpStatus: 200 | 404 = code;\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Char value not in literal union emits E3003") {
+        ParseResult res("let confirmation: 'y' | 'n' = 'x';");
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("String value not in literal union emits E3003") {
+        ParseResult res("let mode: \"read\" | \"write\" = \"execute\";");
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Signed integer value out of range emits E3003") {
+        ParseResult res("let direction: -1 | 0 | 1 = 2;");
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Wider union assigned to narrower union emits E3003") {
+        ParseResult res(
+            "let y: int | string | null = null;\n"
+            "let x: int | string = y;\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+}
+
 

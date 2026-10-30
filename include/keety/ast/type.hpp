@@ -137,4 +137,51 @@ private:
     std::string moduleQualifier_;
 };
 
+/// Literal type kind in type annotations
+enum class LiteralTypeKind {
+    Int,
+    Float,
+    Bool,
+    Char,
+    String
+};
+
+/// Literal type node: `200`, `404`, `'y'`, `"read"`, `true`
+class LiteralType : public TypeAnnotation {
+public:
+    LiteralType(diag::SourceSpan span, int64_t intVal)
+        : TypeAnnotation(span), kind_(LiteralTypeKind::Int), intVal_(intVal), rawText_(std::to_string(intVal)) {}
+
+    LiteralType(diag::SourceSpan span, double floatVal, std::string rawText)
+        : TypeAnnotation(span), kind_(LiteralTypeKind::Float), floatVal_(floatVal), rawText_(std::move(rawText)) {}
+
+    LiteralType(diag::SourceSpan span, bool boolVal)
+        : TypeAnnotation(span), kind_(LiteralTypeKind::Bool), boolVal_(boolVal), rawText_(boolVal ? "true" : "false") {}
+
+    LiteralType(diag::SourceSpan span, char charVal)
+        : TypeAnnotation(span), kind_(LiteralTypeKind::Char), charVal_(charVal), rawText_(std::string("'") + charVal + "'") {}
+
+    LiteralType(diag::SourceSpan span, std::string stringVal)
+        : TypeAnnotation(span), kind_(LiteralTypeKind::String), stringVal_(std::move(stringVal)) {
+        rawText_ = "\"" + stringVal_ + "\"";
+    }
+
+    [[nodiscard]] LiteralTypeKind getLiteralKind() const noexcept { return kind_; }
+    [[nodiscard]] int64_t getIntValue() const noexcept { return intVal_; }
+    [[nodiscard]] double getFloatValue() const noexcept { return floatVal_; }
+    [[nodiscard]] bool getBoolValue() const noexcept { return boolVal_; }
+    [[nodiscard]] char getCharValue() const noexcept { return charVal_; }
+    [[nodiscard]] const std::string& getStringValue() const noexcept { return stringVal_; }
+    [[nodiscard]] const std::string& getRawText() const noexcept { return rawText_; }
+
+private:
+    LiteralTypeKind kind_;
+    int64_t intVal_{0};
+    double floatVal_{0.0};
+    bool boolVal_{false};
+    char charVal_{'\0'};
+    std::string stringVal_;
+    std::string rawText_;
+};
+
 } // namespace keety::ast

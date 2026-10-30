@@ -1045,48 +1045,156 @@ std::unique_ptr<ast::Stmt> Parser::parseZonkStatement() {
     return std::make_unique<ast::ZonkStmt>(span, std::move(errExpr));
 }
 
-std::unique_ptr<ast::TypeAnnotation> Parser::parseTypeAnnotation() {
-    lexer_.setMode(lexer::LexerMode::TypeContext);
+std::unique_ptr<ast::TypeAnnotation> Parser::parseSingleTypeAnnotation() {
     diag::SourceLocation startLoc = peek().span.start;
 
-    std::unique_ptr<ast::TypeAnnotation> baseType = nullptr;
+    // 1. Parenthesized type: `(A | B)`
+    if (match(lexer::TokenKind::LParen)) {
+        auto inner = parseTypeAnnotation();
+        const auto& rParen = expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after parenthesized type");
+        if (inner) {
+            inner->setSpan(diag::SourceSpan{startLoc, rParen.span.end});
+        }
+        return inner;
+    }
 
+    // 2. Primitives
     if (match(lexer::TokenKind::KwInt)) {
-        baseType = std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Int);
-    } else if (match(lexer::TokenKind::KwFloat)) {
-        baseType = std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Float);
-    } else if (match(lexer::TokenKind::KwBool)) {
-        baseType = std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Bool);
-    } else if (match(lexer::TokenKind::KwString)) {
-        baseType = std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::String);
-    } else if (match(lexer::TokenKind::KwChar)) {
-        baseType = std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Char);
-    } else if (match(lexer::TokenKind::KwVoid)) {
-        baseType = std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Void);
-    } else if (match(lexer::TokenKind::KwNull)) {
-        baseType = std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Null);
-    } else if (match(lexer::TokenKind::KwError)) {
-        baseType = std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Error);
-    } else if (match(lexer::TokenKind::KwArray)) {
+        return std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Int);
+    }
+    if (match(lexer::TokenKind::KwFloat)) {
+        return std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Float);
+    }
+    if (match(lexer::TokenKind::KwBool)) {
+        return std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Bool);
+    }
+    if (match(lexer::TokenKind::KwString)) {
+        return std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::String);
+    }
+    if (match(lexer::TokenKind::KwChar)) {
+        return std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Char);
+    }
+    if (match(lexer::TokenKind::KwVoid)) {
+        return std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Void);
+    }
+    if (match(lexer::TokenKind::KwNull)) {
+        return std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Null);
+    }
+    if (match(lexer::TokenKind::KwError)) {
+        return std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Error);
+    }
+
+    // 3. Generic collections: array<T>, map<K, V>
+    if (match(lexer::TokenKind::KwArray)) {
         expect(lexer::TokenKind::Less, diag::ErrorCode::UnexpectedToken, "expected '<' after array");
         auto elemT = parseTypeAnnotation();
-        expect(lexer::TokenKind::Greater, diag::ErrorCode::UnexpectedToken, "expected '>' after array element type");
-        diag::SourceSpan span{startLoc, lastConsumed_.span.end};
-        baseType = std::make_unique<ast::ArrayType>(span, std::move(elemT));
-    } else if (match(lexer::TokenKind::KwMap)) {
+        const auto& closeAngle = expect(lexer::TokenKind::Greater, diag::ErrorCode::UnexpectedToken, "expected '>' after array element type");
+        diag::SourceSpan span{startLoc, closeAngle.span.end};
+        return std::make_unique<ast::ArrayType>(span, std::move(elemT));
+    }
+    if (match(lexer::TokenKind::KwMap)) {
         expect(lexer::TokenKind::Less, diag::ErrorCode::UnexpectedToken, "expected '<' after map");
         auto keyT = parseTypeAnnotation();
         expect(lexer::TokenKind::Comma, diag::ErrorCode::UnexpectedToken, "expected ',' between map key and value types");
         auto valT = parseTypeAnnotation();
-        expect(lexer::TokenKind::Greater, diag::ErrorCode::UnexpectedToken, "expected '>' after map value type");
-        diag::SourceSpan span{startLoc, lastConsumed_.span.end};
-        baseType = std::make_unique<ast::MapType>(span, std::move(keyT), std::move(valT));
-    } else if (check(lexer::TokenKind::Identifier)) {
+        const auto& closeAngle = expect(lexer::TokenKind::Greater, diag::ErrorCode::UnexpectedToken, "expected '>' after map value type");
+        diag::SourceSpan span{startLoc, closeAngle.span.end};
+        return std::make_unique<ast::MapType>(span, std::move(keyT), std::move(valT));
+    }
+
+    // 4. Literal types: signed numbers (+/-), numeric literals, boolean, char, string literals
+    if (check(lexer::TokenKind::Plus) || check(lexer::TokenKind::Minus)) {
+        bool isNeg = check(lexer::TokenKind::Minus);
+        advance(); // consume + or -
+        if (check(lexer::TokenKind::IntLiteral)) {
+            const auto& tok = advance();
+            diag::SourceSpan span{startLoc, tok.span.end};
+            int64_t val = 0;
+            try {
+                val = std::stoll(std::string(tok.lexeme), nullptr, 0);
+            } catch (...) {}
+            if (isNeg) val = -val;
+            return std::make_unique<ast::LiteralType>(span, val);
+        }
+        if (check(lexer::TokenKind::FloatLiteral)) {
+            const auto& tok = advance();
+            diag::SourceSpan span{startLoc, tok.span.end};
+            double val = 0.0;
+            try {
+                val = std::stod(std::string(tok.lexeme));
+            } catch (...) {}
+            if (isNeg) val = -val;
+            return std::make_unique<ast::LiteralType>(span, val, (isNeg ? "-" : "+") + std::string(tok.lexeme));
+        }
+    }
+
+    if (check(lexer::TokenKind::IntLiteral)) {
+        const auto& tok = advance();
+        int64_t val = 0;
+        try {
+            val = std::stoll(std::string(tok.lexeme), nullptr, 0);
+        } catch (...) {}
+        return std::make_unique<ast::LiteralType>(tok.span, val);
+    }
+
+    if (check(lexer::TokenKind::FloatLiteral)) {
+        const auto& tok = advance();
+        double val = 0.0;
+        try {
+            val = std::stod(std::string(tok.lexeme));
+        } catch (...) {}
+        return std::make_unique<ast::LiteralType>(tok.span, val, std::string(tok.lexeme));
+    }
+
+    if (match(lexer::TokenKind::KwTrue)) {
+        return std::make_unique<ast::LiteralType>(lastConsumed_.span, true);
+    }
+    if (match(lexer::TokenKind::KwFalse)) {
+        return std::make_unique<ast::LiteralType>(lastConsumed_.span, false);
+    }
+
+    if (check(lexer::TokenKind::StringLiteral) || check(lexer::TokenKind::CharLiteral)) {
+        const auto& tok = advance();
+        std::string raw(tok.lexeme);
+        // Quote delimiter rule: 1-char in single quotes is char
+        if (raw.size() >= 2 && raw.front() == '\'' && raw.back() == '\'') {
+            std::string inner = raw.substr(1, raw.size() - 2);
+            if (inner.size() == 1) {
+                return std::make_unique<ast::LiteralType>(tok.span, inner[0]);
+            }
+            if (inner.size() == 2 && inner[0] == '\\') {
+                char c = inner[1];
+                if (c == 'n') c = '\n';
+                else if (c == 't') c = '\t';
+                else if (c == 'r') c = '\r';
+                else if (c == '0') c = '\0';
+                return std::make_unique<ast::LiteralType>(tok.span, c);
+            }
+            return std::make_unique<ast::LiteralType>(tok.span, inner);
+        }
+        if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') {
+            std::string inner = raw.substr(1, raw.size() - 2);
+            return std::make_unique<ast::LiteralType>(tok.span, inner);
+        }
+        return std::make_unique<ast::LiteralType>(tok.span, raw);
+    }
+
+    // 5. Custom / nominal identifier
+    if (check(lexer::TokenKind::Identifier)) {
         const auto& nameTok = advance();
-        diag::SourceSpan span = nameTok.span;
-        baseType = std::make_unique<ast::CustomType>(span, std::string(nameTok.lexeme));
-    } else {
-        expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedTypeAnnotation, "expected type name");
+        return std::make_unique<ast::CustomType>(nameTok.span, std::string(nameTok.lexeme));
+    }
+
+    expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedTypeAnnotation, "expected type name");
+    return nullptr;
+}
+
+std::unique_ptr<ast::TypeAnnotation> Parser::parseTypeAnnotation() {
+    lexer_.setMode(lexer::LexerMode::TypeContext);
+    diag::SourceLocation startLoc = peek().span.start;
+
+    auto baseType = parseSingleTypeAnnotation();
+    if (!baseType) {
         lexer_.setMode(lexer::LexerMode::Normal);
         return nullptr;
     }
@@ -1096,30 +1204,7 @@ std::unique_ptr<ast::TypeAnnotation> Parser::parseTypeAnnotation() {
         std::vector<std::unique_ptr<ast::TypeAnnotation>> variants;
         variants.push_back(std::move(baseType));
         while (match(lexer::TokenKind::Pipe)) {
-            // Parse next non-union type
-            std::unique_ptr<ast::TypeAnnotation> nextVariant = nullptr;
-
-            if (match(lexer::TokenKind::KwInt)) {
-                nextVariant = std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Int);
-            } else if (match(lexer::TokenKind::KwFloat)) {
-                nextVariant = std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Float);
-            } else if (match(lexer::TokenKind::KwBool)) {
-                nextVariant = std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Bool);
-            } else if (match(lexer::TokenKind::KwString)) {
-                nextVariant = std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::String);
-            } else if (match(lexer::TokenKind::KwChar)) {
-                nextVariant = std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Char);
-            } else if (match(lexer::TokenKind::KwVoid)) {
-                nextVariant = std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Void);
-            } else if (match(lexer::TokenKind::KwNull)) {
-                nextVariant = std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Null);
-            } else if (match(lexer::TokenKind::KwError)) {
-                nextVariant = std::make_unique<ast::PrimitiveType>(lastConsumed_.span, ast::PrimitiveTypeKind::Error);
-            } else if (check(lexer::TokenKind::Identifier)) {
-                const auto& nTok = advance();
-                nextVariant = std::make_unique<ast::CustomType>(nTok.span, std::string(nTok.lexeme));
-            }
-
+            auto nextVariant = parseSingleTypeAnnotation();
             if (nextVariant) {
                 variants.push_back(std::move(nextVariant));
             } else {
@@ -1135,6 +1220,7 @@ std::unique_ptr<ast::TypeAnnotation> Parser::parseTypeAnnotation() {
     lexer_.setMode(lexer::LexerMode::Normal);
     return baseType;
 }
+
 
 int Parser::getBinaryPrecedence(lexer::TokenKind kind) noexcept {
     switch (kind) {
