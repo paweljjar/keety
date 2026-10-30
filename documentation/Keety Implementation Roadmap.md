@@ -104,7 +104,7 @@ This document specifies the operational development plan for the `keety` compile
 - [x] **Task 4.1.3:** Lower `zonk` error recovery to exception landing pads and handlers.
 
 #### **Phase 4.2: KeetIR Optimization Passes**
-- [ ] **Task 4.2.1:** *Pass 1 (Static Liveness Analysis):* Track variable live ranges and identify last-use points.
+- [x] **Task 4.2.1:** *Pass 1 (Static Liveness Analysis):* Track variable live ranges and identify last-use points.
 - [ ] **Task 4.2.2:** *Pass 2 (Last-Use Move Insertion):* Replace last reads of r-value eligible variables with `std::move`.
 - [ ] **Task 4.2.3:** *Pass 3 (Const-Reference Parameter Promotion):* Promote unmutated composite parameters (`string`, `array`, `map`, `class`) to `const T&`.
 - [ ] **Task 4.2.4:** *Pass 4 (Pipeline Capacity Pre-Allocation):* Detect functional chains (`.map()`, `.filter()`) and insert `.reserve()`.
