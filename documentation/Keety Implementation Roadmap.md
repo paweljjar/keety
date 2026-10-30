@@ -54,7 +54,7 @@ This document specifies the operational development plan for the `keety` compile
 - [x] **Task 2.2.4:** Define type annotation AST nodes (`PrimitiveType`, `ArrayType`, `MapType`, `UnionType`, `FunctionType`, `CustomType`).
 
 #### **Phase 2.3: Syntactic Analysis (`keety::parser`)**
-- [ ] **Task 2.3.1:** Implement top-down Recursive Descent parser with bounded LL(k) lookahead.
+- [x] **Task 2.3.1:** Implement top-down Recursive Descent parser with bounded LL(k) lookahead.
 - [ ] **Task 2.3.2:** Implement Pratt / Precedence Climbing parser for binary and unary expressions according to formal operator precedence tables.
 - [ ] **Task 2.3.3:** Implement header disambiguation for `if`, `while`, and `switch` statements (`IfHeaderInit` with semicolon vs simple conditional expression).
 - [ ] **Task 2.3.4:** Implement `zonk` suffix disambiguation: fallback expression `expr zonk (fallback)` vs recovery block `expr zonk (err) { ... }`.

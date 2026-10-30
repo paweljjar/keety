@@ -5,6 +5,7 @@ add_library(keety_core STATIC
     diag/error_code.cpp
     lexer/token.cpp
     lexer/lexer.cpp
+    parser/parser.cpp
 )
 
 target_include_directories(keety_core PUBLIC

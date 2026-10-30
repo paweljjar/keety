@@ -29,6 +29,7 @@ add_executable(keety_unit_tests
     unit/test_ast_stmt.cpp
     unit/test_ast_expr.cpp
     unit/test_ast_type.cpp
+    unit/test_parser.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE
