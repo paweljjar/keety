@@ -1531,9 +1531,14 @@ std::unique_ptr<ast::Expr> Parser::parsePrefixExpression() {
     // Postfix operators and selectors: calls `()`, index `[]`, member `.`, postfix `++`/`--`
     while (true) {
         if (match(lexer::TokenKind::Dot)) {
-            const auto& memberTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected member identifier after '.'");
-            diag::SourceSpan span{startLoc, memberTok.span.end};
-            expr = std::make_unique<ast::MemberExpr>(span, std::move(expr), std::string(memberTok.lexeme));
+            const lexer::Token* memberTok = nullptr;
+            if (check(lexer::TokenKind::Identifier) || lexer::isKeyword(peek().kind)) {
+                memberTok = &advance();
+            } else {
+                memberTok = &expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected member identifier after '.'");
+            }
+            diag::SourceSpan span{startLoc, memberTok->span.end};
+            expr = std::make_unique<ast::MemberExpr>(span, std::move(expr), std::string(memberTok->lexeme));
         } else if (match(lexer::TokenKind::LBracket)) {
             auto index = parseExpression();
             const auto& rBracket = expect(lexer::TokenKind::RBracket, diag::ErrorCode::ExpectedClosingBracket, "expected ']' after index");

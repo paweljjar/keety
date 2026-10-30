@@ -49,6 +49,7 @@ add_executable(keety_unit_tests
     unit/test_liveness_analysis.cpp
     unit/test_move_insertion.cpp
     unit/test_const_ref_promotion.cpp
+    unit/test_pipeline_reserve.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE
