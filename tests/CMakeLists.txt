@@ -45,6 +45,7 @@ add_executable(keety_unit_tests
     unit/test_type_checker.cpp
     unit/test_keet_ir.cpp
     unit/test_ast_lowerer.cpp
+    unit/test_zonk_lowering.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE

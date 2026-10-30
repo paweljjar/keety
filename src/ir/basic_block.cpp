@@ -15,6 +15,9 @@ std::string BasicBlock::to_string() const {
         }
         ss << "\n";
     }
+    if (landing_pad_) {
+        ss << "  ; landing pad: @" << landing_pad_->get_label() << "\n";
+    }
 
     for (const auto& inst : instructions_) {
         if (inst) {

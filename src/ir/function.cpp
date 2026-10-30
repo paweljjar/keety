@@ -62,6 +62,13 @@ void Function::recompute_cfg_edges() {
 
     for (auto& bb : blocks_) {
         if (!bb) continue;
+
+        if (bb->has_landing_pad()) {
+            BasicBlock* lp = bb->get_landing_pad();
+            bb->add_successor(lp);
+            lp->add_predecessor(bb.get());
+        }
+
         Instruction* term = bb->get_terminator();
         if (!term) continue;
 
@@ -121,6 +128,18 @@ bool Function::validate_cfg(std::string& error_message) const {
         if (!term) {
             error_message = "Basic block '" + bb->get_label() + "' in function '" + name_ + "' is missing a terminator";
             return false;
+        }
+
+        if (bb->has_landing_pad()) {
+            BasicBlock* lp = bb->get_landing_pad();
+            if (block_set.find(lp) == block_set.end()) {
+                error_message = "Landing pad '" + lp->get_label() + "' of block '" + bb->get_label() + "' does not belong to function";
+                return false;
+            }
+            if (!lp->is_landing_pad()) {
+                error_message = "Landing pad block '" + lp->get_label() + "' must begin with a landing_pad instruction";
+                return false;
+            }
         }
 
         for (BasicBlock* succ : bb->get_successors()) {

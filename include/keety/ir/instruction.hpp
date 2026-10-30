@@ -56,6 +56,7 @@ enum class Opcode {
     Return,
     Throw,
     Unreachable,
+    Invoke,
 
     // Variables and Memory
     Alloca,
@@ -261,6 +262,42 @@ public:
 
     [[nodiscard]] std::string to_string() const override;
     [[nodiscard]] std::unique_ptr<Instruction> clone() const override;
+};
+
+/// Fallible function call with exception unwind edge: [dest =] invoke @callee(args...) to normal_target unwind unwind_target
+class InvokeInst : public Instruction {
+public:
+    InvokeInst(std::optional<Operand> dest, std::string callee, std::vector<Operand> args,
+               BasicBlock* normal_target, BasicBlock* unwind_target, diag::SourceSpan span = {})
+        : Instruction(Opcode::Invoke, span),
+          dest_(std::move(dest)),
+          callee_(std::move(callee)),
+          args_(std::move(args)),
+          normal_target_(normal_target),
+          unwind_target_(unwind_target) {}
+
+    [[nodiscard]] bool is_terminator() const noexcept override { return true; }
+    [[nodiscard]] const std::optional<Operand>& get_dest() const noexcept { return dest_; }
+    [[nodiscard]] std::optional<Operand>& get_dest() noexcept { return dest_; }
+    [[nodiscard]] const std::string& get_callee() const noexcept { return callee_; }
+    [[nodiscard]] const std::vector<Operand>& get_args() const noexcept { return args_; }
+    [[nodiscard]] std::vector<Operand>& get_args() noexcept { return args_; }
+    [[nodiscard]] BasicBlock* get_normal_target() const noexcept { return normal_target_; }
+    [[nodiscard]] BasicBlock* get_unwind_target() const noexcept { return unwind_target_; }
+
+    [[nodiscard]] std::vector<BasicBlock*> get_successors() const override;
+    [[nodiscard]] std::vector<Operand*> get_operands() override;
+    [[nodiscard]] std::vector<const Operand*> get_operands() const override;
+
+    [[nodiscard]] std::string to_string() const override;
+    [[nodiscard]] std::unique_ptr<Instruction> clone() const override;
+
+private:
+    std::optional<Operand> dest_;
+    std::string callee_;
+    std::vector<Operand> args_;
+    BasicBlock* normal_target_;
+    BasicBlock* unwind_target_;
 };
 
 // -----------------------------------------------------------------------------

@@ -67,6 +67,7 @@ std::string to_string(Opcode op) {
         case Opcode::Box: return "box";
         case Opcode::Unbox: return "unbox";
         case Opcode::LandingPad: return "landing_pad";
+        case Opcode::Invoke: return "invoke";
     }
     return "unknown_opcode";
 }
@@ -221,6 +222,58 @@ std::string UnreachableInst::to_string() const {
 
 std::unique_ptr<Instruction> UnreachableInst::clone() const {
     return std::make_unique<UnreachableInst>(get_span());
+}
+
+// -----------------------------------------------------------------------------
+// InvokeInst
+// -----------------------------------------------------------------------------
+
+std::vector<BasicBlock*> InvokeInst::get_successors() const {
+    std::vector<BasicBlock*> succs;
+    if (normal_target_) succs.push_back(normal_target_);
+    if (unwind_target_ && unwind_target_ != normal_target_) succs.push_back(unwind_target_);
+    return succs;
+}
+
+std::vector<Operand*> InvokeInst::get_operands() {
+    std::vector<Operand*> ops;
+    if (dest_.has_value()) {
+        ops.push_back(&*dest_);
+    }
+    for (auto& arg : args_) {
+        ops.push_back(&arg);
+    }
+    return ops;
+}
+
+std::vector<const Operand*> InvokeInst::get_operands() const {
+    std::vector<const Operand*> ops;
+    if (dest_.has_value()) {
+        ops.push_back(&*dest_);
+    }
+    for (const auto& arg : args_) {
+        ops.push_back(&arg);
+    }
+    return ops;
+}
+
+std::string InvokeInst::to_string() const {
+    std::ostringstream ss;
+    if (dest_.has_value()) {
+        ss << dest_->to_string() << " = ";
+    }
+    ss << "invoke @" << callee_ << "(";
+    for (size_t i = 0; i < args_.size(); ++i) {
+        if (i > 0) ss << ", ";
+        ss << args_[i].to_string();
+    }
+    ss << ") to " << (normal_target_ ? "@" + normal_target_->get_label() : "@<null_bb>");
+    ss << " unwind " << (unwind_target_ ? "@" + unwind_target_->get_label() : "@<null_bb>");
+    return ss.str();
+}
+
+std::unique_ptr<Instruction> InvokeInst::clone() const {
+    return std::make_unique<InvokeInst>(dest_, callee_, args_, normal_target_, unwind_target_, get_span());
 }
 
 // -----------------------------------------------------------------------------

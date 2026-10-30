@@ -30,6 +30,12 @@ struct SwitchContext {
     BasicBlock* break_target{nullptr};
 };
 
+/// Context entry for active zonk recovery blocks during lowering
+struct ZonkContext {
+    Operand result_var;
+    BasicBlock* merge_target{nullptr};
+};
+
 /// Lowers validated AST nodes into KeetIR Control Flow Graphs and instructions
 class AstLowerer {
 public:
@@ -69,6 +75,7 @@ private:
     // Control flow stacks for break/continue
     std::vector<LoopContext> loop_stack_;
     std::vector<SwitchContext> switch_stack_;
+    std::vector<ZonkContext> zonk_stack_;
     enum class BreakContextKind { Loop, Switch };
     std::vector<std::pair<BreakContextKind, size_t>> break_order_;
 
@@ -85,6 +92,7 @@ private:
     void lower_break_stmt(const ast::BreakStmt& stmt);
     void lower_continue_stmt(const ast::ContinueStmt& stmt);
     void lower_zonk_stmt(const ast::ZonkStmt& stmt);
+    void lower_yield_stmt(const ast::YieldStmt& stmt);
 
     // Expressions
     Operand lower_literal_expr(const ast::LiteralExpr& expr);

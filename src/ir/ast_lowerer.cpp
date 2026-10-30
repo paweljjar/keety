@@ -83,6 +83,7 @@ std::unique_ptr<Function> AstLowerer::lower_function(const ast::FnDecl& fn_decl)
 
     loop_stack_.clear();
     switch_stack_.clear();
+    zonk_stack_.clear();
     break_order_.clear();
 
     if (fn_decl.getBody()) {
@@ -133,6 +134,8 @@ void AstLowerer::lower_statement(const ast::Stmt& stmt) {
         lower_continue_stmt(*continue_stmt);
     } else if (const auto* zonk_stmt = dynamic_cast<const ast::ZonkStmt*>(&stmt)) {
         lower_zonk_stmt(*zonk_stmt);
+    } else if (const auto* yield_stmt = dynamic_cast<const ast::YieldStmt*>(&stmt)) {
+        lower_yield_stmt(*yield_stmt);
     }
 }
 
@@ -487,6 +490,15 @@ void AstLowerer::lower_zonk_stmt(const ast::ZonkStmt& stmt) {
     }
 }
 
+void AstLowerer::lower_yield_stmt(const ast::YieldStmt& stmt) {
+    if (!zonk_stack_.empty() && stmt.getValue()) {
+        const auto& ctx = zonk_stack_.back();
+        Operand val = lower_expression(*stmt.getValue());
+        emit(std::make_unique<StoreInst>(ctx.result_var, val));
+        emit(std::make_unique<BranchInst>(ctx.merge_target));
+    }
+}
+
 BasicBlock* AstLowerer::find_break_target(const std::string& label) const {
     if (!label.empty()) {
         for (auto it = break_order_.rbegin(); it != break_order_.rend(); ++it) {
@@ -831,15 +843,73 @@ Operand AstLowerer::lower_typeof_expr(const ast::TypeofExpr& expr) {
 }
 
 Operand AstLowerer::lower_zonk_expr(const ast::ZonkExpr& expr) {
-    if (expr.getFallback()) {
-        // Lower fallback expression form
-        Operand primary = lower_expression(*expr.getPrimary());
-        return primary;
-    }
+    std::string res_name = "_zonk_res." + std::to_string(current_fn_->create_temp(nullptr).get_temp_id());
+    emit(std::make_unique<AllocaInst>(res_name, nullptr, true));
+    Operand res_var = Operand::create_var(res_name, nullptr);
+
+    BasicBlock* try_bb = create_block("zonk.try");
+    BasicBlock* catch_bb = create_block("zonk.catch");
+    BasicBlock* merge_bb = create_block("zonk.end");
+
+    emit(std::make_unique<BranchInst>(try_bb));
+
+    // Try block (protected region)
+    current_bb_ = try_bb;
+    try_bb->set_landing_pad(catch_bb);
+
     if (expr.getPrimary()) {
-        return lower_expression(*expr.getPrimary());
+        Operand primary_val = lower_expression(*expr.getPrimary());
+        emit(std::make_unique<StoreInst>(res_var, primary_val));
     }
-    return Operand::create_null();
+    if (current_bb_ && !current_bb_->has_terminator()) {
+        emit(std::make_unique<BranchInst>(merge_bb));
+    }
+
+    // Catch / Landing pad block
+    current_bb_ = catch_bb;
+
+    if (expr.hasRecoveryBlock()) {
+        std::string err_ident = expr.getErrorVarName().empty()
+            ? ("_err." + std::to_string(current_fn_->create_temp(nullptr).get_temp_id()))
+            : expr.getErrorVarName();
+
+        auto err_type = std::make_shared<typechecker::Type>(typechecker::TypeKind::Error);
+        Operand err_dest = Operand::create_var(err_ident, err_type);
+        emit(std::make_unique<LandingPadInst>(err_dest));
+        emit(std::make_unique<AllocaInst>(err_ident, err_type, false));
+
+        zonk_stack_.push_back({res_var, merge_bb});
+        lower_block_stmt(*expr.getRecoveryBlock());
+        zonk_stack_.pop_back();
+
+        if (current_bb_ && !current_bb_->has_terminator()) {
+            emit(std::make_unique<BranchInst>(merge_bb));
+        }
+    } else if (expr.getFallback()) {
+        std::string err_ident = "_err." + std::to_string(current_fn_->create_temp(nullptr).get_temp_id());
+        auto err_type = std::make_shared<typechecker::Type>(typechecker::TypeKind::Error);
+        Operand err_dest = Operand::create_var(err_ident, err_type);
+        emit(std::make_unique<LandingPadInst>(err_dest));
+        emit(std::make_unique<AllocaInst>(err_ident, err_type, false));
+
+        Operand fallback_val = lower_expression(*expr.getFallback());
+        emit(std::make_unique<StoreInst>(res_var, fallback_val));
+        if (current_bb_ && !current_bb_->has_terminator()) {
+            emit(std::make_unique<BranchInst>(merge_bb));
+        }
+    } else {
+        std::string err_ident = "_err." + std::to_string(current_fn_->create_temp(nullptr).get_temp_id());
+        auto err_type = std::make_shared<typechecker::Type>(typechecker::TypeKind::Error);
+        Operand err_dest = Operand::create_var(err_ident, err_type);
+        emit(std::make_unique<LandingPadInst>(err_dest));
+        emit(std::make_unique<BranchInst>(merge_bb));
+    }
+
+    // Merge block
+    current_bb_ = merge_bb;
+    Operand result = current_fn_->create_temp(nullptr);
+    emit(std::make_unique<LoadInst>(result, res_var));
+    return result;
 }
 
 } // namespace keety::ir

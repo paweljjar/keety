@@ -58,6 +58,9 @@ Operand Operand::create_char(char val) {
 }
 
 Operand Operand::create_string(std::string val) {
+    if (val.size() >= 2 && ((val.front() == '"' && val.back() == '"') || (val.front() == '`' && val.back() == '`'))) {
+        val = val.substr(1, val.size() - 2);
+    }
     Operand op;
     op.kind_ = OperandKind::Constant;
     op.constant_val_ = std::move(val);

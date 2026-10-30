@@ -108,6 +108,15 @@ public:
     void clear_predecessors() noexcept { predecessors_.clear(); }
     void clear_successors() noexcept { successors_.clear(); }
 
+    // Exception recovery landing pad
+    [[nodiscard]] BasicBlock* get_landing_pad() const noexcept { return landing_pad_; }
+    void set_landing_pad(BasicBlock* lp) noexcept { landing_pad_ = lp; }
+    [[nodiscard]] bool has_landing_pad() const noexcept { return landing_pad_ != nullptr; }
+
+    [[nodiscard]] bool is_landing_pad() const noexcept {
+        return !instructions_.empty() && instructions_.front()->get_opcode() == Opcode::LandingPad;
+    }
+
     [[nodiscard]] std::string to_string() const;
 
 private:
@@ -116,6 +125,7 @@ private:
     std::vector<std::unique_ptr<Instruction>> instructions_;
     std::vector<BasicBlock*> predecessors_;
     std::vector<BasicBlock*> successors_;
+    BasicBlock* landing_pad_{nullptr};
 };
 
 } // namespace keety::ir
