@@ -6,6 +6,8 @@
 #include <keety/diag/diagnostic.hpp>
 #include <keety/diag/diagnostic_emitter.hpp>
 #include <keety/parser/parser.hpp>
+#include <keety/sema/scope.hpp>
+#include <keety/typechecker/type.hpp>
 
 #include <memory>
 #include <string>
@@ -44,11 +46,47 @@ public:
         std::string_view entityName,
         diag::SourceSpan span);
 
+    // --- Task 3.3.2: Strict Zero-Coercion Policy (E3002) ---
+
+    /// Validates zero-coercion across declarations, statements, expressions, assignments,
+    /// returns, and function calls. Emits E3002 (ImplicitTypeWidening) on implicit
+    /// conversions between numeric types (such as int -> float or float -> int).
+    bool checkZeroCoercion(const parser::ModuleAST& module, sema::Scope* rootScope = nullptr);
+
+    /// Checks an individual declaration for zero-coercion violations.
+    bool checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope);
+
+    /// Checks a statement for zero-coercion violations.
+    bool checkZeroCoercion(const ast::Stmt& stmt, sema::Scope& scope);
+
+    /// Evaluates/infers the static semantic type of an expression within a given scope.
+    TypePtr inferType(const ast::Expr& expr, sema::Scope& scope);
+
+    /// Checks whether actualType can be assigned/passed to expectedType without coercion.
+    /// Emits E3002 if implicit numeric widening/narrowing occurs.
+    bool checkAssignment(TypePtr expectedType, TypePtr actualType, diag::SourceSpan span, std::string_view contextDesc = "");
+
+    // Factory methods for creating standardized E3002 diagnostics
+    [[nodiscard]] static diag::Diagnostic createImplicitWideningDiagnostic(
+        TypePtr fromType,
+        TypePtr toType,
+        diag::SourceSpan span,
+        std::string_view contextDesc = "");
+
+    [[nodiscard]] static diag::Diagnostic createBinaryCoercionDiagnostic(
+        TypePtr leftType,
+        TypePtr rightType,
+        lexer::TokenKind op,
+        diag::SourceSpan span);
+
 private:
     diag::DiagnosticEmitter* emitter_{nullptr};
     bool hasErrors_{false};
+    TypePtr currentFunctionReturnType_{nullptr};
 
     void reportMissingType(std::string_view entityKind, std::string_view entityName, diag::SourceSpan span);
+    void reportImplicitWidening(TypePtr fromType, TypePtr toType, diag::SourceSpan span, std::string_view contextDesc);
+    void reportBinaryCoercion(TypePtr leftType, TypePtr rightType, lexer::TokenKind op, diag::SourceSpan span);
 };
 
 } // namespace keety::typechecker

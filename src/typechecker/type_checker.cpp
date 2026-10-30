@@ -1,9 +1,14 @@
 #include <keety/typechecker/type_checker.hpp>
+#include <keety/sema/universe.hpp>
 
 namespace keety::typechecker {
 
 TypeChecker::TypeChecker(diag::DiagnosticEmitter* emitter)
     : emitter_(emitter), hasErrors_(false) {}
+
+// =============================================================================
+// Task 3.3.1: Explicit Type Annotation Validation
+// =============================================================================
 
 diag::Diagnostic TypeChecker::createMissingTypeDiagnostic(
     std::string_view entityKind,
@@ -277,6 +282,590 @@ bool TypeChecker::checkExplicitTypeAnnotations(const ast::Expr& expr) {
     }
 
     return !hasErrors_;
+}
+
+// =============================================================================
+// Task 3.3.2: Strict Zero-Coercion Policy (E3002)
+// =============================================================================
+
+diag::Diagnostic TypeChecker::createImplicitWideningDiagnostic(
+    TypePtr fromType,
+    TypePtr toType,
+    diag::SourceSpan span,
+    std::string_view contextDesc) {
+    std::string fromStr = fromType ? fromType->toString() : "<unknown>";
+    std::string toStr = toType ? toType->toString() : "<unknown>";
+    std::string msg = "implicit numeric conversion from '" + fromStr + "' to '" + toStr + "' is disallowed";
+    if (!contextDesc.empty()) {
+        msg += " in " + std::string(contextDesc);
+    }
+
+    auto d = diag::Diagnostic::makeError(
+        diag::ErrorCode::ImplicitTypeWidening,
+        std::move(msg),
+        span.isValid() ? span.start : diag::SourceLocation{});
+
+    if (span.isValid()) {
+        d.labels.push_back(diag::DiagnosticLabel{
+            span,
+            "expected '" + toStr + "', found '" + fromStr + "'",
+            true
+        });
+    }
+
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Note,
+        "KeetScript enforces a strict zero-coercion policy; numeric types cannot be widened or narrowed implicitly."
+    });
+
+    std::string help;
+    if (fromType && fromType->isInt() && toType && toType->isFloat()) {
+        help = "use an explicit conversion, e.g. 'float(...)', '... .toFloat()', or a float literal like '42.0'";
+    } else {
+        help = "use an explicit conversion, e.g. 'int(...)', '... .toInt()', or an integer literal like '42'";
+    }
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Help,
+        std::move(help)
+    });
+
+    return d;
+}
+
+diag::Diagnostic TypeChecker::createBinaryCoercionDiagnostic(
+    TypePtr leftType,
+    TypePtr rightType,
+    lexer::TokenKind op,
+    diag::SourceSpan span) {
+    std::string opStr = std::string(lexer::getTokenKindName(op));
+    std::string leftStr = leftType ? leftType->toString() : "<unknown>";
+    std::string rightStr = rightType ? rightType->toString() : "<unknown>";
+
+    std::string msg = "implicit numeric conversion between '" + leftStr +
+                      "' and '" + rightStr + "' in binary expression is disallowed";
+
+    auto d = diag::Diagnostic::makeError(
+        diag::ErrorCode::ImplicitTypeWidening,
+        std::move(msg),
+        span.isValid() ? span.start : diag::SourceLocation{});
+
+    if (span.isValid()) {
+        d.labels.push_back(diag::DiagnosticLabel{
+            span,
+            "cannot apply binary operator '" + opStr + "' between '" + leftStr + "' and '" + rightStr + "'",
+            true
+        });
+    }
+
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Note,
+        "KeetScript forbids implicit numeric conversions; both operands of a numeric operator must have the same type."
+    });
+
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Help,
+        "explicitly convert one operand, e.g. 'float(a) " + opStr + " b' or 'a.toFloat() " + opStr + " b'"
+    });
+
+    return d;
+}
+
+void TypeChecker::reportImplicitWidening(
+    TypePtr fromType,
+    TypePtr toType,
+    diag::SourceSpan span,
+    std::string_view contextDesc) {
+    hasErrors_ = true;
+    if (emitter_ != nullptr) {
+        emitter_->report(createImplicitWideningDiagnostic(fromType, toType, span, contextDesc));
+    }
+}
+
+void TypeChecker::reportBinaryCoercion(
+    TypePtr leftType,
+    TypePtr rightType,
+    lexer::TokenKind op,
+    diag::SourceSpan span) {
+    hasErrors_ = true;
+    if (emitter_ != nullptr) {
+        emitter_->report(createBinaryCoercionDiagnostic(leftType, rightType, op, span));
+    }
+}
+
+bool TypeChecker::checkAssignment(
+    TypePtr expectedType,
+    TypePtr actualType,
+    diag::SourceSpan span,
+    std::string_view contextDesc) {
+    if (!expectedType || !actualType) return true;
+    if (expectedType->isUnknown() || actualType->isUnknown()) return true;
+
+    // Strict zero-coercion check: int <-> float
+    if ((actualType->isInt() && expectedType->isFloat()) ||
+        (actualType->isFloat() && expectedType->isInt())) {
+        reportImplicitWidening(actualType, expectedType, span, contextDesc);
+        return false;
+    }
+
+    return true;
+}
+
+bool TypeChecker::checkZeroCoercion(const parser::ModuleAST& module, sema::Scope* rootScope) {
+    std::shared_ptr<sema::Scope> ownedUniverse;
+    std::shared_ptr<sema::Scope> ownedModule;
+    sema::Scope* targetScope = rootScope;
+
+    if (!targetScope) {
+        ownedUniverse = sema::Scope::createUniverse(true);
+        ownedModule = ownedUniverse->createChild(sema::ScopeKind::Module);
+        targetScope = ownedModule.get();
+    }
+
+    // Pass 1: Register top-level module declarations in scope so forward calls can resolve
+    for (const auto& decl : module.declarations) {
+        if (!decl) continue;
+        if (const auto* varDecl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+            auto sym = std::make_shared<sema::Symbol>(varDecl->getName(), sema::SymbolKind::Variable, varDecl->getSpan());
+            sym->setTypeAnnotation(varDecl->getType());
+            sym->setAstNode(varDecl);
+            targetScope->define(sym);
+        } else if (const auto* constDecl = dynamic_cast<const ast::ConstDecl*>(decl.get())) {
+            auto sym = std::make_shared<sema::Symbol>(constDecl->getName(), sema::SymbolKind::Constant, constDecl->getSpan());
+            sym->setTypeAnnotation(constDecl->getType());
+            sym->setAstNode(constDecl);
+            targetScope->define(sym);
+        } else if (const auto* defDecl = dynamic_cast<const ast::DefineDecl*>(decl.get())) {
+            auto sym = std::make_shared<sema::Symbol>(defDecl->getName(), sema::SymbolKind::Define, defDecl->getSpan());
+            sym->setTypeAnnotation(defDecl->getType());
+            sym->setAstNode(defDecl);
+            targetScope->define(sym);
+        } else if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+            auto sym = std::make_shared<sema::Symbol>(fnDecl->getName(), sema::SymbolKind::Function, fnDecl->getSpan());
+            sym->setTypeAnnotation(fnDecl->getReturnType());
+            sym->setAstNode(fnDecl);
+            targetScope->define(sym);
+        } else if (const auto* clsDecl = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+            auto sym = std::make_shared<sema::Symbol>(clsDecl->getName(), sema::SymbolKind::Class, clsDecl->getSpan());
+            sym->setAstNode(clsDecl);
+            targetScope->define(sym);
+        }
+    }
+
+    // Pass 2: Type check each declaration body, statements, and expressions
+    for (const auto& decl : module.declarations) {
+        if (decl) {
+            checkZeroCoercion(*decl, *targetScope);
+        }
+    }
+
+    return !hasErrors_;
+}
+
+bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
+    if (const auto* varDecl = dynamic_cast<const ast::VarDecl*>(&decl)) {
+        auto declType = Type::fromAnnotation(varDecl->getType());
+        auto sym = std::make_shared<sema::Symbol>(varDecl->getName(), sema::SymbolKind::Variable, varDecl->getSpan());
+        sym->setTypeAnnotation(varDecl->getType());
+        sym->setAstNode(varDecl);
+        scope.define(sym);
+
+        if (varDecl->hasInitializer()) {
+            auto initType = inferType(*varDecl->getInitializer(), scope);
+            checkAssignment(declType, initType, varDecl->getInitializer()->getSpan(), "variable initialization");
+        }
+    } else if (const auto* constDecl = dynamic_cast<const ast::ConstDecl*>(&decl)) {
+        auto declType = Type::fromAnnotation(constDecl->getType());
+        auto sym = std::make_shared<sema::Symbol>(constDecl->getName(), sema::SymbolKind::Constant, constDecl->getSpan());
+        sym->setTypeAnnotation(constDecl->getType());
+        sym->setAstNode(constDecl);
+        scope.define(sym);
+
+        if (constDecl->getInitializer()) {
+            auto initType = inferType(*constDecl->getInitializer(), scope);
+            checkAssignment(declType, initType, constDecl->getInitializer()->getSpan(), "constant initialization");
+        }
+    } else if (const auto* defDecl = dynamic_cast<const ast::DefineDecl*>(&decl)) {
+        auto declType = Type::fromAnnotation(defDecl->getType());
+        auto sym = std::make_shared<sema::Symbol>(defDecl->getName(), sema::SymbolKind::Define, defDecl->getSpan());
+        sym->setTypeAnnotation(defDecl->getType());
+        sym->setAstNode(defDecl);
+        scope.define(sym);
+
+        if (defDecl->getValue()) {
+            auto initType = inferType(*defDecl->getValue(), scope);
+            checkAssignment(declType, initType, defDecl->getValue()->getSpan(), "define initialization");
+        }
+    } else if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(&decl)) {
+        auto retType = Type::fromAnnotation(fnDecl->getReturnType());
+        auto fnScope = scope.createChild(sema::ScopeKind::Function);
+
+        for (const auto& param : fnDecl->getParams()) {
+            auto pType = Type::fromAnnotation(param.type.get());
+            auto pSym = std::make_shared<sema::Symbol>(param.name, sema::SymbolKind::Parameter, param.span);
+            pSym->setTypeAnnotation(param.type.get());
+            fnScope->define(pSym);
+
+            if (param.defaultValue) {
+                auto defType = inferType(*param.defaultValue, *fnScope);
+                checkAssignment(pType, defType, param.defaultValue->getSpan(), "parameter default value");
+            }
+        }
+
+        auto prevRet = currentFunctionReturnType_;
+        currentFunctionReturnType_ = retType;
+        if (fnDecl->getBody()) {
+            checkZeroCoercion(*fnDecl->getBody(), *fnScope);
+        }
+        currentFunctionReturnType_ = prevRet;
+    } else if (const auto* classDecl = dynamic_cast<const ast::ClassDecl*>(&decl)) {
+        auto classScope = scope.createChild(sema::ScopeKind::Class);
+
+        for (const auto& field : classDecl->getFields()) {
+            auto fType = Type::fromAnnotation(field.type.get());
+            auto fSym = std::make_shared<sema::Symbol>(field.name, sema::SymbolKind::Field, field.span);
+            fSym->setTypeAnnotation(field.type.get());
+            classScope->define(fSym);
+
+            if (field.initializer) {
+                auto initType = inferType(*field.initializer, *classScope);
+                checkAssignment(fType, initType, field.initializer->getSpan(), "class field initialization");
+            }
+        }
+
+        for (const auto& method : classDecl->getMethods()) {
+            if (method) {
+                checkZeroCoercion(*method, *classScope);
+            }
+        }
+    }
+
+    return !hasErrors_;
+}
+
+bool TypeChecker::checkZeroCoercion(const ast::Stmt& stmt, sema::Scope& scope) {
+    if (const auto* blockStmt = dynamic_cast<const ast::BlockStmt*>(&stmt)) {
+        auto blockScope = scope.createChild(sema::ScopeKind::Block);
+        for (const auto& s : blockStmt->getStatements()) {
+            if (s) {
+                checkZeroCoercion(*s, *blockScope);
+            }
+        }
+    } else if (const auto* declStmt = dynamic_cast<const ast::DeclStmt*>(&stmt)) {
+        if (declStmt->getDeclaration()) {
+            checkZeroCoercion(*declStmt->getDeclaration(), scope);
+        }
+    } else if (const auto* exprStmt = dynamic_cast<const ast::ExprStmt*>(&stmt)) {
+        if (exprStmt->getExpression()) {
+            inferType(*exprStmt->getExpression(), scope);
+        }
+    } else if (const auto* ifStmt = dynamic_cast<const ast::IfStmt*>(&stmt)) {
+        if (ifStmt->hasInit()) {
+            checkZeroCoercion(*ifStmt->getInit(), scope);
+        }
+        if (ifStmt->getCondition()) {
+            inferType(*ifStmt->getCondition(), scope);
+        }
+        if (ifStmt->getThenBranch()) {
+            checkZeroCoercion(*ifStmt->getThenBranch(), scope);
+        }
+        if (ifStmt->getElseBranch()) {
+            checkZeroCoercion(*ifStmt->getElseBranch(), scope);
+        }
+    } else if (const auto* whileStmt = dynamic_cast<const ast::WhileStmt*>(&stmt)) {
+        if (whileStmt->hasInit()) {
+            checkZeroCoercion(*whileStmt->getInit(), scope);
+        }
+        if (whileStmt->getCondition()) {
+            inferType(*whileStmt->getCondition(), scope);
+        }
+        if (whileStmt->getBody()) {
+            checkZeroCoercion(*whileStmt->getBody(), scope);
+        }
+    } else if (const auto* forStmt = dynamic_cast<const ast::ForStmt*>(&stmt)) {
+        auto forScope = scope.createChild(sema::ScopeKind::Block);
+        if (forStmt->getInit()) {
+            checkZeroCoercion(*forStmt->getInit(), *forScope);
+        }
+        if (forStmt->getCondition()) {
+            inferType(*forStmt->getCondition(), *forScope);
+        }
+        if (forStmt->getPost()) {
+            checkZeroCoercion(*forStmt->getPost(), *forScope);
+        }
+        if (forStmt->getBody()) {
+            checkZeroCoercion(*forStmt->getBody(), *forScope);
+        }
+    } else if (const auto* forInStmt = dynamic_cast<const ast::ForInStmt*>(&stmt)) {
+        auto forScope = scope.createChild(sema::ScopeKind::Block);
+        if (forInStmt->getCollection()) {
+            inferType(*forInStmt->getCollection(), scope);
+        }
+        if (forInStmt->getBody()) {
+            checkZeroCoercion(*forInStmt->getBody(), *forScope);
+        }
+    } else if (const auto* returnStmt = dynamic_cast<const ast::ReturnStmt*>(&stmt)) {
+        if (returnStmt->hasValue()) {
+            auto valType = inferType(*returnStmt->getValue(), scope);
+            if (currentFunctionReturnType_) {
+                checkAssignment(currentFunctionReturnType_, valType, returnStmt->getValue()->getSpan(), "return statement");
+            }
+        }
+    } else if (const auto* switchStmt = dynamic_cast<const ast::SwitchStmt*>(&stmt)) {
+        if (switchStmt->hasInit()) {
+            checkZeroCoercion(*switchStmt->getInit(), scope);
+        }
+        if (switchStmt->getDiscriminant()) {
+            inferType(*switchStmt->getDiscriminant(), scope);
+        }
+        for (const auto& c : switchStmt->getCases()) {
+            for (const auto& expr : c.values) {
+                if (expr) {
+                    inferType(*expr, scope);
+                }
+            }
+            if (c.body) {
+                checkZeroCoercion(*c.body, scope);
+            }
+        }
+    }
+
+    return !hasErrors_;
+}
+
+TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope) {
+    if (const auto* lit = dynamic_cast<const ast::LiteralExpr*>(&expr)) {
+        switch (lit->getLiteralKind()) {
+        case lexer::TokenKind::IntLiteral:
+            return Type::intType();
+        case lexer::TokenKind::FloatLiteral:
+            return Type::floatType();
+        case lexer::TokenKind::StringLiteral:
+            return Type::stringType();
+        case lexer::TokenKind::CharLiteral:
+            return Type::charType();
+        case lexer::TokenKind::KwTrue:
+        case lexer::TokenKind::KwFalse:
+            return Type::boolType();
+        case lexer::TokenKind::KwNull:
+            return Type::nullType();
+        default:
+            return Type::unknownType();
+        }
+    }
+
+    if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(&expr)) {
+        auto sym = scope.lookup(ident->getName());
+        if (sym) {
+            if (sym->getTypeAnnotation()) {
+                return Type::fromAnnotation(sym->getTypeAnnotation());
+            }
+            if (sym->isBuiltinType()) {
+                return Type::custom(ident->getName());
+            }
+        }
+        return Type::unknownType();
+    }
+
+    if (const auto* cast = dynamic_cast<const ast::TypeCastExpr*>(&expr)) {
+        if (cast->getExpr()) {
+            inferType(*cast->getExpr(), scope);
+        }
+        return Type::fromAnnotation(cast->getTargetType());
+    }
+
+    if (const auto* typeofExpr = dynamic_cast<const ast::TypeofExpr*>(&expr)) {
+        if (typeofExpr->getExpr()) {
+            inferType(*typeofExpr->getExpr(), scope);
+        }
+        return Type::stringType();
+    }
+
+    if (const auto* unary = dynamic_cast<const ast::UnaryExpr*>(&expr)) {
+        auto opType = unary->getOperand() ? inferType(*unary->getOperand(), scope) : Type::unknownType();
+        if (unary->getOp() == lexer::TokenKind::Exclaim) {
+            return Type::boolType();
+        }
+        return opType;
+    }
+
+    if (const auto* binary = dynamic_cast<const ast::BinaryExpr*>(&expr)) {
+        auto leftType = binary->getLeft() ? inferType(*binary->getLeft(), scope) : Type::unknownType();
+        auto rightType = binary->getRight() ? inferType(*binary->getRight(), scope) : Type::unknownType();
+        auto op = binary->getOp();
+
+        if (lexer::isAssignmentOperator(op)) {
+            if (binary->getRight()) {
+                checkAssignment(leftType, rightType, binary->getRight()->getSpan(), "assignment");
+            }
+            return leftType;
+        }
+
+        // Arithmetic operators: +, -, *, /
+        if (op == lexer::TokenKind::Plus || op == lexer::TokenKind::Minus ||
+            op == lexer::TokenKind::Star || op == lexer::TokenKind::Slash) {
+            if ((leftType->isInt() && rightType->isFloat()) ||
+                (leftType->isFloat() && rightType->isInt())) {
+                reportBinaryCoercion(leftType, rightType, op, binary->getSpan());
+                return Type::unknownType();
+            }
+            if (leftType->isInt() && rightType->isInt()) return Type::intType();
+            if (leftType->isFloat() && rightType->isFloat()) return Type::floatType();
+            if (op == lexer::TokenKind::Plus && (leftType->isString() || rightType->isString())) {
+                return Type::stringType();
+            }
+            return leftType;
+        }
+
+        // Remainder operator: %
+        if (op == lexer::TokenKind::Percent) {
+            if (leftType->isFloat() || rightType->isFloat()) {
+                reportBinaryCoercion(leftType, rightType, op, binary->getSpan());
+                return Type::unknownType();
+            }
+            return Type::intType();
+        }
+
+        // Relational and equality operators: <, <=, >, >=, ==, !=
+        if (op == lexer::TokenKind::Less || op == lexer::TokenKind::LessEqual ||
+            op == lexer::TokenKind::Greater || op == lexer::TokenKind::GreaterEqual ||
+            op == lexer::TokenKind::EqualEqual || op == lexer::TokenKind::ExclaimEqual) {
+            if ((leftType->isInt() && rightType->isFloat()) ||
+                (leftType->isFloat() && rightType->isInt())) {
+                reportBinaryCoercion(leftType, rightType, op, binary->getSpan());
+            }
+            return Type::boolType();
+        }
+
+        // Logical operators: &&, ||
+        if (op == lexer::TokenKind::AmpAmp || op == lexer::TokenKind::PipePipe) {
+            return Type::boolType();
+        }
+
+        return Type::unknownType();
+    }
+
+    if (const auto* call = dynamic_cast<const ast::CallExpr*>(&expr)) {
+        // Built-in numeric conversion methods: .toFloat(), .toInt(), etc.
+        if (const auto* member = dynamic_cast<const ast::MemberExpr*>(call->getCallee())) {
+            auto objType = member->getObject() ? inferType(*member->getObject(), scope) : Type::unknownType();
+            for (const auto& arg : call->getArgs()) {
+                if (arg.value) inferType(*arg.value, scope);
+            }
+            if (member->getMemberName() == "toFloat") return Type::floatType();
+            if (member->getMemberName() == "toInt") return Type::intType();
+            if (member->getMemberName() == "toString") return Type::stringType();
+            if (member->getMemberName() == "toChar") return Type::charType();
+            return Type::unknownType();
+        }
+
+        // Function call: lookup in scope and check arguments
+        if (const auto* calleeIdent = dynamic_cast<const ast::IdentExpr*>(call->getCallee())) {
+            auto sym = scope.lookup(calleeIdent->getName());
+            if (sym && sym->getAstNode()) {
+                if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(sym->getAstNode())) {
+                    for (size_t i = 0; i < call->getArgs().size(); ++i) {
+                        const auto& arg = call->getArgs()[i];
+                        if (arg.value) {
+                            auto argType = inferType(*arg.value, scope);
+                            if (i < fnDecl->getParams().size()) {
+                                auto pType = Type::fromAnnotation(fnDecl->getParams()[i].type.get());
+                                checkAssignment(pType, argType, arg.value->getSpan(), "function argument");
+                            }
+                        }
+                    }
+                    return Type::fromAnnotation(fnDecl->getReturnType());
+                }
+            }
+        }
+
+        for (const auto& arg : call->getArgs()) {
+            if (arg.value) inferType(*arg.value, scope);
+        }
+        return Type::unknownType();
+    }
+
+    if (const auto* ternary = dynamic_cast<const ast::TernaryExpr*>(&expr)) {
+        if (ternary->getCondition()) inferType(*ternary->getCondition(), scope);
+        auto thenType = ternary->getThenExpr() ? inferType(*ternary->getThenExpr(), scope) : Type::unknownType();
+        auto elseType = ternary->getElseExpr() ? inferType(*ternary->getElseExpr(), scope) : Type::unknownType();
+
+        if ((thenType->isInt() && elseType->isFloat()) ||
+            (thenType->isFloat() && elseType->isInt())) {
+            reportImplicitWidening(thenType, elseType, ternary->getSpan(), "ternary branches");
+        }
+        return thenType;
+    }
+
+    if (const auto* arrLit = dynamic_cast<const ast::ArrayLitExpr*>(&expr)) {
+        TypePtr elemType = Type::unknownType();
+        for (const auto& el : arrLit->getElements()) {
+            if (el) {
+                elemType = inferType(*el, scope);
+            }
+        }
+        return Type::array(elemType);
+    }
+
+    if (const auto* mapLit = dynamic_cast<const ast::MapLitExpr*>(&expr)) {
+        for (const auto& entry : mapLit->getEntries()) {
+            if (entry.key) inferType(*entry.key, scope);
+            if (entry.value) inferType(*entry.value, scope);
+        }
+        return Type::map(Type::unknownType(), Type::unknownType());
+    }
+
+    if (const auto* closure = dynamic_cast<const ast::ClosureExpr*>(&expr)) {
+        auto fnScope = scope.createChild(sema::ScopeKind::Function);
+        for (const auto& p : closure->getParams()) {
+            auto pSym = std::make_shared<sema::Symbol>(p.name, sema::SymbolKind::Parameter, p.span);
+            pSym->setTypeAnnotation(p.type.get());
+            fnScope->define(pSym);
+        }
+        if (closure->getBody()) {
+            auto prevRet = currentFunctionReturnType_;
+            currentFunctionReturnType_ = Type::fromAnnotation(closure->getReturnType());
+            checkZeroCoercion(*closure->getBody(), *fnScope);
+            currentFunctionReturnType_ = prevRet;
+        }
+        return Type::fromAnnotation(closure->getReturnType());
+    }
+
+    if (const auto* index = dynamic_cast<const ast::IndexExpr*>(&expr)) {
+        auto contType = index->getContainer() ? inferType(*index->getContainer(), scope) : Type::unknownType();
+        if (index->getIndex()) inferType(*index->getIndex(), scope);
+
+        if (contType->isArray()) {
+            const auto& arr = static_cast<const ArrayType&>(*contType);
+            return arr.getElementType();
+        }
+        if (contType->isMap()) {
+            const auto& m = static_cast<const MapType&>(*contType);
+            return m.getValueType();
+        }
+        return Type::unknownType();
+    }
+
+    if (const auto* member = dynamic_cast<const ast::MemberExpr*>(&expr)) {
+        if (member->getObject()) inferType(*member->getObject(), scope);
+        return Type::unknownType();
+    }
+
+    if (const auto* zonk = dynamic_cast<const ast::ZonkExpr*>(&expr)) {
+        auto pType = zonk->getPrimary() ? inferType(*zonk->getPrimary(), scope) : Type::unknownType();
+        if (zonk->getFallback()) {
+            auto fbType = inferType(*zonk->getFallback(), scope);
+            if ((pType->isInt() && fbType->isFloat()) ||
+                (pType->isFloat() && fbType->isInt())) {
+                reportImplicitWidening(fbType, pType, zonk->getFallback()->getSpan(), "zonk fallback");
+            }
+        }
+        if (zonk->getRecoveryBlock()) {
+            checkZeroCoercion(*zonk->getRecoveryBlock(), scope);
+        }
+        return pType;
+    }
+
+    return Type::unknownType();
 }
 
 } // namespace keety::typechecker

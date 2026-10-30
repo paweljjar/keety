@@ -1221,6 +1221,26 @@ std::unique_ptr<ast::Expr> Parser::parsePrimaryExpression() {
         return std::make_unique<ast::LiteralExpr>(lastConsumed_.span, lexer::TokenKind::KwNull, "null");
     }
 
+    // 2. Functional cast expressions: `int(x)`, `float(x)`, `bool(x)`, `char(x)`, `string(x)`
+    if (check(lexer::TokenKind::KwInt) || check(lexer::TokenKind::KwFloat) ||
+        check(lexer::TokenKind::KwChar) || check(lexer::TokenKind::KwString) ||
+        check(lexer::TokenKind::KwBool)) {
+        if (peek(1).is(lexer::TokenKind::LParen)) {
+            auto typeTok = advance();
+            advance(); // consume '('
+            auto arg = parseExpression();
+            const auto& rParen = expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' in functional cast");
+            diag::SourceSpan span{typeTok.span.start, rParen.span.end};
+            ast::PrimitiveTypeKind pKind = ast::PrimitiveTypeKind::Int;
+            if (typeTok.kind == lexer::TokenKind::KwFloat) pKind = ast::PrimitiveTypeKind::Float;
+            else if (typeTok.kind == lexer::TokenKind::KwBool) pKind = ast::PrimitiveTypeKind::Bool;
+            else if (typeTok.kind == lexer::TokenKind::KwChar) pKind = ast::PrimitiveTypeKind::Char;
+            else if (typeTok.kind == lexer::TokenKind::KwString) pKind = ast::PrimitiveTypeKind::String;
+            auto targetType = std::make_unique<ast::PrimitiveType>(typeTok.span, pKind);
+            return std::make_unique<ast::TypeCastExpr>(span, std::move(arg), std::move(targetType), false);
+        }
+    }
+
     // 2. Identifiers and `this`
     if (match(lexer::TokenKind::Identifier)) {
         return std::make_unique<ast::IdentExpr>(lastConsumed_.span, std::string(lastConsumed_.lexeme));
