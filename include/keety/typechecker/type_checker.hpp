@@ -59,13 +59,6 @@ public:
     /// Checks a statement for zero-coercion violations.
     bool checkZeroCoercion(const ast::Stmt& stmt, sema::Scope& scope);
 
-    /// Evaluates/infers the static semantic type of an expression within a given scope.
-    TypePtr inferType(const ast::Expr& expr, sema::Scope& scope);
-
-    /// Checks whether actualType can be assigned/passed to expectedType without coercion.
-    /// Emits E3002 if implicit numeric widening/narrowing occurs.
-    bool checkAssignment(TypePtr expectedType, TypePtr actualType, diag::SourceSpan span, std::string_view contextDesc = "");
-
     // Factory methods for creating standardized E3002 diagnostics
     [[nodiscard]] static diag::Diagnostic createImplicitWideningDiagnostic(
         TypePtr fromType,
@@ -79,6 +72,30 @@ public:
         lexer::TokenKind op,
         diag::SourceSpan span);
 
+    // --- Task 3.3.3: Contextual Typing of Empty Collection Literals (E3009 / E3003) ---
+
+    /// Evaluates/infers the static semantic type of an expression within a given scope,
+    /// taking an optional expected contextual type into account (e.g. for [] and {}).
+    TypePtr inferType(const ast::Expr& expr, sema::Scope& scope, TypePtr contextualType = nullptr);
+
+    /// Checks whether actualType can be assigned/passed to expectedType without coercion or mismatch.
+    /// Emits E3002 if numeric coercion occurs, or E3003 if types are incompatible.
+    bool checkAssignment(TypePtr expectedType, TypePtr actualType, diag::SourceSpan span, std::string_view contextDesc = "");
+
+    /// Complete type check validating explicit annotations, zero-coercion, and contextual collections.
+    bool checkTypes(const parser::ModuleAST& module, sema::Scope* rootScope = nullptr);
+
+    // Factory methods for Task 3.3.3 diagnostics
+    [[nodiscard]] static diag::Diagnostic createCannotInferCollectionTypeDiagnostic(
+        std::string_view literalKind,
+        diag::SourceSpan span);
+
+    [[nodiscard]] static diag::Diagnostic createTypeMismatchDiagnostic(
+        TypePtr expectedType,
+        TypePtr actualType,
+        diag::SourceSpan span,
+        std::string_view contextDesc = "");
+
 private:
     diag::DiagnosticEmitter* emitter_{nullptr};
     bool hasErrors_{false};
@@ -87,6 +104,8 @@ private:
     void reportMissingType(std::string_view entityKind, std::string_view entityName, diag::SourceSpan span);
     void reportImplicitWidening(TypePtr fromType, TypePtr toType, diag::SourceSpan span, std::string_view contextDesc);
     void reportBinaryCoercion(TypePtr leftType, TypePtr rightType, lexer::TokenKind op, diag::SourceSpan span);
+    void reportCannotInferCollectionType(std::string_view literalKind, diag::SourceSpan span);
+    void reportTypeMismatch(TypePtr expectedType, TypePtr actualType, diag::SourceSpan span, std::string_view contextDesc);
 };
 
 } // namespace keety::typechecker

@@ -392,6 +392,95 @@ void TypeChecker::reportBinaryCoercion(
     }
 }
 
+// =============================================================================
+// Task 3.3.3: Contextual Typing of Empty Collection Literals (E3009 / E3003)
+// =============================================================================
+
+diag::Diagnostic TypeChecker::createCannotInferCollectionTypeDiagnostic(
+    std::string_view literalKind,
+    diag::SourceSpan span) {
+    std::string msg = "cannot infer type of empty " + std::string(literalKind) + " without explicit contextual type";
+
+    auto d = diag::Diagnostic::makeError(
+        diag::ErrorCode::CannotInferCollectionType,
+        std::move(msg),
+        span.isValid() ? span.start : diag::SourceLocation{});
+
+    if (span.isValid()) {
+        d.labels.push_back(diag::DiagnosticLabel{
+            span,
+            "empty collection literal requires an explicit contextual type",
+            true
+        });
+    }
+
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Note,
+        "Empty collection literals do not possess an inherent type and derive their concrete type contextually from an explicit type annotation."
+    });
+
+    std::string help = "assign to an explicitly typed binding or provide an explicit type annotation, e.g. 'let x: ";
+    if (literalKind.find("map") != std::string::npos) {
+        help += "map<K, V> = {}'";
+    } else {
+        help += "array<T> = []'";
+    }
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Help,
+        std::move(help)
+    });
+
+    return d;
+}
+
+diag::Diagnostic TypeChecker::createTypeMismatchDiagnostic(
+    TypePtr expectedType,
+    TypePtr actualType,
+    diag::SourceSpan span,
+    std::string_view contextDesc) {
+    std::string expStr = expectedType ? expectedType->toString() : "<unknown>";
+    std::string actStr = actualType ? actualType->toString() : "<unknown>";
+
+    std::string msg = "type mismatch: expected '" + expStr + "', found '" + actStr + "'";
+    if (!contextDesc.empty()) {
+        msg += " in " + std::string(contextDesc);
+    }
+
+    auto d = diag::Diagnostic::makeError(
+        diag::ErrorCode::TypeMismatch,
+        std::move(msg),
+        span.isValid() ? span.start : diag::SourceLocation{});
+
+    if (span.isValid()) {
+        d.labels.push_back(diag::DiagnosticLabel{
+            span,
+            "expected '" + expStr + "', found '" + actStr + "'",
+            true
+        });
+    }
+
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Note,
+        "KeetScript requires expression types to match expected static types exactly."
+    });
+
+    return d;
+}
+
+void TypeChecker::reportCannotInferCollectionType(std::string_view literalKind, diag::SourceSpan span) {
+    hasErrors_ = true;
+    if (emitter_ != nullptr) {
+        emitter_->report(createCannotInferCollectionTypeDiagnostic(literalKind, span));
+    }
+}
+
+void TypeChecker::reportTypeMismatch(TypePtr expectedType, TypePtr actualType, diag::SourceSpan span, std::string_view contextDesc) {
+    hasErrors_ = true;
+    if (emitter_ != nullptr) {
+        emitter_->report(createTypeMismatchDiagnostic(expectedType, actualType, span, contextDesc));
+    }
+}
+
 bool TypeChecker::checkAssignment(
     TypePtr expectedType,
     TypePtr actualType,
@@ -407,10 +496,30 @@ bool TypeChecker::checkAssignment(
         return false;
     }
 
+    // Check union compatibility (if expectedType is a union containing actualType)
+    if (expectedType->isUnion()) {
+        const auto& unionT = static_cast<const UnionType&>(*expectedType);
+        for (const auto& variant : unionT.getVariants()) {
+            if (variant && variant->equals(*actualType)) {
+                return true;
+            }
+        }
+    }
+
+    // Exact structural type equality
+    if (!expectedType->equals(*actualType)) {
+        reportTypeMismatch(expectedType, actualType, span, contextDesc);
+        return false;
+    }
+
     return true;
 }
 
 bool TypeChecker::checkZeroCoercion(const parser::ModuleAST& module, sema::Scope* rootScope) {
+    return checkTypes(module, rootScope);
+}
+
+bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootScope) {
     std::shared_ptr<sema::Scope> ownedUniverse;
     std::shared_ptr<sema::Scope> ownedModule;
     sema::Scope* targetScope = rootScope;
@@ -470,7 +579,7 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
         scope.define(sym);
 
         if (varDecl->hasInitializer()) {
-            auto initType = inferType(*varDecl->getInitializer(), scope);
+            auto initType = inferType(*varDecl->getInitializer(), scope, declType);
             checkAssignment(declType, initType, varDecl->getInitializer()->getSpan(), "variable initialization");
         }
     } else if (const auto* constDecl = dynamic_cast<const ast::ConstDecl*>(&decl)) {
@@ -481,7 +590,7 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
         scope.define(sym);
 
         if (constDecl->getInitializer()) {
-            auto initType = inferType(*constDecl->getInitializer(), scope);
+            auto initType = inferType(*constDecl->getInitializer(), scope, declType);
             checkAssignment(declType, initType, constDecl->getInitializer()->getSpan(), "constant initialization");
         }
     } else if (const auto* defDecl = dynamic_cast<const ast::DefineDecl*>(&decl)) {
@@ -492,7 +601,7 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
         scope.define(sym);
 
         if (defDecl->getValue()) {
-            auto initType = inferType(*defDecl->getValue(), scope);
+            auto initType = inferType(*defDecl->getValue(), scope, declType);
             checkAssignment(declType, initType, defDecl->getValue()->getSpan(), "define initialization");
         }
     } else if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(&decl)) {
@@ -506,7 +615,7 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
             fnScope->define(pSym);
 
             if (param.defaultValue) {
-                auto defType = inferType(*param.defaultValue, *fnScope);
+                auto defType = inferType(*param.defaultValue, *fnScope, pType);
                 checkAssignment(pType, defType, param.defaultValue->getSpan(), "parameter default value");
             }
         }
@@ -527,7 +636,7 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
             classScope->define(fSym);
 
             if (field.initializer) {
-                auto initType = inferType(*field.initializer, *classScope);
+                auto initType = inferType(*field.initializer, *classScope, fType);
                 checkAssignment(fType, initType, field.initializer->getSpan(), "class field initialization");
             }
         }
@@ -605,7 +714,7 @@ bool TypeChecker::checkZeroCoercion(const ast::Stmt& stmt, sema::Scope& scope) {
         }
     } else if (const auto* returnStmt = dynamic_cast<const ast::ReturnStmt*>(&stmt)) {
         if (returnStmt->hasValue()) {
-            auto valType = inferType(*returnStmt->getValue(), scope);
+            auto valType = inferType(*returnStmt->getValue(), scope, currentFunctionReturnType_);
             if (currentFunctionReturnType_) {
                 checkAssignment(currentFunctionReturnType_, valType, returnStmt->getValue()->getSpan(), "return statement");
             }
@@ -632,7 +741,7 @@ bool TypeChecker::checkZeroCoercion(const ast::Stmt& stmt, sema::Scope& scope) {
     return !hasErrors_;
 }
 
-TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope) {
+TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePtr contextualType) {
     if (const auto* lit = dynamic_cast<const ast::LiteralExpr*>(&expr)) {
         switch (lit->getLiteralKind()) {
         case lexer::TokenKind::IntLiteral:
@@ -689,16 +798,19 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope) {
     }
 
     if (const auto* binary = dynamic_cast<const ast::BinaryExpr*>(&expr)) {
-        auto leftType = binary->getLeft() ? inferType(*binary->getLeft(), scope) : Type::unknownType();
-        auto rightType = binary->getRight() ? inferType(*binary->getRight(), scope) : Type::unknownType();
         auto op = binary->getOp();
 
         if (lexer::isAssignmentOperator(op)) {
+            auto leftType = binary->getLeft() ? inferType(*binary->getLeft(), scope) : Type::unknownType();
+            auto rightType = binary->getRight() ? inferType(*binary->getRight(), scope, leftType) : Type::unknownType();
             if (binary->getRight()) {
                 checkAssignment(leftType, rightType, binary->getRight()->getSpan(), "assignment");
             }
             return leftType;
         }
+
+        auto leftType = binary->getLeft() ? inferType(*binary->getLeft(), scope) : Type::unknownType();
+        auto rightType = binary->getRight() ? inferType(*binary->getRight(), scope) : Type::unknownType();
 
         // Arithmetic operators: +, -, *, /
         if (op == lexer::TokenKind::Plus || op == lexer::TokenKind::Minus ||
@@ -766,9 +878,11 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope) {
                     for (size_t i = 0; i < call->getArgs().size(); ++i) {
                         const auto& arg = call->getArgs()[i];
                         if (arg.value) {
-                            auto argType = inferType(*arg.value, scope);
-                            if (i < fnDecl->getParams().size()) {
-                                auto pType = Type::fromAnnotation(fnDecl->getParams()[i].type.get());
+                            TypePtr pType = (i < fnDecl->getParams().size())
+                                ? Type::fromAnnotation(fnDecl->getParams()[i].type.get())
+                                : nullptr;
+                            auto argType = inferType(*arg.value, scope, pType);
+                            if (pType) {
                                 checkAssignment(pType, argType, arg.value->getSpan(), "function argument");
                             }
                         }
@@ -786,32 +900,90 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope) {
 
     if (const auto* ternary = dynamic_cast<const ast::TernaryExpr*>(&expr)) {
         if (ternary->getCondition()) inferType(*ternary->getCondition(), scope);
-        auto thenType = ternary->getThenExpr() ? inferType(*ternary->getThenExpr(), scope) : Type::unknownType();
-        auto elseType = ternary->getElseExpr() ? inferType(*ternary->getElseExpr(), scope) : Type::unknownType();
+        auto thenType = ternary->getThenExpr() ? inferType(*ternary->getThenExpr(), scope, contextualType) : Type::unknownType();
+        auto elseType = ternary->getElseExpr() ? inferType(*ternary->getElseExpr(), scope, contextualType) : Type::unknownType();
 
         if ((thenType->isInt() && elseType->isFloat()) ||
             (thenType->isFloat() && elseType->isInt())) {
             reportImplicitWidening(thenType, elseType, ternary->getSpan(), "ternary branches");
         }
-        return thenType;
+        return contextualType ? contextualType : thenType;
     }
 
     if (const auto* arrLit = dynamic_cast<const ast::ArrayLitExpr*>(&expr)) {
-        TypePtr elemType = Type::unknownType();
+        if (arrLit->getElements().empty()) {
+            if (contextualType && contextualType->isArray()) {
+                return contextualType;
+            }
+            if (contextualType && !contextualType->isArray() && !contextualType->isUnknown()) {
+                reportTypeMismatch(contextualType, Type::array(Type::unknownType()), arrLit->getSpan(), "empty array literal");
+                return Type::array(Type::unknownType());
+            }
+            reportCannotInferCollectionType("array literal '[]'", arrLit->getSpan());
+            return Type::array(Type::unknownType());
+        }
+
+        TypePtr elemTarget = (contextualType && contextualType->isArray())
+            ? static_cast<const ArrayType&>(*contextualType).getElementType()
+            : nullptr;
+        TypePtr inferredElem = elemTarget;
+
         for (const auto& el : arrLit->getElements()) {
             if (el) {
-                elemType = inferType(*el, scope);
+                auto elType = inferType(*el, scope, elemTarget);
+                if (elemTarget) {
+                    checkAssignment(elemTarget, elType, el->getSpan(), "array element");
+                } else if (!inferredElem || inferredElem->isUnknown()) {
+                    inferredElem = elType;
+                }
             }
         }
-        return Type::array(elemType);
+        return contextualType ? contextualType : Type::array(inferredElem ? inferredElem : Type::unknownType());
     }
 
     if (const auto* mapLit = dynamic_cast<const ast::MapLitExpr*>(&expr)) {
-        for (const auto& entry : mapLit->getEntries()) {
-            if (entry.key) inferType(*entry.key, scope);
-            if (entry.value) inferType(*entry.value, scope);
+        if (mapLit->getEntries().empty()) {
+            if (contextualType && contextualType->isMap()) {
+                return contextualType;
+            }
+            if (contextualType && !contextualType->isMap() && !contextualType->isUnknown()) {
+                reportTypeMismatch(contextualType, Type::map(Type::unknownType(), Type::unknownType()), mapLit->getSpan(), "empty map literal");
+                return Type::map(Type::unknownType(), Type::unknownType());
+            }
+            reportCannotInferCollectionType("map literal '{}'", mapLit->getSpan());
+            return Type::map(Type::unknownType(), Type::unknownType());
         }
-        return Type::map(Type::unknownType(), Type::unknownType());
+
+        TypePtr keyTarget = (contextualType && contextualType->isMap())
+            ? static_cast<const MapType&>(*contextualType).getKeyType()
+            : nullptr;
+        TypePtr valTarget = (contextualType && contextualType->isMap())
+            ? static_cast<const MapType&>(*contextualType).getValueType()
+            : nullptr;
+        TypePtr inferredKey = keyTarget;
+        TypePtr inferredVal = valTarget;
+
+        for (const auto& entry : mapLit->getEntries()) {
+            if (entry.key) {
+                auto kType = inferType(*entry.key, scope, keyTarget);
+                if (keyTarget) {
+                    checkAssignment(keyTarget, kType, entry.key->getSpan(), "map key");
+                } else if (!inferredKey || inferredKey->isUnknown()) {
+                    inferredKey = kType;
+                }
+            }
+            if (entry.value) {
+                auto vType = inferType(*entry.value, scope, valTarget);
+                if (valTarget) {
+                    checkAssignment(valTarget, vType, entry.value->getSpan(), "map value");
+                } else if (!inferredVal || inferredVal->isUnknown()) {
+                    inferredVal = vType;
+                }
+            }
+        }
+        return contextualType ? contextualType : Type::map(
+            inferredKey ? inferredKey : Type::unknownType(),
+            inferredVal ? inferredVal : Type::unknownType());
     }
 
     if (const auto* closure = dynamic_cast<const ast::ClosureExpr*>(&expr)) {
@@ -851,9 +1023,9 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope) {
     }
 
     if (const auto* zonk = dynamic_cast<const ast::ZonkExpr*>(&expr)) {
-        auto pType = zonk->getPrimary() ? inferType(*zonk->getPrimary(), scope) : Type::unknownType();
+        auto pType = zonk->getPrimary() ? inferType(*zonk->getPrimary(), scope, contextualType) : Type::unknownType();
         if (zonk->getFallback()) {
-            auto fbType = inferType(*zonk->getFallback(), scope);
+            auto fbType = inferType(*zonk->getFallback(), scope, contextualType ? contextualType : pType);
             if ((pType->isInt() && fbType->isFloat()) ||
                 (pType->isFloat() && fbType->isInt())) {
                 reportImplicitWidening(fbType, pType, zonk->getFallback()->getSpan(), "zonk fallback");
@@ -862,7 +1034,7 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope) {
         if (zonk->getRecoveryBlock()) {
             checkZeroCoercion(*zonk->getRecoveryBlock(), scope);
         }
-        return pType;
+        return contextualType ? contextualType : pType;
     }
 
     return Type::unknownType();

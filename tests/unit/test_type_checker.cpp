@@ -403,3 +403,227 @@ TEST_CASE("Task 3.3.2: Strict Zero-Coercion - Class Field Initializers (E3002)",
     }
 }
 
+// =============================================================================
+// Task 3.3.3: Contextual Typing of Empty Collection Literals (E3009 / E3003)
+// =============================================================================
+
+TEST_CASE("Task 3.3.3: Contextual Typing - Empty Array Literals '[]'", "[typechecker][contextual]") {
+    SECTION("Variable declaration context: let a: array<int> = [] succeeds") {
+        ParseResult res("let a: array<int> = [];");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Constant context: const a: array<string> = [] succeeds") {
+        ParseResult res("const a: array<string> = [];");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Compile-time define context: define EMPTY: array<bool> = [] succeeds") {
+        ParseResult res("define EMPTY: array<bool> = [];");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Reassignment context: a = [] succeeds") {
+        ParseResult res(
+            "fn run(): void {\n"
+            "    let a: array<int> = [1, 2];\n"
+            "    a = [];\n"
+            "}\n");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Function call argument context: clear([]) succeeds") {
+        ParseResult res(
+            "fn clear(items: array<int>): void {}\n"
+            "fn run(): void { clear([]); }\n");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Function return statement context: return [] succeeds") {
+        ParseResult res(
+            "fn getItems(): array<float> {\n"
+            "    return [];\n"
+            "}\n");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Class field default initializer context succeeds") {
+        ParseResult res("class Cache { pub let items: array<string> = []; }");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+}
+
+TEST_CASE("Task 3.3.3: Contextual Typing - Empty Map Literals '{}'", "[typechecker][contextual]") {
+    SECTION("Variable declaration context: let m: map<string, int> = {} succeeds") {
+        ParseResult res("let m: map<string, int> = {};");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Constant context: const m: map<string, string> = {} succeeds") {
+        ParseResult res("const m: map<string, string> = {};");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Compile-time define context: define EMPTY_MAP: map<int, int> = {} succeeds") {
+        ParseResult res("define EMPTY_MAP: map<int, int> = {};");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Reassignment context: m = {} succeeds") {
+        ParseResult res(
+            "fn run(): void {\n"
+            "    let m: map<string, int> = {\"x\": 1};\n"
+            "    m = {};\n"
+            "}\n");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Function call argument context: reset({}) succeeds") {
+        ParseResult res(
+            "fn reset(config: map<string, string>): void {}\n"
+            "fn run(): void { reset({}); }\n");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Function return statement context: return {} succeeds") {
+        ParseResult res(
+            "fn getScores(): map<string, int> {\n"
+            "    return {};\n"
+            "}\n");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Class field default initializer context succeeds") {
+        ParseResult res("class Config { pub let settings: map<string, string> = {}; }");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+}
+
+TEST_CASE("Task 3.3.3: Contextual Typing - Nested Empty Collections", "[typechecker][contextual]") {
+    SECTION("Nested empty arrays in array<array<int>> succeed") {
+        ParseResult res("let matrix: array<array<int>> = [[], [1, 2], []];");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Nested empty array in map<string, array<int>> succeeds") {
+        ParseResult res("let table: map<string, array<int>> = {\"primes\": [2, 3], \"empty\": []};");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Nested empty map in map<string, map<string, int>> succeeds") {
+        ParseResult res("let nested: map<string, map<string, int>> = {\"group\": {}};");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+}
+
+TEST_CASE("Task 3.3.3: Contextual Typing - Ternary and Zonk Fallback Collections", "[typechecker][contextual]") {
+    SECTION("Empty array in ternary conditional succeeds") {
+        ParseResult res(
+            "fn run(flag: bool): void {\n"
+            "    let a: array<int> = flag ? [1, 2] : [];\n"
+            "}\n");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Empty array in zonk fallback succeeds") {
+        ParseResult res(
+            "fn fetch(): array<int> { return []; }\n"
+            "fn run(): void {\n"
+            "    let a: array<int> = fetch() zonk [];\n"
+            "}\n");
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+}
+
+TEST_CASE("Task 3.3.3: Contextual Typing - Untyped Empty Collections Emit E3009", "[typechecker][E3009]") {
+    SECTION("typeof([]) without contextual type emits E3009") {
+        ParseResult res("fn run(): void { let s: string = typeof([]); }");
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::CannotInferCollectionType));
+
+        const auto& d = res.emitter.getDiagnostics().front();
+        REQUIRE(d.code == "E3009");
+        REQUIRE(d.message.find("cannot infer type of empty array literal '[]'") != std::string::npos);
+    }
+
+    SECTION("typeof({}) without contextual type emits E3009") {
+        ParseResult res("fn run(): void { let s: string = typeof({}); }");
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::CannotInferCollectionType));
+
+        const auto& d = res.emitter.getDiagnostics().front();
+        REQUIRE(d.code == "E3009");
+        REQUIRE(d.message.find("cannot infer type of empty map literal '{}'") != std::string::npos);
+    }
+}
+
+TEST_CASE("Task 3.3.3: Contextual Typing - Incompatible Collection Types Emit E3003", "[typechecker][E3003]") {
+    SECTION("Empty array assigned to scalar int emits E3003") {
+        ParseResult res("let x: int = [];");
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+
+        const auto& d = res.emitter.getDiagnostics().front();
+        REQUIRE(d.code == "E3003");
+        REQUIRE(d.message.find("type mismatch: expected 'int'") != std::string::npos);
+    }
+
+    SECTION("Empty map assigned to scalar string emits E3003") {
+        ParseResult res("let s: string = {};");
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Empty map assigned to array<int> emits E3003") {
+        ParseResult res("let a: array<int> = {};");
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Empty array assigned to map<string, int> emits E3003") {
+        ParseResult res("let m: map<string, int> = [];");
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+}
+
+TEST_CASE("Task 3.3.3: Contextual Typing - Non-Empty Collection Elements Checked", "[typechecker]") {
+    SECTION("Array elements checked for zero-coercion (E3002)") {
+        ParseResult res("let a: array<float> = [42];");
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ImplicitTypeWidening));
+    }
+
+    SECTION("Map values checked for zero-coercion (E3002)") {
+        ParseResult res("let m: map<string, float> = {\"k\": 42};");
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ImplicitTypeWidening));
+    }
+
+    SECTION("Array elements checked for type mismatch (E3003)") {
+        ParseResult res("let a: array<int> = [\"not_an_int\"];");
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+}
+
+
