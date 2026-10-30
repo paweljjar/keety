@@ -44,7 +44,7 @@ This document specifies the operational development plan for the `keety` compile
 - [x] **Task 2.1.1:** Define `TokenKind` (keywords, literals, operators, delimiters, special tokens) and the `Token` struct.
 - [x] **Task 2.1.2:** Implement UTF-8 scanner with *Maximal Munch* rule and comment handling (`//`, `/* ... */`).
 - [x] **Task 2.1.3:** Implement context-sensitive disambiguation for Blank Identifier: standalone `_` as `Token::BlankIdent`, and `_count` as a regular identifier.
-- [ ] **Task 2.1.4:** Implement angle bracket disambiguation: `<` immediately following an identifier with no whitespace triggers generic type arguments, and type-context `>` does not combine into `>>`.
+- [x] **Task 2.1.4:** Implement angle bracket disambiguation: `<` immediately following an identifier with no whitespace triggers generic type arguments, and type-context `>` does not combine into `>>`.
 - [ ] **Task 2.1.5:** Implement multiline template literal scanner with recursive `${expr}` interpolation state stack.
 
 #### **Phase 2.2: Abstract Syntax Tree Representation (`keety::ast`)**

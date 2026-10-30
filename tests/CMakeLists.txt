@@ -23,6 +23,7 @@ add_executable(keety_unit_tests
     unit/test_token.cpp
     unit/test_lexer.cpp
     unit/test_blank_ident.cpp
+    unit/test_angle_brackets.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE

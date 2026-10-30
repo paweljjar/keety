@@ -137,6 +137,7 @@ bool Lexer::match(char expected) noexcept {
 }
 
 void Lexer::skipWhitespaceAndComments() {
+    hadPrecedingWhitespace_ = false;
     while (!isAtEnd()) {
         char c = peek();
         switch (c) {
@@ -144,10 +145,12 @@ void Lexer::skipWhitespaceAndComments() {
         case '\t':
         case '\r':
         case '\n':
+            hadPrecedingWhitespace_ = true;
             advance();
             break;
         case '/':
             if (peekNext() == '/') {
+                hadPrecedingWhitespace_ = true;
                 // Line comment: skip until end of line or EOF
                 advance(); // '/'
                 advance(); // '/'
@@ -155,6 +158,7 @@ void Lexer::skipWhitespaceAndComments() {
                     advance();
                 }
             } else if (peekNext() == '*') {
+                hadPrecedingWhitespace_ = true;
                 // Block comment: skip until '*/'
                 size_t commentStart = cursor_;
                 advance(); // '/'
@@ -290,11 +294,23 @@ Token Lexer::scanToken() {
         if (match('=')) return makeToken(TokenKind::ExclaimEqual, start, cursor_);
         return makeToken(TokenKind::Exclaim, start, cursor_);
     case '<':
+        if (mode_ == LexerMode::TypeContext || genericDepth_ > 0) {
+            // When already inside a type context, each '<' increases nesting level
+            ++genericDepth_;
+            return makeToken(TokenKind::Less, start, cursor_);
+        }
         if (match('=')) return makeToken(TokenKind::LessEqual, start, cursor_);
         return makeToken(TokenKind::Less, start, cursor_);
     case '>':
-        if (mode_ == LexerMode::TypeContext) {
-            // In TypeContext, '>' closes type bracket immediately without combining into '>=' or '>>'
+        if (mode_ == LexerMode::TypeContext || genericDepth_ > 0) {
+            // Section 'Tokens' & 'Closing Angle Brackets in Type Contexts (> vs. >= / >>)':
+            // In TypeContext, '>' closes the innermost open generic bracket without combining into '>=' or '>>'
+            if (genericDepth_ > 0) {
+                --genericDepth_;
+            }
+            if (genericDepth_ == 0) {
+                mode_ = LexerMode::Normal;
+            }
             return makeToken(TokenKind::Greater, start, cursor_);
         }
         if (match('=')) return makeToken(TokenKind::GreaterEqual, start, cursor_);
