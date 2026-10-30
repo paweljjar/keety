@@ -1,6 +1,4 @@
 #pragma once
 
-// Runtime header directory for generated C++ translation units
-namespace keet {
-    // KeetScript native runtime definitions will reside here
-}
+// Canonical runtime headers included by generated C++ translation units
+#include <keet/error.hpp>

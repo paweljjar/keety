@@ -7,6 +7,7 @@ add_library(keety_core STATIC
 
 target_include_directories(keety_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../runtime>
     $<INSTALL_INTERFACE:include>
 )
 
