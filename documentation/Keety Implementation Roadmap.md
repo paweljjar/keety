@@ -9,8 +9,8 @@ This document specifies the operational development plan for the `keety` compile
 - [x] **Stage I: Foundations, Diagnostic Infrastructure & Runtime** (100% Completed)
 - [x] **Stage II: Front-End (Lexer, Parser & AST)** (100% Completed)
 - [x] **Stage III: Module Dependency Graph & Semantic Analysis** (100% Completed)
-- [ ] **Stage IV: KeetIR Intermediate Representation & Optimizations** (Next)
-- [ ] **Stage V: Back-End (C++17 Code Emission & Toolchain Linking)**
+- [x] **Stage IV: KeetIR Intermediate Representation & Optimizations** (100% Completed)
+- [ ] **Stage V: Back-End (C++17 Code Emission & Toolchain Linking)** (Next)
 - [ ] **Stage VI: CLI Driver, Conformance Test Suite & Benchmarks**
 
 ---
@@ -96,7 +96,7 @@ This document specifies the operational development plan for the `keety` compile
 
 ---
 
-### **Stage IV: KeetIR Intermediate Representation & Optimizations** `[CURRENT]`
+### **Stage IV: KeetIR Intermediate Representation & Optimizations** `[COMPLETED]`
 
 #### **Phase 4.1: AST Lowering to KeetIR**
 - [x] **Task 4.1.1:** Define KeetIR instruction set and Control Flow Graph (CFG with Basic Blocks).
@@ -112,7 +112,7 @@ This document specifies the operational development plan for the `keety` compile
 
 ---
 
-### **Stage V: Back-End (C++17 Code Emission & Toolchain Linking)**
+### **Stage V: Back-End (C++17 Code Emission & Toolchain Linking)** `[CURRENT]`
 
 #### **Phase 5.1: C++ Header Emitter (`<module>.hpp`)**
 - [ ] **Task 5.1.1:** Emit `#pragma once`, required standard headers, and imported module includes.
