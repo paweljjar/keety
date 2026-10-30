@@ -68,7 +68,7 @@ This document specifies the operational development plan for the `keety` compile
 - [x] **Task 3.1.1:** Implement module path resolution (standard library modules, third-party `keet_modules/`, local `./relative` paths).
 - [x] **Task 3.1.2:** Construct directed dependency graph $G = (V, E)$.
 - [x] **Task 3.1.3:** Implement Tarjan's Strongly Connected Components (SCC) algorithm to detect cycles and emit `E1001`.
-- [ ] **Task 3.1.4:** Compute deterministic topological initialization order (post-order DFS) and single-instantiation deduplication for diamond imports.
+- [x] **Task 3.1.4:** Compute deterministic topological initialization order (post-order DFS) and single-instantiation deduplication for diamond imports.
 
 #### **Phase 3.2: Symbol Scoping & Strict No-Shadowing Enforcement**
 - [ ] **Task 3.2.1:** Implement hierarchical symbol table (`Scope`: Universe $\rightarrow$ Module $\rightarrow$ Function/Method $\rightarrow$ Block).

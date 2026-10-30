@@ -37,6 +37,7 @@ add_executable(keety_unit_tests
     unit/test_module_path_resolver.cpp
     unit/test_module_graph.cpp
     unit/test_cycle_detector.cpp
+    unit/test_topological_sorter.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE
