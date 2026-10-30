@@ -39,6 +39,12 @@ public:
     std::unique_ptr<ast::Expr> parseExpression(int minPrecedence = 0);
 
 private:
+    // --- Pratt Expression Parsing ---
+    std::unique_ptr<ast::Expr> parsePrimaryExpression();
+    std::unique_ptr<ast::Expr> parsePrefixExpression();
+    static int getBinaryPrecedence(lexer::TokenKind kind) noexcept;
+    static bool isRightAssociative(lexer::TokenKind kind) noexcept;
+
     // --- LL(k) lookahead buffer management ---
     const lexer::Token& peek(size_t k = 0);
     const lexer::Token& advance();

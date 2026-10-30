@@ -757,11 +757,72 @@ std::unique_ptr<ast::TypeAnnotation> Parser::parseTypeAnnotation() {
     return baseType;
 }
 
-std::unique_ptr<ast::Expr> Parser::parseExpression(int minPrecedence) {
-    (void)minPrecedence;
+int Parser::getBinaryPrecedence(lexer::TokenKind kind) noexcept {
+    switch (kind) {
+    case lexer::TokenKind::Equal:
+    case lexer::TokenKind::PlusEqual:
+    case lexer::TokenKind::MinusEqual:
+    case lexer::TokenKind::StarEqual:
+    case lexer::TokenKind::SlashEqual:
+    case lexer::TokenKind::PercentEqual:
+        return 1; // Assignment operators (lowest precedence)
+
+    case lexer::TokenKind::Question:
+        return 2; // Ternary operator `? :`
+
+    case lexer::TokenKind::KwZonk:
+        return 3; // `zonk` error recovery
+
+    case lexer::TokenKind::PipePipe:
+        return 4; // Logical OR `||`
+
+    case lexer::TokenKind::AmpAmp:
+        return 5; // Logical AND `&&`
+
+    case lexer::TokenKind::EqualEqual:
+    case lexer::TokenKind::ExclaimEqual:
+        return 6; // Equality `==`, `!=`
+
+    case lexer::TokenKind::Less:
+    case lexer::TokenKind::LessEqual:
+    case lexer::TokenKind::Greater:
+    case lexer::TokenKind::GreaterEqual:
+    case lexer::TokenKind::KwAs:
+        return 7; // Relational `<`, `<=`, `>`, `>=` and type assertion `as`
+
+    case lexer::TokenKind::Plus:
+    case lexer::TokenKind::Minus:
+        return 8; // Additive `+`, `-`
+
+    case lexer::TokenKind::Star:
+    case lexer::TokenKind::Slash:
+    case lexer::TokenKind::Percent:
+        return 9; // Multiplicative `*`, `/`, `%`
+
+    default:
+        return 0; // Not a binary operator
+    }
+}
+
+bool Parser::isRightAssociative(lexer::TokenKind kind) noexcept {
+    switch (kind) {
+    case lexer::TokenKind::Equal:
+    case lexer::TokenKind::PlusEqual:
+    case lexer::TokenKind::MinusEqual:
+    case lexer::TokenKind::StarEqual:
+    case lexer::TokenKind::SlashEqual:
+    case lexer::TokenKind::PercentEqual:
+    case lexer::TokenKind::Question:
+        return true;
+    default:
+        return false;
+    }
+}
+
+std::unique_ptr<ast::Expr> Parser::parsePrimaryExpression() {
     diag::SourceLocation startLoc = peek().span.start;
 
-    // Basic primary expression parsing (Pratt precedence climbing in Task 2.3.2)
+    // 1. Literals
     if (match(lexer::TokenKind::IntLiteral)) {
         return std::make_unique<ast::LiteralExpr>(lastConsumed_.span, lexer::TokenKind::IntLiteral, std::string(lastConsumed_.lexeme));
     }
@@ -771,30 +832,216 @@ std::unique_ptr<ast::Expr> Parser::parseExpression(int minPrecedence) {
     if (match(lexer::TokenKind::StringLiteral)) {
         return std::make_unique<ast::LiteralExpr>(lastConsumed_.span, lexer::TokenKind::StringLiteral, std::string(lastConsumed_.lexeme));
     }
+    if (match(lexer::TokenKind::CharLiteral)) {
+        return std::make_unique<ast::LiteralExpr>(lastConsumed_.span, lexer::TokenKind::CharLiteral, std::string(lastConsumed_.lexeme));
+    }
     if (match(lexer::TokenKind::KwTrue) || match(lexer::TokenKind::KwFalse)) {
         return std::make_unique<ast::LiteralExpr>(lastConsumed_.span, lastConsumed_.kind, std::string(lastConsumed_.lexeme));
     }
     if (match(lexer::TokenKind::KwNull)) {
         return std::make_unique<ast::LiteralExpr>(lastConsumed_.span, lexer::TokenKind::KwNull, "null");
     }
+
+    // 2. Identifiers and `this`
     if (match(lexer::TokenKind::Identifier)) {
-        auto id = std::make_unique<ast::IdentExpr>(lastConsumed_.span, std::string(lastConsumed_.lexeme));
-        if (match(lexer::TokenKind::PlusPlus)) {
-            return std::make_unique<ast::UnaryExpr>(diag::SourceSpan{startLoc, lastConsumed_.span.end},
-                                                   lexer::TokenKind::PlusPlus, std::move(id), false);
+        return std::make_unique<ast::IdentExpr>(lastConsumed_.span, std::string(lastConsumed_.lexeme));
+    }
+    if (match(lexer::TokenKind::KwThis)) {
+        return std::make_unique<ast::IdentExpr>(lastConsumed_.span, "this");
+    }
+
+    // 3. Parenthesized expression: `(expr)`
+    if (match(lexer::TokenKind::LParen)) {
+        auto inner = parseExpression();
+        expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' to close expression");
+        return inner;
+    }
+
+    // 4. Array literal: `[1, 2, 3]`
+    if (match(lexer::TokenKind::LBracket)) {
+        std::vector<std::unique_ptr<ast::Expr>> elements;
+        if (!check(lexer::TokenKind::RBracket)) {
+            do {
+                elements.push_back(parseExpression());
+            } while (match(lexer::TokenKind::Comma));
         }
-        return id;
+        const auto& endBracket = expect(lexer::TokenKind::RBracket, diag::ErrorCode::ExpectedClosingBracket, "expected ']' after array elements");
+        diag::SourceSpan span{startLoc, endBracket.span.end};
+        return std::make_unique<ast::ArrayLitExpr>(span, std::move(elements));
     }
 
-    if (match(lexer::TokenKind::PlusPlus)) {
-        const auto& target = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected identifier");
-        auto id = std::make_unique<ast::IdentExpr>(target.span, std::string(target.lexeme));
-        return std::make_unique<ast::UnaryExpr>(diag::SourceSpan{startLoc, target.span.end},
-                                               lexer::TokenKind::PlusPlus, std::move(id), true);
+    // 5. Map literal: `{"key": val}`
+    if (match(lexer::TokenKind::LBrace)) {
+        std::vector<ast::MapEntry> entries;
+        if (!check(lexer::TokenKind::RBrace)) {
+            do {
+                auto keyExpr = parseExpression();
+                expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' between map key and value");
+                auto valExpr = parseExpression();
+                entries.push_back(ast::MapEntry{std::move(keyExpr), std::move(valExpr)});
+            } while (match(lexer::TokenKind::Comma));
+        }
+        const auto& endBrace = expect(lexer::TokenKind::RBrace, diag::ErrorCode::ExpectedClosingBrace, "expected '}' after map entries");
+        diag::SourceSpan span{startLoc, endBrace.span.end};
+        return std::make_unique<ast::MapLitExpr>(span, std::move(entries));
     }
 
+    // 6. Type inspection: `typeof(expr)`
+    if (match(lexer::TokenKind::KwTypeof)) {
+        expect(lexer::TokenKind::LParen, diag::ErrorCode::UnexpectedToken, "expected '(' after typeof");
+        auto target = parseExpression();
+        const auto& rParen = expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after typeof expression");
+        diag::SourceSpan span{startLoc, rParen.span.end};
+        return std::make_unique<ast::TypeofExpr>(span, std::move(target));
+    }
+
+    // 7. Lambda / Function literal: `fn (params): RetType { body }`
+    if (match(lexer::TokenKind::KwFn)) {
+        expect(lexer::TokenKind::LParen, diag::ErrorCode::UnexpectedToken, "expected '(' after fn");
+        auto params = parseParamList();
+        expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after parameters");
+        expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' return type");
+        auto retType = parseTypeAnnotation();
+        auto body = parseBlockStatement();
+        diag::SourceSpan span{startLoc, body ? body->getSpan().end : lastConsumed_.span.end};
+        return std::make_unique<ast::ClosureExpr>(span, std::move(params), std::move(retType), std::move(body));
+    }
+
+    if (emitter_ && !panicMode_) {
+        diag::SourceSpan span = peek().span;
+        emitter_->report(diag::Diagnostic::makeError(diag::ErrorCode::UnexpectedToken,
+                                                    "expected expression", span.start)
+                             .withLabel(span, "unexpected token in expression"));
+    }
     advance();
     return nullptr;
+}
+
+std::unique_ptr<ast::Expr> Parser::parsePrefixExpression() {
+    diag::SourceLocation startLoc = peek().span.start;
+
+    // Unary prefix operators: `+`, `-`, `!`, `++`, `--`, `await`
+    if (match(lexer::TokenKind::Minus) || match(lexer::TokenKind::Plus) || match(lexer::TokenKind::Exclaim)) {
+        lexer::TokenKind op = lastConsumed_.kind;
+        auto operand = parsePrefixExpression();
+        diag::SourceSpan span{startLoc, operand ? operand->getSpan().end : lastConsumed_.span.end};
+        return std::make_unique<ast::UnaryExpr>(span, op, std::move(operand), true);
+    }
+    if (match(lexer::TokenKind::PlusPlus) || match(lexer::TokenKind::MinusMinus)) {
+        lexer::TokenKind op = lastConsumed_.kind;
+        auto operand = parsePrefixExpression();
+        diag::SourceSpan span{startLoc, operand ? operand->getSpan().end : lastConsumed_.span.end};
+        return std::make_unique<ast::UnaryExpr>(span, op, std::move(operand), true);
+    }
+    if (match(lexer::TokenKind::KwAwait)) {
+        auto target = parsePrefixExpression();
+        diag::SourceSpan span{startLoc, target ? target->getSpan().end : lastConsumed_.span.end};
+        return std::make_unique<ast::AwaitExpr>(span, std::move(target));
+    }
+
+    auto expr = parsePrimaryExpression();
+
+    // Postfix operators and selectors: calls `()`, index `[]`, member `.`, postfix `++`/`--`
+    while (true) {
+        if (match(lexer::TokenKind::Dot)) {
+            const auto& memberTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected member identifier after '.'");
+            diag::SourceSpan span{startLoc, memberTok.span.end};
+            expr = std::make_unique<ast::MemberExpr>(span, std::move(expr), std::string(memberTok.lexeme));
+        } else if (match(lexer::TokenKind::LBracket)) {
+            auto index = parseExpression();
+            const auto& rBracket = expect(lexer::TokenKind::RBracket, diag::ErrorCode::ExpectedClosingBracket, "expected ']' after index");
+            diag::SourceSpan span{startLoc, rBracket.span.end};
+            expr = std::make_unique<ast::IndexExpr>(span, std::move(expr), std::move(index));
+        } else if (match(lexer::TokenKind::LParen)) {
+            // Function call: callee(args...)
+            std::vector<ast::CallArg> args;
+            if (!check(lexer::TokenKind::RParen)) {
+                do {
+                    bool isMut = match(lexer::TokenKind::KwMut);
+                    diag::SourceLocation argStart = isMut ? lastConsumed_.span.start : peek().span.start;
+                    auto argVal = parseExpression();
+                    diag::SourceSpan argSpan{argStart, argVal ? argVal->getSpan().end : lastConsumed_.span.end};
+                    args.push_back(ast::CallArg{argSpan, std::move(argVal), isMut});
+                } while (match(lexer::TokenKind::Comma));
+            }
+            const auto& rParen = expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after call arguments");
+            diag::SourceSpan span{startLoc, rParen.span.end};
+            expr = std::make_unique<ast::CallExpr>(span, std::move(expr), std::move(args));
+        } else if (match(lexer::TokenKind::PlusPlus) || match(lexer::TokenKind::MinusMinus)) {
+            lexer::TokenKind op = lastConsumed_.kind;
+            diag::SourceSpan span{startLoc, lastConsumed_.span.end};
+            expr = std::make_unique<ast::UnaryExpr>(span, op, std::move(expr), false);
+        } else {
+            break;
+        }
+    }
+
+    return expr;
+}
+
+std::unique_ptr<ast::Expr> Parser::parseExpression(int minPrecedence) {
+    auto left = parsePrefixExpression();
+    if (!left) {
+        return nullptr;
+    }
+
+    while (true) {
+        lexer::TokenKind op = peek().kind;
+        int prec = getBinaryPrecedence(op);
+        if (prec <= minPrecedence) {
+            break;
+        }
+
+        // Consume operator token
+        advance();
+        diag::SourceLocation startLoc = left->getSpan().start;
+
+        if (op == lexer::TokenKind::Question) {
+            // Ternary conditional: `cond ? thenExpr : elseExpr`
+            auto thenExpr = parseExpression();
+            expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' in ternary operator");
+            auto elseExpr = parseExpression(prec - 1); // Right-associative
+            diag::SourceSpan span{startLoc, elseExpr ? elseExpr->getSpan().end : lastConsumed_.span.end};
+            left = std::make_unique<ast::TernaryExpr>(span, std::move(left), std::move(thenExpr), std::move(elseExpr));
+            continue;
+        }
+
+        if (op == lexer::TokenKind::KwAs) {
+            // Type assertion: `expr as TargetType`
+            auto targetType = parseTypeAnnotation();
+            diag::SourceSpan span{startLoc, targetType ? targetType->getSpan().end : lastConsumed_.span.end};
+            left = std::make_unique<ast::TypeCastExpr>(span, std::move(left), std::move(targetType), true);
+            continue;
+        }
+
+        if (op == lexer::TokenKind::KwZonk) {
+            // Error recovery expression: fallback or block form
+            if (check(lexer::TokenKind::LParen) && check(lexer::TokenKind::LBrace, 2)) {
+                // Scoped block: expr zonk (err) { ... }
+                advance(); // consume '('
+                const auto& errTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected error variable");
+                std::string errName = std::string(errTok.lexeme);
+                expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')'");
+                auto block = parseBlockStatement();
+                diag::SourceSpan span{startLoc, block ? block->getSpan().end : lastConsumed_.span.end};
+                left = std::make_unique<ast::ZonkExpr>(span, std::move(left), nullptr, std::move(errName), std::move(block));
+            } else {
+                // Fallback value: expr zonk fallbackExpr
+                auto fallback = parseExpression(prec);
+                diag::SourceSpan span{startLoc, fallback ? fallback->getSpan().end : lastConsumed_.span.end};
+                left = std::make_unique<ast::ZonkExpr>(span, std::move(left), std::move(fallback));
+            }
+            continue;
+        }
+
+        // Standard binary operator
+        int nextMinPrecedence = isRightAssociative(op) ? prec - 1 : prec;
+        auto right = parseExpression(nextMinPrecedence);
+        diag::SourceSpan span{startLoc, right ? right->getSpan().end : lastConsumed_.span.end};
+        left = std::make_unique<ast::BinaryExpr>(span, op, std::move(left), std::move(right));
+    }
+
+    return left;
 }
 
 } // namespace keety::parser
