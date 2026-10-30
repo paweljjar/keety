@@ -21,6 +21,7 @@ add_library(keety_core STATIC
     ir/basic_block.cpp
     ir/function.cpp
     ir/module.cpp
+    ir/ast_lowerer.cpp
 )
 
 target_include_directories(keety_core PUBLIC
