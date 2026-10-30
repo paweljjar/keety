@@ -5,7 +5,7 @@ namespace keety::sema {
 namespace {
 
 const std::vector<std::string_view> UNIVERSE_TYPES = {
-    "bool", "int", "float", "char", "string", "void", "null", "error", "array", "map", "never"
+    "bool", "int", "float", "char", "string", "void", "null", "error", "array", "map"
 };
 
 const std::vector<std::string_view> UNIVERSE_CONSTANTS = {
@@ -28,7 +28,7 @@ const std::vector<std::string_view>& getUniverseConstantNames() noexcept {
 
 const std::vector<std::string_view>& getAllUniverseSymbolNames() noexcept {
     static const std::vector<std::string_view> ALL = {
-        "bool", "int", "float", "char", "string", "void", "null", "error", "array", "map", "never",
+        "bool", "int", "float", "char", "string", "void", "null", "error", "array", "map",
         "true", "false", "typeof"
     };
     return ALL;

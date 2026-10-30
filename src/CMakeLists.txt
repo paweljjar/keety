@@ -12,6 +12,7 @@ add_library(keety_core STATIC
     resolver/topological_sorter.cpp
     sema/scope.cpp
     sema/universe.cpp
+    sema/shadow_checker.cpp
 )
 
 target_include_directories(keety_core PUBLIC

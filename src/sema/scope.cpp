@@ -53,7 +53,7 @@ std::shared_ptr<Scope> Scope::getEnclosingClass() const {
     return nullptr;
 }
 
-DefineResult Scope::define(std::shared_ptr<Symbol> symbol) {
+DefineResult Scope::define(std::shared_ptr<Symbol> symbol, bool enforceNoShadowing) {
     if (!symbol) {
         return DefineResult::duplicate(nullptr, "cannot define null symbol");
     }
@@ -79,6 +79,18 @@ DefineResult Scope::define(std::shared_ptr<Symbol> symbol) {
         return DefineResult::duplicate(
             existing,
             "redeclaration of identifier '" + symbol->getName() + "' in the same scope");
+    }
+
+    // Strict No-Shadowing check across enclosing lexical scopes
+    if (enforceNoShadowing) {
+        // Class fields and methods do not shadow outer bindings
+        if (!isClass() || (!symbol->isField() && !symbol->isMethod())) {
+            if (auto outer = lookupParentForShadowing(symbol->getName())) {
+                return DefineResult::shadowed(
+                    outer,
+                    "identifier '" + symbol->getName() + "' shadows previous declaration in outer scope");
+            }
+        }
     }
 
     symbols_.emplace(symbol->getName(), symbol);
@@ -114,11 +126,11 @@ std::shared_ptr<Symbol> Scope::lookupParentForShadowing(std::string_view name) c
     auto curr = parent_.lock();
     while (curr) {
         if (curr->isClass()) {
-            // Per Language Spec Section 741: Inside class methods, instance fields require
-            // `this.` access. Method parameters and locals may share names with fields
+            // Per Language Spec Section 741: Inside class methods, instance fields and methods
+            // require `this.` access. Method parameters and locals may share names with fields/methods
             // without violating the no-shadowing rule.
             if (auto sym = curr->lookupCurrent(name)) {
-                if (!sym->isField()) {
+                if (!sym->isField() && !sym->isMethod()) {
                     return sym;
                 }
             }

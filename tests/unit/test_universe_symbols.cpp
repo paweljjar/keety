@@ -10,7 +10,7 @@ TEST_CASE("Predeclared Universe types inspection", "[sema][universe]") {
     REQUIRE(universe != nullptr);
 
     const std::vector<std::string> expectedTypes = {
-        "bool", "int", "float", "char", "string", "void", "null", "error", "array", "map", "never"
+        "bool", "int", "float", "char", "string", "void", "null", "error", "array", "map"
     };
 
     for (const auto& typeName : expectedTypes) {
@@ -99,16 +99,16 @@ TEST_CASE("Predeclared Universe operators inspection", "[sema][universe]") {
 
 TEST_CASE("Universe catalog lists and queries", "[sema][universe]") {
     const auto& types = getUniverseTypeNames();
-    CHECK(types.size() == 11);
+    CHECK(types.size() == 10);
 
     const auto& constants = getUniverseConstantNames();
     CHECK(constants.size() == 3);
 
     const auto& all = getAllUniverseSymbolNames();
-    CHECK(all.size() == 14);
+    CHECK(all.size() == 13);
 
     auto universe = Scope::createUniverse();
-    CHECK(universe->size() == 14);
+    CHECK(universe->size() == 13);
 }
 
 TEST_CASE("Universe symbols propagate down through child scopes", "[sema][universe]") {

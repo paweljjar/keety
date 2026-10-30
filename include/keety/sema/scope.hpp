@@ -105,7 +105,9 @@ public:
     ///   - If both are functions/methods (overloads), the new symbol is appended to the
     ///     existing symbol's overload set.
     ///   - Otherwise, returns `RedeclarationInSameScope` (E2004).
-    DefineResult define(std::shared_ptr<Symbol> symbol);
+    /// - If `enforceNoShadowing` is true and an outer declaration is shadowed:
+    ///   - Returns `IdentifierShadowed` (E2001).
+    DefineResult define(std::shared_ptr<Symbol> symbol, bool enforceNoShadowing = true);
 
     // --- Lookups ---
 

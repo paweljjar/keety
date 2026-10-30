@@ -40,6 +40,7 @@ add_executable(keety_unit_tests
     unit/test_topological_sorter.cpp
     unit/test_symbol_scope.cpp
     unit/test_universe_symbols.cpp
+    unit/test_no_shadowing.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE
