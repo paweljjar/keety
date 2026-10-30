@@ -1970,4 +1970,217 @@ TEST_CASE("Mutable Reference Borrow Checker - Validate L-Values (E4005)", "[type
     }
 }
 
+// =============================================================================
+// Mutable Reference Borrow Checker - Exclusive Borrowing (E4001)
+// =============================================================================
+
+TEST_CASE("Mutable Reference Borrow Checker - Exclusive Borrowing (E4001)", "[typechecker][borrow_checker][E4001]") {
+    SECTION("Reject duplicate borrow of same variable with explicit mut (neg_mut_alias)") {
+        ParseResult res(
+            "fn swap(mut a: int, mut b: int): void {\n"
+            "    let temp: int = a;\n"
+            "    a = b;\n"
+            "    b = temp;\n"
+            "}\n"
+            "fn test(): void {\n"
+            "    let x: int = 42;\n"
+            "    swap(mut x, mut x);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::DuplicateMutableBorrow));
+    }
+
+    SECTION("Reject duplicate borrow without mut keyword at call site") {
+        ParseResult res(
+            "fn swap(mut a: int, mut b: int): void {}\n"
+            "fn test(): void {\n"
+            "    let x: int = 10;\n"
+            "    swap(x, x);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::DuplicateMutableBorrow));
+    }
+
+    SECTION("Reject duplicate borrow in function with three or more parameters") {
+        ParseResult res(
+            "fn process(mut a: int, mut b: int, mut c: int): void {}\n"
+            "fn test(): void {\n"
+            "    let x: int = 1;\n"
+            "    let y: int = 2;\n"
+            "    process(mut x, mut y, mut x);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::DuplicateMutableBorrow));
+    }
+
+    SECTION("Reject duplicate borrow of the same class field") {
+        ParseResult res(
+            "class Player {\n"
+            "    pub let hp: int = 100;\n"
+            "    pub let mana: int = 50;\n"
+            "}\n"
+            "fn swap(mut a: int, mut b: int): void {}\n"
+            "fn test(): void {\n"
+            "    let p: Player = new Player();\n"
+            "    swap(mut p.hp, mut p.hp);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::DuplicateMutableBorrow));
+    }
+
+    SECTION("Accept distinct class fields on the same object") {
+        ParseResult res(
+            "class Player {\n"
+            "    pub let hp: int = 100;\n"
+            "    pub let mana: int = 50;\n"
+            "}\n"
+            "fn swap(mut a: int, mut b: int): void {}\n"
+            "fn test(): void {\n"
+            "    let p: Player = new Player();\n"
+            "    swap(mut p.hp, mut p.mana);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::DuplicateMutableBorrow));
+    }
+
+    SECTION("Accept same field on two distinct object instances") {
+        ParseResult res(
+            "class Player {\n"
+            "    pub let hp: int = 100;\n"
+            "}\n"
+            "fn swap(mut a: int, mut b: int): void {}\n"
+            "fn test(): void {\n"
+            "    let p1: Player = new Player();\n"
+            "    let p2: Player = new Player();\n"
+            "    swap(mut p1.hp, mut p2.hp);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::DuplicateMutableBorrow));
+    }
+
+    SECTION("Reject overlapping borrow of object and its field") {
+        ParseResult res(
+            "class Inner {\n"
+            "    pub let val: int = 0;\n"
+            "}\n"
+            "class Outer {\n"
+            "    pub let inner: Inner = new Inner();\n"
+            "}\n"
+            "fn f(mut o: Outer, mut i: Inner): void {}\n"
+            "fn test(): void {\n"
+            "    let o: Outer = new Outer();\n"
+            "    f(mut o, mut o.inner);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::DuplicateMutableBorrow));
+    }
+
+    SECTION("Reject duplicate borrow of the same array element") {
+        ParseResult res(
+            "fn swap(mut a: int, mut b: int): void {}\n"
+            "fn test(): void {\n"
+            "    let arr: array<int> = [1, 2];\n"
+            "    swap(mut arr[0], mut arr[0]);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::DuplicateMutableBorrow));
+    }
+
+    SECTION("Accept distinct array elements") {
+        ParseResult res(
+            "fn swap(mut a: int, mut b: int): void {}\n"
+            "fn test(): void {\n"
+            "    let arr: array<int> = [1, 2];\n"
+            "    swap(mut arr[0], mut arr[1]);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::DuplicateMutableBorrow));
+    }
+
+    SECTION("Reject duplicate borrow in class method call") {
+        ParseResult res(
+            "class MathOps {\n"
+            "    pub fn exchange(mut a: int, mut b: int): void {}\n"
+            "}\n"
+            "fn test(): void {\n"
+            "    let m: MathOps = new MathOps();\n"
+            "    let x: int = 10;\n"
+            "    m.exchange(mut x, mut x);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::DuplicateMutableBorrow));
+    }
+
+    SECTION("Reject duplicate borrow in closure call") {
+        ParseResult res(
+            "fn test(): void {\n"
+            "    let cb: (mut a: int, mut b: int) => void = fn(mut a: int, mut b: int): void {};\n"
+            "    let x: int = 10;\n"
+            "    cb(mut x, mut x);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::DuplicateMutableBorrow));
+    }
+
+    SECTION("Accept distinct mutable variables in call") {
+        ParseResult res(
+            "fn swap(mut a: int, mut b: int): void {}\n"
+            "fn test(): void {\n"
+            "    let x: int = 1;\n"
+            "    let y: int = 2;\n"
+            "    swap(mut x, mut y);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::DuplicateMutableBorrow));
+    }
+
+    SECTION("Accept multiple sequential calls borrowing the same variable") {
+        ParseResult res(
+            "fn inc(mut a: int): void {}\n"
+            "fn test(): void {\n"
+            "    let x: int = 1;\n"
+            "    inc(mut x);\n"
+            "    inc(mut x);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::DuplicateMutableBorrow));
+    }
+
+    SECTION("Accept forwarding two distinct mut parameters") {
+        ParseResult res(
+            "fn target(mut a: int, mut b: int): void {}\n"
+            "fn forwarder(mut p1: int, mut p2: int): void {\n"
+            "    target(mut p1, mut p2);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.hasError(diag::ErrorCode::DuplicateMutableBorrow));
+    }
+
+    SECTION("Reject forwarding the same mut parameter twice") {
+        ParseResult res(
+            "fn target(mut a: int, mut b: int): void {}\n"
+            "fn forwarder(mut p: int): void {\n"
+            "    target(mut p, mut p);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::DuplicateMutableBorrow));
+    }
+}
+
+
 

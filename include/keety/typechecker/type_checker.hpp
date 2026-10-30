@@ -147,6 +147,20 @@ public:
         std::string_view exprDesc,
         diag::SourceSpan span);
 
+    // --- Mutable Reference Borrow Checker (Exclusive Borrowing - E4001) ---
+
+    /// Computes the normalized storage path of an l-value expression (e.g. "x", "p.hp", "arr[0]").
+    /// Returns empty string if the expression does not have a recognizable storage path.
+    [[nodiscard]] static std::string computeStoragePath(const ast::Expr* expr);
+
+    /// Checks if two storage paths alias or overlap (identical path or parent/child field relationship).
+    [[nodiscard]] static bool storagePathsAlias(const std::string& p1, const std::string& p2);
+
+    [[nodiscard]] static diag::Diagnostic createDuplicateMutableBorrowDiagnostic(
+        std::string_view path,
+        diag::SourceSpan firstSpan,
+        diag::SourceSpan duplicateSpan);
+
 private:
     diag::DiagnosticEmitter* emitter_{nullptr};
     bool hasErrors_{false};
@@ -160,6 +174,7 @@ private:
     void reportMissingReturn(std::string_view functionName, TypePtr returnType, diag::SourceSpan span);
     void reportUnreachableCode(diag::SourceSpan span);
     void reportNonLValueMutableBorrow(std::string_view exprDesc, diag::SourceSpan span);
+    void reportDuplicateMutableBorrow(std::string_view path, diag::SourceSpan firstSpan, diag::SourceSpan duplicateSpan);
 };
 
 } // namespace keety::typechecker

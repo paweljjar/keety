@@ -800,6 +800,119 @@ bool TypeChecker::isMutableLValue(const ast::Expr* expr, sema::Scope& scope, std
     return false;
 }
 
+// =============================================================================
+// Mutable Reference Borrow Checker (Exclusive Borrowing - E4001)
+// =============================================================================
+
+namespace {
+
+std::string exprToStorageString(const ast::Expr* expr) {
+    if (!expr) return "";
+    if (const auto* lit = dynamic_cast<const ast::LiteralExpr*>(expr)) {
+        return lit->getRawText();
+    }
+    if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(expr)) {
+        return ident->getName();
+    }
+    if (const auto* member = dynamic_cast<const ast::MemberExpr*>(expr)) {
+        auto o = exprToStorageString(member->getObject());
+        return o.empty() ? member->getMemberName() : o + "." + member->getMemberName();
+    }
+    return "";
+}
+
+} // namespace
+
+std::string TypeChecker::computeStoragePath(const ast::Expr* expr) {
+    if (!expr) return "";
+
+    if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(expr)) {
+        return ident->getName();
+    }
+
+    if (const auto* member = dynamic_cast<const ast::MemberExpr*>(expr)) {
+        auto obj = computeStoragePath(member->getObject());
+        if (obj.empty()) return "";
+        return obj + "." + member->getMemberName();
+    }
+
+    if (const auto* index = dynamic_cast<const ast::IndexExpr*>(expr)) {
+        auto cont = computeStoragePath(index->getContainer());
+        if (cont.empty()) return "";
+        auto idxStr = exprToStorageString(index->getIndex());
+        if (idxStr.empty()) return "";
+        return cont + "[" + idxStr + "]";
+    }
+
+    return "";
+}
+
+bool TypeChecker::storagePathsAlias(const std::string& p1, const std::string& p2) {
+    if (p1.empty() || p2.empty()) return false;
+    if (p1 == p2) return true;
+    if (p1.size() > p2.size() && p1[p2.size()] == '.' && p1.rfind(p2, 0) == 0) {
+        return true;
+    }
+    if (p2.size() > p1.size() && p2[p1.size()] == '.' && p2.rfind(p1, 0) == 0) {
+        return true;
+    }
+    return false;
+}
+
+diag::Diagnostic TypeChecker::createDuplicateMutableBorrowDiagnostic(
+    std::string_view path,
+    diag::SourceSpan firstSpan,
+    diag::SourceSpan duplicateSpan) {
+    std::string msg = "cannot pass multiple mutable references to the same storage path";
+    if (!path.empty()) {
+        msg += ": '" + std::string(path) + "'";
+    }
+
+    auto d = diag::Diagnostic::makeError(
+        diag::ErrorCode::DuplicateMutableBorrow,
+        std::move(msg),
+        duplicateSpan.isValid() ? duplicateSpan.start : diag::SourceLocation{});
+
+    if (duplicateSpan.isValid()) {
+        d.labels.push_back(diag::DiagnosticLabel{
+            duplicateSpan,
+            "duplicate mutable borrow",
+            true
+        });
+    }
+
+    if (firstSpan.isValid()) {
+        d.labels.push_back(diag::DiagnosticLabel{
+            firstSpan,
+            "first mutable borrow occurs here",
+            false
+        });
+    }
+
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Note,
+        "KeetScript enforces exclusive mutable borrowing to prevent reference aliasing bugs"
+    });
+
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Help,
+        "ensure each 'mut' argument references a distinct, disjoint storage location"
+    });
+
+    return d;
+}
+
+void TypeChecker::reportDuplicateMutableBorrow(
+    std::string_view path,
+    diag::SourceSpan firstSpan,
+    diag::SourceSpan duplicateSpan) {
+    hasErrors_ = true;
+    if (emitter_ != nullptr) {
+        emitter_->report(createDuplicateMutableBorrowDiagnostic(path, firstSpan, duplicateSpan));
+    }
+}
+
+
 
 bool TypeChecker::checkAssignment(
     TypePtr expectedType,
@@ -1641,6 +1754,35 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
     if (const auto* call = dynamic_cast<const ast::CallExpr*>(&expr)) {
         std::vector<std::string> mutatedVars;
 
+        struct BorrowRecord {
+            std::string path;
+            diag::SourceSpan span;
+        };
+        std::vector<BorrowRecord> activeBorrows;
+
+        auto checkMutArg = [&](const ast::CallArg& arg) {
+            if (!arg.value) return;
+            if (const auto* argIdent = dynamic_cast<const ast::IdentExpr*>(arg.value.get())) {
+                mutatedVars.push_back(argIdent->getName());
+            }
+            diag::SourceSpan errSpan = arg.span.isValid() ? arg.span : arg.value->getSpan();
+            std::string reason;
+            if (!isMutableLValue(arg.value.get(), scope, &reason)) {
+                reportNonLValueMutableBorrow(reason, errSpan);
+            } else {
+                auto path = computeStoragePath(arg.value.get());
+                if (!path.empty()) {
+                    for (const auto& prev : activeBorrows) {
+                        if (storagePathsAlias(prev.path, path)) {
+                            reportDuplicateMutableBorrow(path, prev.span, errSpan);
+                            break;
+                        }
+                    }
+                    activeBorrows.push_back(BorrowRecord{std::move(path), errSpan});
+                }
+            }
+        };
+
         // Member call: built-in numeric conversions (.toFloat(), .toInt(), etc.) or class method call
         if (const auto* member = dynamic_cast<const ast::MemberExpr*>(call->getCallee())) {
             auto objType = member->getObject() ? inferType(*member->getObject(), scope) : Type::unknownType();
@@ -1652,13 +1794,7 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 for (const auto& arg : call->getArgs()) {
                     if (arg.value) inferType(*arg.value, scope);
                     if (arg.isMut && arg.value) {
-                        if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(arg.value.get())) {
-                            mutatedVars.push_back(ident->getName());
-                        }
-                        std::string reason;
-                        if (!isMutableLValue(arg.value.get(), scope, &reason)) {
-                            reportNonLValueMutableBorrow(reason, arg.span.isValid() ? arg.span : arg.value->getSpan());
-                        }
+                        checkMutArg(arg);
                     }
                 }
                 for (const auto& v : mutatedVars) {
@@ -1699,13 +1835,7 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     }
                     bool isMut = arg.isMut || (methodDecl && i < methodDecl->getParams().size() && methodDecl->getParams()[i].isMut);
                     if (isMut) {
-                        if (const auto* argIdent = dynamic_cast<const ast::IdentExpr*>(arg.value.get())) {
-                            mutatedVars.push_back(argIdent->getName());
-                        }
-                        std::string reason;
-                        if (!isMutableLValue(arg.value.get(), scope, &reason)) {
-                            reportNonLValueMutableBorrow(reason, arg.span.isValid() ? arg.span : arg.value->getSpan());
-                        }
+                        checkMutArg(arg);
                     }
                 }
             }
@@ -1758,13 +1888,7 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                         }
                         bool isMut = arg.isMut || (i < fnDecl->getParams().size() && fnDecl->getParams()[i].isMut);
                         if (isMut) {
-                            if (const auto* argIdent = dynamic_cast<const ast::IdentExpr*>(arg.value.get())) {
-                                mutatedVars.push_back(argIdent->getName());
-                            }
-                            std::string reason;
-                            if (!isMutableLValue(arg.value.get(), scope, &reason)) {
-                                reportNonLValueMutableBorrow(reason, arg.span.isValid() ? arg.span : arg.value->getSpan());
-                            }
+                            checkMutArg(arg);
                         }
                     }
                 }
@@ -1785,13 +1909,7 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                         }
                         bool isMut = arg.isMut || (i < funcTypeAnnotation->getParams().size() && funcTypeAnnotation->getParams()[i].isMut);
                         if (isMut) {
-                            if (const auto* argIdent = dynamic_cast<const ast::IdentExpr*>(arg.value.get())) {
-                                mutatedVars.push_back(argIdent->getName());
-                            }
-                            std::string reason;
-                            if (!isMutableLValue(arg.value.get(), scope, &reason)) {
-                                reportNonLValueMutableBorrow(reason, arg.span.isValid() ? arg.span : arg.value->getSpan());
-                            }
+                            checkMutArg(arg);
                         }
                     }
                 }
@@ -1805,13 +1923,7 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
         for (const auto& arg : call->getArgs()) {
             if (arg.value) inferType(*arg.value, scope);
             if (arg.isMut && arg.value) {
-                if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(arg.value.get())) {
-                    mutatedVars.push_back(ident->getName());
-                }
-                std::string reason;
-                if (!isMutableLValue(arg.value.get(), scope, &reason)) {
-                    reportNonLValueMutableBorrow(reason, arg.span.isValid() ? arg.span : arg.value->getSpan());
-                }
+                checkMutArg(arg);
             }
         }
         for (const auto& v : mutatedVars) {
