@@ -77,7 +77,7 @@ This document specifies the operational development plan for the `keety` compile
 - [x] **Task 3.2.4:** Enforce `const`-view visibility semantics for imported `export let` variables (`E2002`).
 
 #### **Phase 3.3: Static Type Checking & Union Algebra Normalization (`keety::typechecker`)**
-- [ ] **Task 3.3.1:** Enforce explicit type annotations on declarations (`let`, `const`, parameters) and emit `E3001` for omitted types.
+- [x] **Task 3.3.1:** Enforce explicit type annotations on declarations (`let`, `const`, parameters) and emit `E3001` for omitted types.
 - [ ] **Task 3.3.2:** Enforce strict zero-coercion policy: emit `E3002` on implicit int $\rightarrow$ float conversion.
 - [ ] **Task 3.3.3:** Contextually type empty collection literals (`[]` as `array<T>`, `{}` as `map<K, V>`).
 - [ ] **Task 3.3.4:** Canonical union algebra normalization (flattening, deduplication, subtype absorption).

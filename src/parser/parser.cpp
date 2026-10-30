@@ -160,8 +160,21 @@ std::unique_ptr<ast::VarDecl> Parser::parseVarDecl(bool isExported) {
     const auto& nameTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected variable name");
     std::string name = std::string(nameTok.lexeme);
 
-    expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' type annotation");
-    auto type = parseTypeAnnotation();
+    std::unique_ptr<ast::TypeAnnotation> type = nullptr;
+    if (match(lexer::TokenKind::Colon)) {
+        type = parseTypeAnnotation();
+    } else {
+        if (emitter_) {
+            diag::SourceSpan span = nameTok.span;
+            emitter_->report(diag::Diagnostic::makeError(
+                diag::ErrorCode::MissingTypeAnnotation,
+                "missing explicit type annotation for variable '" + name + "'",
+                span.start)
+                .withLabel(span, "explicit type annotation required here")
+                .withNote("KeetScript requires explicit type annotations on all variable and constant declarations")
+                .withHelp("specify a type, e.g. 'let " + name + ": <Type>'"));
+        }
+    }
 
     std::unique_ptr<ast::Expr> init = nullptr;
     if (match(lexer::TokenKind::Equal)) {
@@ -179,8 +192,21 @@ std::unique_ptr<ast::ConstDecl> Parser::parseConstDecl(bool isExported) {
     const auto& nameTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected constant name");
     std::string name = std::string(nameTok.lexeme);
 
-    expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' type annotation");
-    auto type = parseTypeAnnotation();
+    std::unique_ptr<ast::TypeAnnotation> type = nullptr;
+    if (match(lexer::TokenKind::Colon)) {
+        type = parseTypeAnnotation();
+    } else {
+        if (emitter_) {
+            diag::SourceSpan span = nameTok.span;
+            emitter_->report(diag::Diagnostic::makeError(
+                diag::ErrorCode::MissingTypeAnnotation,
+                "missing explicit type annotation for constant '" + name + "'",
+                span.start)
+                .withLabel(span, "explicit type annotation required here")
+                .withNote("KeetScript requires explicit type annotations on all variable and constant declarations")
+                .withHelp("specify a type, e.g. 'const " + name + ": <Type>'"));
+        }
+    }
 
     expect(lexer::TokenKind::Equal, diag::ErrorCode::UnexpectedToken, "constants require an explicit initializer '='");
     auto init = parseExpression();
@@ -196,8 +222,21 @@ std::unique_ptr<ast::DefineDecl> Parser::parseDefineDecl(bool isExported) {
     const auto& nameTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected define constant name");
     std::string name = std::string(nameTok.lexeme);
 
-    expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' type annotation");
-    auto type = parseTypeAnnotation();
+    std::unique_ptr<ast::TypeAnnotation> type = nullptr;
+    if (match(lexer::TokenKind::Colon)) {
+        type = parseTypeAnnotation();
+    } else {
+        if (emitter_) {
+            diag::SourceSpan span = nameTok.span;
+            emitter_->report(diag::Diagnostic::makeError(
+                diag::ErrorCode::MissingTypeAnnotation,
+                "missing explicit type annotation for compile-time constant '" + name + "'",
+                span.start)
+                .withLabel(span, "explicit type annotation required here")
+                .withNote("KeetScript requires explicit type annotations on all variable and constant declarations")
+                .withHelp("specify a type, e.g. 'define " + name + ": <Type>'"));
+        }
+    }
 
     expect(lexer::TokenKind::Equal, diag::ErrorCode::UnexpectedToken, "define requires an initializer '='");
     auto value = parseExpression();
@@ -217,8 +256,21 @@ std::unique_ptr<ast::FnDecl> Parser::parseFnDecl(bool isAsync, bool isExported) 
     auto params = parseParamList();
     expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after parameters");
 
-    expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' return type annotation");
-    auto returnType = parseTypeAnnotation();
+    std::unique_ptr<ast::TypeAnnotation> returnType = nullptr;
+    if (match(lexer::TokenKind::Colon)) {
+        returnType = parseTypeAnnotation();
+    } else {
+        if (emitter_) {
+            diag::SourceSpan span = nameTok.span;
+            emitter_->report(diag::Diagnostic::makeError(
+                diag::ErrorCode::MissingTypeAnnotation,
+                "missing explicit return type annotation for function '" + name + "'",
+                span.start)
+                .withLabel(span, "explicit return type required here")
+                .withNote("KeetScript requires explicit return type annotations on all functions")
+                .withHelp("specify a return type, e.g. 'fn " + name + "(...): void'"));
+        }
+    }
 
     auto body = parseBlockStatement();
     diag::SourceSpan span{startLoc, body ? body->getSpan().end : lastConsumed_.span.end};
@@ -247,8 +299,21 @@ ast::Param Parser::parseParam() {
     const auto& nameTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected parameter name");
     std::string name = std::string(nameTok.lexeme);
 
-    expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' type annotation for parameter");
-    auto type = parseTypeAnnotation();
+    std::unique_ptr<ast::TypeAnnotation> type = nullptr;
+    if (match(lexer::TokenKind::Colon)) {
+        type = parseTypeAnnotation();
+    } else {
+        if (emitter_) {
+            diag::SourceSpan span = nameTok.span;
+            emitter_->report(diag::Diagnostic::makeError(
+                diag::ErrorCode::MissingTypeAnnotation,
+                "missing explicit type annotation for parameter '" + name + "'",
+                span.start)
+                .withLabel(span, "parameter type annotation required here")
+                .withNote("KeetScript requires explicit type annotations on all function and method parameters")
+                .withHelp("specify a type, e.g. '" + name + ": <Type>'"));
+        }
+    }
 
     std::unique_ptr<ast::Expr> defVal = nullptr;
     if (match(lexer::TokenKind::Equal)) {
@@ -293,8 +358,21 @@ std::unique_ptr<ast::ClassDecl> Parser::parseClassDecl(bool isExported) {
             std::string fieldName = std::string(fName.lexeme);
             diag::SourceSpan fieldSpan = fName.span;
 
-            expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' type annotation");
-            auto fType = parseTypeAnnotation();
+            std::unique_ptr<ast::TypeAnnotation> fType = nullptr;
+            if (match(lexer::TokenKind::Colon)) {
+                fType = parseTypeAnnotation();
+            } else {
+                if (emitter_) {
+                    diag::SourceSpan span = fName.span;
+                    emitter_->report(diag::Diagnostic::makeError(
+                        diag::ErrorCode::MissingTypeAnnotation,
+                        "missing explicit type annotation for class field '" + fieldName + "'",
+                        span.start)
+                        .withLabel(span, "class field type annotation required here")
+                        .withNote("KeetScript requires explicit type annotations on all declarations")
+                        .withHelp("specify a type, e.g. '" + fieldName + ": <Type>'"));
+                }
+            }
 
             std::unique_ptr<ast::Expr> fInit = nullptr;
             if (match(lexer::TokenKind::Equal)) {
@@ -371,8 +449,21 @@ std::unique_ptr<ast::ErrTypeDecl> Parser::parseErrTypeDecl(bool isExported) {
         }
         if (match(lexer::TokenKind::KwLet) || match(lexer::TokenKind::KwConst)) {
             const auto& fName = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected field name");
-            expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' type annotation");
-            auto fType = parseTypeAnnotation();
+            std::unique_ptr<ast::TypeAnnotation> fType = nullptr;
+            if (match(lexer::TokenKind::Colon)) {
+                fType = parseTypeAnnotation();
+            } else {
+                if (emitter_) {
+                    diag::SourceSpan span = fName.span;
+                    emitter_->report(diag::Diagnostic::makeError(
+                        diag::ErrorCode::MissingTypeAnnotation,
+                        "missing explicit type annotation for error field '" + std::string(fName.lexeme) + "'",
+                        span.start)
+                        .withLabel(span, "error field type annotation required here")
+                        .withNote("KeetScript requires explicit type annotations on all declarations")
+                        .withHelp("specify a type, e.g. '" + std::string(fName.lexeme) + ": <Type>'"));
+                }
+            }
             expect(lexer::TokenKind::Semicolon, diag::ErrorCode::ExpectedSemicolon, "expected ';' after field");
             fields.push_back(ast::ClassField{fName.span, vis, false, std::string(fName.lexeme), std::move(fType), nullptr});
         } else {
@@ -694,8 +785,20 @@ std::unique_ptr<ast::Stmt> Parser::parseForStatement() {
 
         std::unique_ptr<ast::TypeAnnotation> firstType = nullptr;
         if (hasBindingKw) {
-            expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' type annotation in for-in loop");
-            firstType = parseTypeAnnotation();
+            if (match(lexer::TokenKind::Colon)) {
+                firstType = parseTypeAnnotation();
+            } else {
+                if (emitter_) {
+                    diag::SourceSpan span = lastConsumed_.span;
+                    emitter_->report(diag::Diagnostic::makeError(
+                        diag::ErrorCode::MissingTypeAnnotation,
+                        "missing explicit type annotation for loop variable '" + firstIdent + "'",
+                        span.start)
+                        .withLabel(span, "loop variable type annotation required here")
+                        .withNote("KeetScript requires explicit type annotations on all new loop bindings")
+                        .withHelp("specify a type, e.g. 'let " + firstIdent + ": <Type>'"));
+                }
+            }
         }
 
         // Optional second binding (key-value pair or index-value pair)
@@ -709,8 +812,20 @@ std::unique_ptr<ast::Stmt> Parser::parseForStatement() {
             }
 
             if (hasBindingKw) {
-                expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' type annotation for second for-in variable");
-                secondType = parseTypeAnnotation();
+                if (match(lexer::TokenKind::Colon)) {
+                    secondType = parseTypeAnnotation();
+                } else {
+                    if (emitter_) {
+                        diag::SourceSpan span = lastConsumed_.span;
+                        emitter_->report(diag::Diagnostic::makeError(
+                            diag::ErrorCode::MissingTypeAnnotation,
+                            "missing explicit type annotation for loop variable '" + secondIdent + "'",
+                            span.start)
+                            .withLabel(span, "loop variable type annotation required here")
+                            .withNote("KeetScript requires explicit type annotations on all new loop bindings")
+                            .withHelp("specify a type, e.g. '" + secondIdent + ": <Type>'"));
+                    }
+                }
             }
         }
 
@@ -756,8 +871,21 @@ std::unique_ptr<ast::Stmt> Parser::parseForStatement() {
             std::string varName = std::string(nameTok.lexeme);
             diag::SourceLocation varStart = nameTok.span.start;
 
-            expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' type annotation");
-            auto type = parseTypeAnnotation();
+            std::unique_ptr<ast::TypeAnnotation> type = nullptr;
+            if (match(lexer::TokenKind::Colon)) {
+                type = parseTypeAnnotation();
+            } else {
+                if (emitter_) {
+                    diag::SourceSpan span = nameTok.span;
+                    emitter_->report(diag::Diagnostic::makeError(
+                        diag::ErrorCode::MissingTypeAnnotation,
+                        "missing explicit type annotation for loop variable '" + varName + "'",
+                        span.start)
+                        .withLabel(span, "loop variable type annotation required here")
+                        .withNote("KeetScript requires explicit type annotations on all variable declarations")
+                        .withHelp("specify a type, e.g. 'let " + varName + ": <Type>'"));
+                }
+            }
             expect(lexer::TokenKind::Equal, diag::ErrorCode::UnexpectedToken, "expected '='");
             auto val = parseExpression();
             diag::SourceSpan s{varStart, val ? val->getSpan().end : lastConsumed_.span.end};
@@ -1151,8 +1279,21 @@ std::unique_ptr<ast::Expr> Parser::parsePrimaryExpression() {
         expect(lexer::TokenKind::LParen, diag::ErrorCode::UnexpectedToken, "expected '(' after fn");
         auto params = parseParamList();
         expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after parameters");
-        expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' return type");
-        auto retType = parseTypeAnnotation();
+        std::unique_ptr<ast::TypeAnnotation> retType = nullptr;
+        if (match(lexer::TokenKind::Colon)) {
+            retType = parseTypeAnnotation();
+        } else {
+            if (emitter_) {
+                diag::SourceSpan span = lastConsumed_.span;
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::MissingTypeAnnotation,
+                    "missing explicit return type annotation for function literal",
+                    span.start)
+                    .withLabel(span, "explicit return type required here")
+                    .withNote("KeetScript requires explicit return type annotations on all function literals")
+                    .withHelp("specify a return type, e.g. 'fn (...): void { ... }'"));
+            }
+        }
         auto body = parseBlockStatement();
         diag::SourceSpan span{startLoc, body ? body->getSpan().end : lastConsumed_.span.end};
         return std::make_unique<ast::ClosureExpr>(span, std::move(params), std::move(retType), std::move(body));
