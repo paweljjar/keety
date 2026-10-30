@@ -48,7 +48,7 @@ This document specifies the operational development plan for the `keety` compile
 - [x] **Task 2.1.5:** Implement multiline template literal scanner with recursive `${expr}` interpolation state stack.
 
 #### **Phase 2.2: Abstract Syntax Tree Representation (`keety::ast`)**
-- [ ] **Task 2.2.1:** Define declaration AST node hierarchy (`VarDecl`, `ConstDecl`, `DefineDecl`, `FnDecl`, `ClassDecl`, `EnumDecl`, `ErrTypeDecl`, `ImportDecl`, `ExportDecl`).
+- [x] **Task 2.2.1:** Define declaration AST node hierarchy (`VarDecl`, `ConstDecl`, `DefineDecl`, `FnDecl`, `ClassDecl`, `EnumDecl`, `ErrTypeDecl`, `ImportDecl`, `ExportDecl`).
 - [ ] **Task 2.2.2:** Define statement AST node hierarchy (`IfStmt`, `WhileStmt`, `ForStmt`, `SwitchStmt`, `ReturnStmt`, `YieldStmt`, `BreakStmt`, `ContinueStmt`, `ZonkStmt`).
 - [ ] **Task 2.2.3:** Define expression and operator AST nodes (`BinaryExpr`, `UnaryExpr`, `CallExpr`, `IndexExpr`, `MemberExpr`, `ZonkExpr`, `TernaryExpr`, `TypeCastExpr`, `ClosureExpr`).
 - [ ] **Task 2.2.4:** Define type annotation AST nodes (`PrimitiveType`, `ArrayType`, `MapType`, `UnionType`, `FunctionType`, `CustomType`).
