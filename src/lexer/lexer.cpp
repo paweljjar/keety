@@ -347,8 +347,7 @@ Token Lexer::scanToken() {
     case '}':
         if (!templateBraceStack_.empty()) {
             if (--templateBraceStack_.back() == 0) {
-                // Resume template string scanning
-                templateBraceStack_.pop_back();
+                // When balanced closing brace matches '${', transition seamlessly to scanning template text
                 return scanTemplate();
             }
         }
@@ -489,11 +488,15 @@ Token Lexer::scanString(char quote) {
 
 Token Lexer::scanTemplate() {
     size_t start = cursor_;
-    bool isResume = (!source_.empty() && source_[start] == '}');
-    if (isResume) {
-        advance(); // consume '}'
+    bool isResume = false;
+
+    // Check if we are resuming after a closing '}' of an interpolation
+    if (!templateBraceStack_.empty() && templateBraceStack_.back() == 0) {
+        isResume = true;
+        // cursor_ is currently at the position immediately following '}'
     } else {
-        advance(); // consume '`'
+        // Starting a new template literal: consume opening backtick '`'
+        advance();
     }
 
     bool escaped = false;
@@ -505,13 +508,22 @@ Token Lexer::scanTemplate() {
             escaped = true;
         } else if (c == '$' && !isAtEnd() && peek() == '{') {
             advance(); // consume '{'
-            templateBraceStack_.push_back(1);
+            // Push or reset brace depth for this interpolation level
+            if (isResume) {
+                templateBraceStack_.back() = 1;
+            } else {
+                templateBraceStack_.push_back(1);
+            }
             TokenKind kind = isResume ? TokenKind::TemplateMiddle : TokenKind::TemplateHead;
             return makeToken(kind, start, cursor_);
         } else if (c == '`') {
+            if (isResume) {
+                templateBraceStack_.pop_back();
+            }
             TokenKind kind = isResume ? TokenKind::TemplateTail : TokenKind::TemplateNoSub;
             return makeToken(kind, start, cursor_);
         }
+        // Note: Newlines inside template literals are preserved as part of the multiline template!
     }
 
     if (emitter_) {
@@ -520,7 +532,7 @@ Token Lexer::scanTemplate() {
             diag::ErrorCode::UnterminatedStringLiteral,
             "unterminated template literal",
             span.start
-        ).withLabel(span, "missing closing backtick delimiter"));
+        ).withLabel(span, "missing closing backtick delimiter '`'"));
     }
     return makeToken(TokenKind::Invalid, start, cursor_);
 }
