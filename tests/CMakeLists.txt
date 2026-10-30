@@ -18,6 +18,7 @@ add_executable(keety_unit_tests
     unit/test_error_code.cpp
     unit/test_runtime_error.cpp
     unit/test_runtime_bool_byte.cpp
+    unit/test_runtime_deep_copy_ptr.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE
