@@ -85,8 +85,21 @@ std::string DiagnosticEmitter::format(const Diagnostic& diag) const {
         loc = diag.labels.front().span.start;
     }
 
-    const SourceBuffer* buffer = loc.isValid() ? sourceManager_.getBuffer(loc.fileId) : nullptr;
-    if (!buffer) {
+    // Collect all unique FileIds present in location and labels
+    std::vector<FileId> fileIds;
+    if (loc.isValid()) {
+        fileIds.push_back(loc.fileId);
+    }
+    for (const auto& lbl : diag.labels) {
+        if (lbl.span.isValid()) {
+            FileId fid = lbl.span.getFileId();
+            if (std::find(fileIds.begin(), fileIds.end(), fid) == fileIds.end()) {
+                fileIds.push_back(fid);
+            }
+        }
+    }
+
+    if (fileIds.empty()) {
         // If no source buffer or location, just render footers if any
         for (const auto& footer : diag.footers) {
             if (footer.kind == DiagnosticFooter::Kind::Note) {
@@ -102,140 +115,146 @@ std::string DiagnosticEmitter::format(const Diagnostic& diag) const {
         return ss.str();
     }
 
-    // Determine gutter width based on maximum line number we will print
-    uint32_t maxLine = loc.line;
-    for (const auto& lbl : diag.labels) {
-        if (lbl.span.isValid() && lbl.span.getFileId() == loc.fileId) {
+    bool isFirstFile = true;
+    size_t globalGutterWidth = 2;
+    for (FileId fid : fileIds) {
+        const SourceBuffer* buffer = sourceManager_.getBuffer(fid);
+        if (!buffer) continue;
+
+        // Collect labels for this buffer
+        std::vector<DiagnosticLabel> fileLabels;
+        for (const auto& lbl : diag.labels) {
+            if (lbl.span.isValid() && lbl.span.getFileId() == fid) {
+                fileLabels.push_back(lbl);
+            }
+        }
+
+        if (fileLabels.empty() && fid == loc.fileId && loc.isValid()) {
+            SourceSpan dummySpan{loc, SourceLocation{loc.fileId, loc.offset + 1, loc.line, loc.column + 1}};
+            fileLabels.push_back(DiagnosticLabel{dummySpan, "", true});
+        }
+
+        if (fileLabels.empty()) continue;
+
+        // Determine gutter width based on maximum line number we will print for this file
+        uint32_t maxLine = (fid == loc.fileId) ? loc.line : fileLabels.front().span.start.line;
+        for (const auto& lbl : fileLabels) {
             maxLine = std::max(maxLine, lbl.span.start.line);
             maxLine = std::max(maxLine, lbl.span.end.line);
         }
-    }
-    const size_t gutterWidth = std::max<size_t>(2, std::to_string(maxLine).length());
+        const size_t gutterWidth = std::max<size_t>(2, std::to_string(maxLine).length());
+        globalGutterWidth = std::max(globalGutterWidth, gutterWidth);
 
-    // 2. File position: --> <file_path>:<line>:<column>
-    if (useColor) ss << ANSI_BLUE;
-    ss << std::string(gutterWidth, ' ') << "--> ";
-    if (useColor) ss << ANSI_RESET;
-    ss << buffer->getFilePath() << ":" << loc.line << ":" << loc.column << "\n";
+        SourceLocation headerLoc = (fid == loc.fileId) ? loc : fileLabels.front().span.start;
 
-    // 3. Separator line: |
-    if (useColor) ss << ANSI_BLUE;
-    ss << std::string(gutterWidth, ' ') << " |\n";
-    if (useColor) ss << ANSI_RESET;
-
-    // Collect all labels for this buffer sorted by start line & column
-    std::vector<DiagnosticLabel> fileLabels;
-    for (const auto& lbl : diag.labels) {
-        if (lbl.span.isValid() && lbl.span.getFileId() == loc.fileId) {
-            fileLabels.push_back(lbl);
-        }
-    }
-
-    // If no labels exist, synthesize a dummy one covering the single location
-    if (fileLabels.empty() && loc.isValid()) {
-        SourceSpan dummySpan{loc, SourceLocation{loc.fileId, loc.offset + 1, loc.line, loc.column + 1}};
-        fileLabels.push_back(DiagnosticLabel{dummySpan, "", true});
-    }
-
-    // Group rendering by line
-    // Collect unique lines that have labels
-    std::vector<uint32_t> linesToRender;
-    for (const auto& lbl : fileLabels) {
-        for (uint32_t l = lbl.span.start.line; l <= lbl.span.end.line; ++l) {
-            if (std::find(linesToRender.begin(), linesToRender.end(), l) == linesToRender.end()) {
-                linesToRender.push_back(l);
-            }
-        }
-    }
-    std::sort(linesToRender.begin(), linesToRender.end());
-
-    for (uint32_t lineNum : linesToRender) {
-        std::string_view lineContent = buffer->getLineText(lineNum);
-
-        // Source line display: "  42 | source line text..."
+        // Header: --> for primary, ::: for secondary files
         if (useColor) ss << ANSI_BLUE;
-        ss << std::setw(static_cast<int>(gutterWidth)) << lineNum << " | ";
+        ss << std::string(gutterWidth, ' ') << (isFirstFile ? "--> " : "::: ");
         if (useColor) ss << ANSI_RESET;
-        ss << lineContent << "\n";
+        ss << buffer->getFilePath() << ":" << headerLoc.line << ":" << headerLoc.column << "\n";
 
-        // Underline and squiggles
-        // Find labels that touch this line
-        std::vector<const DiagnosticLabel*> lineLabels;
+        // Separator line: |
+        if (useColor) ss << ANSI_BLUE;
+        ss << std::string(gutterWidth, ' ') << " |\n";
+        if (useColor) ss << ANSI_RESET;
+
+        // Collect unique lines that have labels
+        std::vector<uint32_t> linesToRender;
         for (const auto& lbl : fileLabels) {
-            if (lineNum >= lbl.span.start.line && lineNum <= lbl.span.end.line) {
-                lineLabels.push_back(&lbl);
+            for (uint32_t l = lbl.span.start.line; l <= lbl.span.end.line; ++l) {
+                if (std::find(linesToRender.begin(), linesToRender.end(), l) == linesToRender.end()) {
+                    linesToRender.push_back(l);
+                }
             }
         }
+        std::sort(linesToRender.begin(), linesToRender.end());
 
-        if (!lineLabels.empty()) {
+        for (uint32_t lineNum : linesToRender) {
+            std::string_view lineContent = buffer->getLineText(lineNum);
+
+            // Source line display: "  42 | source line text..."
             if (useColor) ss << ANSI_BLUE;
-            ss << std::string(gutterWidth, ' ') << " | ";
+            ss << std::setw(static_cast<int>(gutterWidth)) << lineNum << " | ";
             if (useColor) ss << ANSI_RESET;
+            ss << lineContent << "\n";
 
-            // Build squiggle line buffer
-            size_t maxCol = lineContent.length() + 1;
-            for (const auto* lbl : lineLabels) {
-                if (lbl->span.start.line == lineNum) {
-                    maxCol = std::max<size_t>(maxCol, lbl->span.start.column + lbl->span.length() + 1);
+            // Underline and squiggles
+            std::vector<const DiagnosticLabel*> lineLabels;
+            for (const auto& lbl : fileLabels) {
+                if (lineNum >= lbl.span.start.line && lineNum <= lbl.span.end.line) {
+                    lineLabels.push_back(&lbl);
                 }
             }
 
-            std::string squiggles(maxCol, ' ');
-            for (const auto* lbl : lineLabels) {
-                uint32_t startCol = (lbl->span.start.line == lineNum) ? lbl->span.start.column : 1;
-                uint32_t endCol = (lbl->span.end.line == lineNum) ? lbl->span.end.column : static_cast<uint32_t>(lineContent.length() + 1);
+            if (!lineLabels.empty()) {
+                if (useColor) ss << ANSI_BLUE;
+                ss << std::string(gutterWidth, ' ') << " | ";
+                if (useColor) ss << ANSI_RESET;
 
-                if (endCol <= startCol) {
-                    endCol = startCol + 1;
+                // Build squiggle line buffer
+                size_t maxCol = lineContent.length() + 1;
+                for (const auto* lbl : lineLabels) {
+                    if (lbl->span.start.line == lineNum) {
+                        maxCol = std::max<size_t>(maxCol, lbl->span.start.column + lbl->span.length() + 1);
+                    }
                 }
 
-                char squiggleChar = lbl->isPrimary ? '^' : '-';
-                size_t startIndex = (startCol > 0) ? (startCol - 1) : 0;
-                size_t endIndex = (endCol > 0) ? (endCol - 1) : 0;
+                std::string squiggles(maxCol, ' ');
+                for (const auto* lbl : lineLabels) {
+                    uint32_t startCol = (lbl->span.start.line == lineNum) ? lbl->span.start.column : 1;
+                    uint32_t endCol = (lbl->span.end.line == lineNum) ? lbl->span.end.column : static_cast<uint32_t>(lineContent.length() + 1);
 
-                for (size_t c = startIndex; c < endIndex && c < squiggles.size(); ++c) {
-                    squiggles[c] = squiggleChar;
+                    if (endCol <= startCol) {
+                        endCol = startCol + 1;
+                    }
+
+                    char squiggleChar = lbl->isPrimary ? '^' : '-';
+                    size_t startIndex = (startCol > 0) ? (startCol - 1) : 0;
+                    size_t endIndex = (endCol > 0) ? (endCol - 1) : 0;
+
+                    for (size_t c = startIndex; c < endIndex && c < squiggles.size(); ++c) {
+                        squiggles[c] = squiggleChar;
+                    }
                 }
-            }
 
-            // Append inline label messages
-            // Trim trailing spaces in squiggles
-            while (!squiggles.empty() && squiggles.back() == ' ') {
-                squiggles.pop_back();
-            }
-
-            if (useColor) {
-                ss << (diag.severity == DiagnosticSeverity::Error ? ANSI_RED : ANSI_YELLOW);
-            }
-            ss << squiggles;
-
-            // If there's an inline label message on this line, append it
-            std::string inlineNotes;
-            for (const auto* lbl : lineLabels) {
-                if (!lbl->message.empty() && lbl->span.start.line == lineNum) {
-                    if (!inlineNotes.empty()) inlineNotes += ", ";
-                    inlineNotes += lbl->message;
+                while (!squiggles.empty() && squiggles.back() == ' ') {
+                    squiggles.pop_back();
                 }
+
+                if (useColor) {
+                    ss << (diag.severity == DiagnosticSeverity::Error ? ANSI_RED : ANSI_YELLOW);
+                }
+                ss << squiggles;
+
+                std::string inlineNotes;
+                for (const auto* lbl : lineLabels) {
+                    if (!lbl->message.empty() && lbl->span.start.line == lineNum) {
+                        if (!inlineNotes.empty()) inlineNotes += ", ";
+                        inlineNotes += lbl->message;
+                    }
+                }
+                if (!inlineNotes.empty()) {
+                    ss << " " << inlineNotes;
+                }
+                if (useColor) ss << ANSI_RESET;
+                ss << "\n";
             }
-            if (!inlineNotes.empty()) {
-                ss << " " << inlineNotes;
-            }
-            if (useColor) ss << ANSI_RESET;
-            ss << "\n";
         }
-    }
 
-    // 4. Closing pipe before footers
-    if (useColor) ss << ANSI_BLUE;
-    ss << std::string(gutterWidth, ' ') << " |\n";
-    if (useColor) ss << ANSI_RESET;
+        // Closing pipe before next file or footers
+        if (useColor) ss << ANSI_BLUE;
+        ss << std::string(gutterWidth, ' ') << " |\n";
+        if (useColor) ss << ANSI_RESET;
+
+        isFirstFile = false;
+    }
 
     // 5. Footers (notes and helps):
     //    = note: ...
     //    = help: ...
     for (const auto& footer : diag.footers) {
         if (useColor) ss << ANSI_BLUE;
-        ss << std::string(gutterWidth, ' ') << " = ";
+        ss << std::string(globalGutterWidth, ' ') << " = ";
         if (footer.kind == DiagnosticFooter::Kind::Note) {
             if (useColor) ss << ANSI_CYAN;
             ss << "note: ";

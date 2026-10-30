@@ -13,6 +13,7 @@ add_library(keety_core STATIC
     sema/scope.cpp
     sema/universe.cpp
     sema/shadow_checker.cpp
+    sema/const_view_checker.cpp
 )
 
 target_include_directories(keety_core PUBLIC

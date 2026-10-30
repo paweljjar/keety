@@ -74,7 +74,7 @@ This document specifies the operational development plan for the `keety` compile
 - [x] **Task 3.2.1:** Implement hierarchical symbol table (`Scope`: Universe $\rightarrow$ Module $\rightarrow$ Function/Method $\rightarrow$ Block).
 - [x] **Task 3.2.2:** Register predeclared Universe symbols (`int`, `float`, `string`, `bool`, `error`, `typeof`, etc.).
 - [x] **Task 3.2.3:** Enforce strict no-shadowing rule: emit `E2001` if a local variable or parameter shadows any outer declaration.
-- [ ] **Task 3.2.4:** Enforce `const`-view visibility semantics for imported `export let` variables (`E2002`).
+- [x] **Task 3.2.4:** Enforce `const`-view visibility semantics for imported `export let` variables (`E2002`).
 
 #### **Phase 3.3: Static Type Checking & Union Algebra Normalization (`keety::typechecker`)**
 - [ ] **Task 3.3.1:** Enforce explicit type annotations on declarations (`let`, `const`, parameters) and emit `E3001` for omitted types.

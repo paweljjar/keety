@@ -145,6 +145,40 @@ public:
     [[nodiscard]] bool isConstView() const noexcept { return isConstView_; }
     void setConstView(bool cv) noexcept { isConstView_ = cv; }
 
+    /// Returns true if this symbol can be mutated in place.
+    [[nodiscard]] bool canMutate() const noexcept {
+        return isMutable_ && !isConst_ && !isConstView_;
+    }
+
+    /// Returns true if this symbol can be an assignment target (l-value).
+    [[nodiscard]] bool isAssignable() const noexcept {
+        return canMutate() &&
+               (kind_ == SymbolKind::Variable || kind_ == SymbolKind::Field || kind_ == SymbolKind::Parameter);
+    }
+
+    // Linkage to original exported symbol (for imported const-views)
+    [[nodiscard]] std::shared_ptr<Symbol> getOriginalExportedSymbol() const noexcept {
+        return originalExportedSymbol_;
+    }
+    void setOriginalExportedSymbol(std::shared_ptr<Symbol> orig) noexcept {
+        originalExportedSymbol_ = std::move(orig);
+    }
+
+    /// Factory method to create an imported const-view of an exported variable.
+    [[nodiscard]] static std::shared_ptr<Symbol> createImportedConstView(
+        const std::shared_ptr<Symbol>& original,
+        diag::SourceSpan importSpan) {
+        auto imported = std::make_shared<Symbol>(
+            original->getName(), SymbolKind::ImportedSymbol, importSpan);
+        imported->setConstView(true);
+        imported->setMutable(false);
+        imported->setConst(true);
+        imported->setAstNode(original->getAstNode());
+        imported->setTypeAnnotation(original->getTypeAnnotation());
+        imported->setOriginalExportedSymbol(original);
+        return imported;
+    }
+
     void setIsType(bool t) noexcept { isType_ = t; }
 
     // --- AST Associations ---
@@ -173,6 +207,7 @@ private:
     bool isConstView_{false};
     bool isType_{false};
     std::vector<std::shared_ptr<Symbol>> overloads_;
+    std::shared_ptr<Symbol> originalExportedSymbol_{nullptr};
 };
 
 } // namespace keety::sema
