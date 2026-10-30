@@ -418,12 +418,14 @@ std::unique_ptr<ast::EnumDecl> Parser::parseEnumDecl(bool isExported) {
     std::vector<ast::EnumMember> members;
 
     while (!check(lexer::TokenKind::RBrace) && !check(lexer::TokenKind::Eof)) {
-        const auto& mName = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected enum member name");
+        const auto& mNameTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected enum member name");
+        std::string mName = std::string(mNameTok.lexeme);
+        diag::SourceSpan mSpan = mNameTok.span;
         std::unique_ptr<ast::Expr> mVal = nullptr;
         if (match(lexer::TokenKind::Equal)) {
             mVal = parseExpression();
         }
-        members.push_back(ast::EnumMember{mName.span, std::string(mName.lexeme), std::move(mVal)});
+        members.push_back(ast::EnumMember{mSpan, std::move(mName), std::move(mVal)});
         if (!match(lexer::TokenKind::Comma)) {
             break;
         }
@@ -456,24 +458,25 @@ std::unique_ptr<ast::ErrTypeDecl> Parser::parseErrTypeDecl(bool isExported) {
             vis = ast::Visibility::Pub;
         }
         if (match(lexer::TokenKind::KwLet) || match(lexer::TokenKind::KwConst)) {
-            const auto& fName = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected field name");
+            const auto& fNameTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected field name");
+            std::string fieldName = std::string(fNameTok.lexeme);
+            diag::SourceSpan fieldSpan = fNameTok.span;
             std::unique_ptr<ast::TypeAnnotation> fType = nullptr;
             if (match(lexer::TokenKind::Colon)) {
                 fType = parseTypeAnnotation();
             } else {
                 if (emitter_) {
-                    diag::SourceSpan span = fName.span;
                     emitter_->report(diag::Diagnostic::makeError(
                         diag::ErrorCode::MissingTypeAnnotation,
-                        "missing explicit type annotation for error field '" + std::string(fName.lexeme) + "'",
-                        span.start)
-                        .withLabel(span, "error field type annotation required here")
+                        "missing explicit type annotation for error field '" + fieldName + "'",
+                        fieldSpan.start)
+                        .withLabel(fieldSpan, "error field type annotation required here")
                         .withNote("KeetScript requires explicit type annotations on all declarations")
-                        .withHelp("specify a type, e.g. '" + std::string(fName.lexeme) + ": <Type>'"));
+                        .withHelp("specify a type, e.g. '" + fieldName + ": <Type>'"));
                 }
             }
             expect(lexer::TokenKind::Semicolon, diag::ErrorCode::ExpectedSemicolon, "expected ';' after field");
-            fields.push_back(ast::ClassField{fName.span, vis, false, std::string(fName.lexeme), std::move(fType), nullptr});
+            fields.push_back(ast::ClassField{fieldSpan, vis, false, std::move(fieldName), std::move(fType), nullptr});
         } else {
             advance();
         }

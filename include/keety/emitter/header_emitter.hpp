@@ -85,15 +85,55 @@ public:
     [[nodiscard]] std::string emit_namespace_end() const;
     [[nodiscard]] std::string emit_namespace_body() const;
 
+    // Type and Expression mapping
+    [[nodiscard]] static std::string to_cpp_type(const ast::TypeAnnotation* type, const std::string& current_module = "");
+    [[nodiscard]] static std::string to_cpp_expr(const ast::Expr* expr);
+    [[nodiscard]] static std::string format_param(const ast::Param& param);
+
+    // Declaration emission sections
+    [[nodiscard]] std::string emit_forward_declarations() const;
+    [[nodiscard]] std::string emit_constexpr_definitions() const;
+    [[nodiscard]] std::string emit_enum_definitions() const;
+    [[nodiscard]] std::string emit_class_definitions() const;
+    [[nodiscard]] std::string emit_errtype_definitions() const;
+
+    // AST declaration ingestion
+    void collect_declarations(const parser::ModuleAST& ast);
+    void collect_declarations(const std::vector<std::unique_ptr<ast::Decl>>& decls);
+
+    // Programmatic declaration addition
+    void add_forward_decl(std::string decl);
+    void add_constexpr_def(std::string def);
+    void add_enum_def(std::string def);
+    void add_class_def(std::string def);
+    void add_errtype_def(std::string def);
+
+    // Accessors for emitted declarations
+    [[nodiscard]] const std::vector<std::string>& get_forward_decls() const noexcept { return forward_decls_; }
+    [[nodiscard]] const std::vector<std::string>& get_constexpr_defs() const noexcept { return constexpr_defs_; }
+    [[nodiscard]] const std::vector<std::string>& get_enum_defs() const noexcept { return enum_defs_; }
+    [[nodiscard]] const std::vector<std::string>& get_class_defs() const noexcept { return class_defs_; }
+    [[nodiscard]] const std::vector<std::string>& get_errtype_defs() const noexcept { return errtype_defs_; }
+
     // Full header generation
     [[nodiscard]] std::string emit() const;
     void emit(std::ostream& os) const;
 
 private:
+    [[nodiscard]] static std::string generate_enum_def(const ast::EnumDecl& enm);
+    [[nodiscard]] static std::string generate_class_def(const ast::ClassDecl& cls);
+    [[nodiscard]] static std::string generate_errtype_def(const ast::ErrTypeDecl& err);
+
     std::string module_name_{"main"};
     HeaderEmitterOptions options_;
     const parser::ModuleAST* ast_{nullptr};
     const ir::Module* ir_module_{nullptr};
+
+    std::vector<std::string> forward_decls_{};
+    std::vector<std::string> constexpr_defs_{};
+    std::vector<std::string> enum_defs_{};
+    std::vector<std::string> class_defs_{};
+    std::vector<std::string> errtype_defs_{};
 };
 
 } // namespace keety::emitter

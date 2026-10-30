@@ -244,3 +244,164 @@ TEST_CASE("C++ Header Emitter encapsulates declarations within module namespace"
         REQUIRE(header.find("} // namespace keet_module_user_account\n") != std::string::npos);
     }
 }
+
+TEST_CASE("C++ Header Emitter maps KeetScript types to C++17 types", "[emitter][types]") {
+    using namespace keety::ast;
+    keety::diag::SourceSpan dummySpan{};
+
+    SECTION("Primitive types") {
+        PrimitiveType tInt(dummySpan, PrimitiveTypeKind::Int);
+        REQUIRE(keety::emitter::HeaderEmitter::to_cpp_type(&tInt) == "int64_t");
+
+        PrimitiveType tFloat(dummySpan, PrimitiveTypeKind::Float);
+        REQUIRE(keety::emitter::HeaderEmitter::to_cpp_type(&tFloat) == "double");
+
+        PrimitiveType tBool(dummySpan, PrimitiveTypeKind::Bool);
+        REQUIRE(keety::emitter::HeaderEmitter::to_cpp_type(&tBool) == "bool");
+
+        PrimitiveType tStr(dummySpan, PrimitiveTypeKind::String);
+        REQUIRE(keety::emitter::HeaderEmitter::to_cpp_type(&tStr) == "std::string");
+
+        PrimitiveType tChar(dummySpan, PrimitiveTypeKind::Char);
+        REQUIRE(keety::emitter::HeaderEmitter::to_cpp_type(&tChar) == "char");
+
+        PrimitiveType tVoid(dummySpan, PrimitiveTypeKind::Void);
+        REQUIRE(keety::emitter::HeaderEmitter::to_cpp_type(&tVoid) == "void");
+
+        PrimitiveType tNull(dummySpan, PrimitiveTypeKind::Null);
+        REQUIRE(keety::emitter::HeaderEmitter::to_cpp_type(&tNull) == "std::monostate");
+
+        PrimitiveType tErr(dummySpan, PrimitiveTypeKind::Error);
+        REQUIRE(keety::emitter::HeaderEmitter::to_cpp_type(&tErr) == "keet::error");
+    }
+
+    SECTION("Collection types") {
+        auto elem = std::make_unique<PrimitiveType>(dummySpan, PrimitiveTypeKind::Int);
+        ArrayType arr(dummySpan, std::move(elem));
+        REQUIRE(keety::emitter::HeaderEmitter::to_cpp_type(&arr) == "std::vector<int64_t>");
+
+        auto k = std::make_unique<PrimitiveType>(dummySpan, PrimitiveTypeKind::String);
+        auto v = std::make_unique<PrimitiveType>(dummySpan, PrimitiveTypeKind::Float);
+        MapType mp(dummySpan, std::move(k), std::move(v));
+        REQUIRE(keety::emitter::HeaderEmitter::to_cpp_type(&mp) == "std::unordered_map<std::string, double>");
+    }
+
+    SECTION("Union types") {
+        std::vector<std::unique_ptr<TypeAnnotation>> vars;
+        vars.push_back(std::make_unique<PrimitiveType>(dummySpan, PrimitiveTypeKind::String));
+        vars.push_back(std::make_unique<PrimitiveType>(dummySpan, PrimitiveTypeKind::Null));
+        UnionType un(dummySpan, std::move(vars));
+        REQUIRE(keety::emitter::HeaderEmitter::to_cpp_type(&un) == "std::variant<std::string, std::monostate>");
+    }
+
+    SECTION("Function types") {
+        std::vector<FuncTypeParam> params;
+        params.push_back(FuncTypeParam{"a", std::make_unique<PrimitiveType>(dummySpan, PrimitiveTypeKind::Int), false});
+        params.push_back(FuncTypeParam{"b", std::make_unique<PrimitiveType>(dummySpan, PrimitiveTypeKind::Int), true});
+        auto ret = std::make_unique<PrimitiveType>(dummySpan, PrimitiveTypeKind::Bool);
+        FunctionType fn(dummySpan, std::move(params), std::move(ret));
+        REQUIRE(keety::emitter::HeaderEmitter::to_cpp_type(&fn) == "std::function<bool(int64_t, int64_t&)>");
+    }
+
+    SECTION("Custom and qualified types") {
+        CustomType simple(dummySpan, "Player");
+        REQUIRE(keety::emitter::HeaderEmitter::to_cpp_type(&simple) == "Player");
+
+        std::vector<std::unique_ptr<TypeAnnotation>> args;
+        args.push_back(std::make_unique<PrimitiveType>(dummySpan, PrimitiveTypeKind::Int));
+        CustomType generic(dummySpan, "Box", std::move(args));
+        REQUIRE(keety::emitter::HeaderEmitter::to_cpp_type(&generic) == "Box<int64_t>");
+
+        CustomType qual(dummySpan, "Vector", {}, "math");
+        REQUIRE(keety::emitter::HeaderEmitter::to_cpp_type(&qual) == "keet_module_math::Vector");
+    }
+}
+
+TEST_CASE("C++ Header Emitter emits forward declarations, constexpr constants, enums, classes, and error types", "[emitter][declarations]") {
+    const std::string source = R"(
+        define MAX_BUFFER_SIZE: int = 4096;
+        define PI: float = 3.14159;
+        define VERSION: string = "1.0.0";
+
+        enum StatusCode: int {
+            OK = 200,
+            NotFound = 404,
+            InternalError = 500
+        }
+
+        errtype TimeoutError {
+            pub let timeoutMs: int;
+        }
+
+        class Entity {
+            pub let id: int = 1;
+            pub let active: bool = true;
+
+            fn isAlive(): bool {
+                return true;
+            }
+        }
+
+        class Player inherits Entity {
+            pub let name: string;
+            pub let scores: array<int>;
+
+            fn addScore(pts: int, mut buffer: array<int>): void {
+            }
+        }
+    )";
+
+    keety::parser::ModuleAST ast = parseSource(source, "game_engine");
+    keety::emitter::HeaderEmitter emitter(ast);
+
+    std::string header = emitter.emit();
+
+    SECTION("Emits forward declarations for all classes, error types, and enums") {
+        REQUIRE(header.find("// --- Forward Declarations ---") != std::string::npos);
+        REQUIRE(header.find("struct Entity;") != std::string::npos);
+        REQUIRE(header.find("struct Player;") != std::string::npos);
+        REQUIRE(header.find("struct TimeoutError;") != std::string::npos);
+        REQUIRE(header.find("enum class StatusCode : int64_t;") != std::string::npos);
+    }
+
+    SECTION("Emits compile-time constexpr constant definitions") {
+        REQUIRE(header.find("// --- Compile-Time Constants ---") != std::string::npos);
+        REQUIRE(header.find("inline constexpr int64_t MAX_BUFFER_SIZE = 4096;") != std::string::npos);
+        REQUIRE(header.find("inline constexpr double PI = 3.14159;") != std::string::npos);
+        REQUIRE(header.find("inline constexpr std::string VERSION = \"1.0.0\";") != std::string::npos);
+    }
+
+    SECTION("Emits enum definitions with underlying type and enumerators") {
+        REQUIRE(header.find("// --- Enums ---") != std::string::npos);
+        REQUIRE(header.find("enum class StatusCode : int64_t {") != std::string::npos);
+        REQUIRE(header.find("OK = 200,") != std::string::npos);
+        REQUIRE(header.find("NotFound = 404,") != std::string::npos);
+        REQUIRE(header.find("InternalError = 500") != std::string::npos);
+    }
+
+    SECTION("Emits error type definitions deriving from keet::error with custom fields and constructor") {
+        REQUIRE(header.find("// --- Error Types ---") != std::string::npos);
+        REQUIRE(header.find("struct TimeoutError : public keet::error {") != std::string::npos);
+        REQUIRE(header.find("int64_t timeoutMs{};") != std::string::npos);
+        REQUIRE(header.find("TimeoutError(int64_t timeoutMs = {}, std::string msg = \"TimeoutError\")") != std::string::npos);
+        REQUIRE(header.find(": keet::error(\"TimeoutError\", std::move(msg)), timeoutMs(timeoutMs)") != std::string::npos);
+    }
+
+    SECTION("Emits class definitions with base inheritance, fields, default constructor, and methods") {
+        REQUIRE(header.find("// --- Classes and Structs ---") != std::string::npos);
+
+        // Entity base class
+        REQUIRE(header.find("struct Entity {") != std::string::npos);
+        REQUIRE(header.find("int64_t id = 1;") != std::string::npos);
+        REQUIRE(header.find("bool active = true;") != std::string::npos);
+        REQUIRE(header.find("Entity() = default;") != std::string::npos);
+        REQUIRE(header.find("bool isAlive();") != std::string::npos);
+
+        // Player derived class
+        REQUIRE(header.find("struct Player : public Entity {") != std::string::npos);
+        REQUIRE(header.find("std::string name{};") != std::string::npos);
+        REQUIRE(header.find("std::vector<int64_t> scores{};") != std::string::npos);
+        REQUIRE(header.find("Player() = default;") != std::string::npos);
+        REQUIRE(header.find("void addScore(int64_t pts, std::vector<int64_t>& buffer);") != std::string::npos);
+    }
+}
