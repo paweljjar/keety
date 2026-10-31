@@ -4,6 +4,7 @@ add_executable(keety_benchmarks
     main.cpp
     bench_numeric_vector.cpp
     bench_hash_map.cpp
+    bench_string_ingestion.cpp
 )
 
 target_include_directories(keety_benchmarks PRIVATE
@@ -37,5 +38,9 @@ if(KEETY_BUILD_TESTS)
     add_test(
         NAME bench_hash_map
         COMMAND keety_benchmarks --benchmark 2 --size 100000 --warmup 2 --measure 5
+    )
+    add_test(
+        NAME bench_string_ingestion
+        COMMAND keety_benchmarks --benchmark 3 --size 500000 --warmup 2 --measure 5
     )
 endif()

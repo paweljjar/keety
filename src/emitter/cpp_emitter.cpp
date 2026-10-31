@@ -415,6 +415,15 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             if (m_name == "toString") {
                 return "keet::to_string(" + obj_s + ")";
             }
+            if (m_name == "tryInt") {
+                return "keet::try_int(" + obj_s + ")";
+            }
+            if (m_name == "tryFloat") {
+                return "keet::try_float(" + obj_s + ")";
+            }
+            if (m_name == "trim") {
+                return "keet::trim(" + obj_s + ")";
+            }
 
             if (is_this) {
                 return "this->" + m_name + "(" + args_str + ")";
@@ -647,6 +656,34 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
                         else if (tname == "float") narrowed_type = "double";
                         else if (tname == "bool") narrowed_type = "bool";
                         else if (tname == "char") narrowed_type = "char";
+                    }
+                }
+            } else if (bin->getOp() == lexer::TokenKind::ExclaimEqual) {
+                const ast::IdentExpr* id = dynamic_cast<const ast::IdentExpr*>(bin->getLeft());
+                const ast::LiteralExpr* lit = dynamic_cast<const ast::LiteralExpr*>(bin->getRight());
+                if (!id) {
+                    id = dynamic_cast<const ast::IdentExpr*>(bin->getRight());
+                    lit = dynamic_cast<const ast::LiteralExpr*>(bin->getLeft());
+                }
+                if (id && lit && lit->getRawText() == "null") {
+                    if (if_stmt->hasInit()) {
+                        if (const auto* decl = dynamic_cast<const ast::DeclStmt*>(if_stmt->getInit())) {
+                            if (const auto* var = dynamic_cast<const ast::VarDecl*>(decl->getDeclaration())) {
+                                if (var->getName() == id->getName() && var->getType()) {
+                                    if (const auto* un = dynamic_cast<const ast::UnionType*>(var->getType())) {
+                                        for (const auto& v : un->getVariants()) {
+                                            if (const auto* prim = dynamic_cast<const ast::PrimitiveType*>(v.get())) {
+                                                if (prim->getKind() != ast::PrimitiveTypeKind::Null) {
+                                                    narrowed_var = id->getName();
+                                                    narrowed_type = HeaderEmitter::to_cpp_type(v.get());
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

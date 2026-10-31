@@ -120,7 +120,7 @@ inline auto branch(Cond&& cond, T1&& t1, T2&& t2) {
 
 // Comparison operators for variant and monostate (representing KeetScript null)
 template <typename... Ts>
-inline bool operator==(const std::variant<Ts...>& v, std::monostate) {
+inline bool operator==(const std::variant<Ts...>& v, std::monostate) noexcept {
     if constexpr ((std::is_same_v<Ts, std::monostate> || ...)) {
         return std::holds_alternative<std::monostate>(v);
     } else {
@@ -129,18 +129,22 @@ inline bool operator==(const std::variant<Ts...>& v, std::monostate) {
 }
 
 template <typename... Ts>
-inline bool operator==(std::monostate, const std::variant<Ts...>& v) {
+inline bool operator==(std::monostate, const std::variant<Ts...>& v) noexcept {
     return v == std::monostate{};
 }
 
 template <typename... Ts>
-inline bool operator!=(const std::variant<Ts...>& v, std::monostate) {
-    return !(v == std::monostate{});
+inline bool operator!=(const std::variant<Ts...>& v, std::monostate) noexcept {
+    if constexpr ((std::is_same_v<Ts, std::monostate> || ...)) {
+        return !std::holds_alternative<std::monostate>(v);
+    } else {
+        return true;
+    }
 }
 
 template <typename... Ts>
-inline bool operator!=(std::monostate, const std::variant<Ts...>& v) {
-    return !(v == std::monostate{});
+inline bool operator!=(std::monostate, const std::variant<Ts...>& v) noexcept {
+    return v != std::monostate{};
 }
 
 // Safe numeric accumulation for variants

@@ -7,3 +7,4 @@
 #include <keet/numeric.hpp>
 #include <keet/typeof.hpp>
 #include <keet/functional.hpp>
+#include <keet/strings.hpp>

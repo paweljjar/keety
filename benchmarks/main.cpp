@@ -1,5 +1,6 @@
 #include "bench_numeric_vector.hpp"
 #include "bench_hash_map.hpp"
+#include "bench_string_ingestion.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -46,6 +47,15 @@ int main(int argc, char* argv[]) {
     if (target_benchmark == 2 || target_benchmark == 0) {
         size_t b2_size = custom_size > 0 ? custom_size : 1000000;
         auto res = keety::benchmarks::run_hash_map_benchmark(b2_size, warmup, measure, verbose);
+        if (!res.passed) {
+            all_passed = false;
+        }
+    }
+
+    // Benchmark 3: High-Throughput String Ingestion
+    if (target_benchmark == 3 || target_benchmark == 0) {
+        size_t b3_size = custom_size > 0 ? custom_size : 5000000;
+        auto res = keety::benchmarks::run_string_ingestion_benchmark(b3_size, warmup, measure, verbose);
         if (!res.passed) {
             all_passed = false;
         }
