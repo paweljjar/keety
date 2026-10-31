@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <limits>
+#include <type_traits>
 #include <keet/error.hpp>
 
 namespace keet {
@@ -30,26 +32,60 @@ namespace keet {
 
 /// Fallible integer division: raises keet::error("DivisionByZero") if b == 0,
 /// and handles INT64_MIN / -1 wrapping deterministically to INT64_MIN.
-[[nodiscard]] inline int64_t div_safe(int64_t a, int64_t b) {
-    if (b == 0) {
-        throw error("DivisionByZero", "Integer division by zero");
+template <typename T, typename U>
+[[nodiscard]] inline auto div_safe(T a, U b) {
+    if constexpr (std::is_integral_v<T> && std::is_integral_v<U>) {
+        if (b == 0) {
+            throw error("DivisionByZero", "Integer division by zero");
+        }
+        if (a == std::numeric_limits<T>::min() && b == -1) {
+            return static_cast<int64_t>(std::numeric_limits<T>::min());
+        }
+        return static_cast<int64_t>(a / b);
+    } else {
+        return a / b;
     }
-    // Handle the single overflow case: INT64_MIN / -1 produces INT64_MIN in two's complement
-    if (a == std::numeric_limits<int64_t>::min() && b == -1) {
-        return std::numeric_limits<int64_t>::min();
-    }
-    return a / b;
 }
 
 /// Fallible integer modulo: raises keet::error("DivisionByZero") if b == 0.
-[[nodiscard]] inline int64_t mod_safe(int64_t a, int64_t b) {
-    if (b == 0) {
-        throw error("DivisionByZero", "Integer modulo by zero");
+template <typename T, typename U>
+[[nodiscard]] inline auto mod_safe(T a, U b) {
+    if constexpr (std::is_integral_v<T> && std::is_integral_v<U>) {
+        if (b == 0) {
+            throw error("DivisionByZero", "Integer modulo by zero");
+        }
+        if (a == std::numeric_limits<T>::min() && b == -1) {
+            return static_cast<int64_t>(0);
+        }
+        return static_cast<int64_t>(a % b);
+    } else {
+        return std::fmod(a, b);
     }
-    if (a == std::numeric_limits<int64_t>::min() && b == -1) {
-        return 0;
+}
+
+/// Safe float-to-integer conversion with NaN and range checking.
+template <typename T>
+[[nodiscard]] inline int64_t to_int(T v) {
+    if constexpr (std::is_floating_point_v<T>) {
+        if (std::isnan(v)) {
+            throw error("InvalidCast", "Cannot convert NaN float to integer");
+        }
+        if (v < static_cast<double>(std::numeric_limits<int64_t>::min()) ||
+            v > static_cast<double>(std::numeric_limits<int64_t>::max())) {
+            throw error("OverflowError", "Float conversion out of 64-bit integer range");
+        }
+        return static_cast<int64_t>(v);
+    } else {
+        return static_cast<int64_t>(v);
     }
-    return a % b;
+}
+
+/// Clamps value between min and max bounds.
+template <typename T, typename MinT, typename MaxT>
+[[nodiscard]] inline auto clamp(T val, MinT min_val, MaxT max_val) noexcept {
+    if (val < min_val) return static_cast<decltype(val + min_val + max_val)>(min_val);
+    if (val > max_val) return static_cast<decltype(val + min_val + max_val)>(max_val);
+    return static_cast<decltype(val + min_val + max_val)>(val);
 }
 
 } // namespace keet

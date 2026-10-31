@@ -1,0 +1,14 @@
+fn main(): int {
+    let maxInt: int = 9223372036854775807;
+    let wrapped: int = maxInt + 1;
+    let minInt: int = -9223372036854775808;
+    let negatedMin: int = -minInt;
+
+    if (wrapped != -9223372036854775808) {
+        return 1;
+    }
+    if (negatedMin != -9223372036854775808) {
+        return 2;
+    }
+    return 0;
+}

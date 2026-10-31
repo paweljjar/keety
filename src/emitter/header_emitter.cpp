@@ -393,6 +393,12 @@ std::string HeaderEmitter::to_cpp_expr(const ast::Expr* expr) {
         if (lit->getRawText() == "null") {
             return "nullptr";
         }
+        if (lit->getRawText() == "9223372036854775808") {
+            return "(9223372036854775807LL + 1LL)";
+        }
+        if (lit->getRawText() == "9223372036854775807") {
+            return "9223372036854775807LL";
+        }
         return lit->getRawText();
     }
 
@@ -401,11 +407,24 @@ std::string HeaderEmitter::to_cpp_expr(const ast::Expr* expr) {
     }
 
     if (const auto* un = dynamic_cast<const ast::UnaryExpr*>(expr)) {
+        if (un->getOp() == lexer::TokenKind::Minus) {
+            if (const auto* lit = dynamic_cast<const ast::LiteralExpr*>(un->getOperand())) {
+                if (lit->getRawText() == "9223372036854775808") {
+                    return "(-9223372036854775807LL - 1LL)";
+                }
+            }
+        }
         std::string_view op_str = lexer::getTokenKindName(un->getOp());
         return std::string(op_str) + to_cpp_expr(un->getOperand());
     }
 
     if (const auto* bin = dynamic_cast<const ast::BinaryExpr*>(expr)) {
+        if (bin->getOp() == lexer::TokenKind::Slash) {
+            return "keet::div_safe(" + to_cpp_expr(bin->getLeft()) + ", " + to_cpp_expr(bin->getRight()) + ")";
+        }
+        if (bin->getOp() == lexer::TokenKind::Percent) {
+            return "keet::mod_safe(" + to_cpp_expr(bin->getLeft()) + ", " + to_cpp_expr(bin->getRight()) + ")";
+        }
         std::string_view op_str = lexer::getTokenKindName(bin->getOp());
         return to_cpp_expr(bin->getLeft()) + " " + std::string(op_str) + " " + to_cpp_expr(bin->getRight());
     }

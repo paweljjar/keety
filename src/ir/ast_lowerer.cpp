@@ -573,8 +573,17 @@ Operand AstLowerer::lower_expression(const ast::Expr& expr) {
 
 Operand AstLowerer::lower_literal_expr(const ast::LiteralExpr& expr) {
     switch (expr.getLiteralKind()) {
-        case lexer::TokenKind::IntLiteral:
-            return Operand::create_int(std::stoll(expr.getRawText()));
+        case lexer::TokenKind::IntLiteral: {
+            int64_t val = 0;
+            try {
+                val = std::stoll(expr.getRawText());
+            } catch (...) {
+                try {
+                    val = static_cast<int64_t>(std::stoull(expr.getRawText()));
+                } catch (...) {}
+            }
+            return Operand::create_int(val);
+        }
         case lexer::TokenKind::FloatLiteral:
             return Operand::create_float(std::stod(expr.getRawText()));
         case lexer::TokenKind::CharLiteral:

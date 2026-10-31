@@ -121,6 +121,7 @@ private:
     bool main_has_args_{false};
     bool main_returns_int_{false};
     bool manual_root_override_{false};
+    mutable bool in_zonk_expr_{false};
 };
 
 } // namespace keety::emitter

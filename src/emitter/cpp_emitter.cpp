@@ -38,8 +38,25 @@ CppEmitter::CppEmitter(const parser::ModuleAST& ast, const ir::Module& ir_module
     } else if (!ir_module.get_name().empty()) {
         module_name_ = ir_module.get_name();
     }
-    collect_declarations(ast);
-    collect_ir_declarations(ir_module);
+    if (!ast.declarations.empty()) {
+        collect_declarations(ast);
+        for (const auto& global : ir_module.get_globals()) {
+            if (!is_module_var(global.name)) {
+                register_module_var(global.name);
+                std::string cpp_type = HeaderEmitter::to_cpp_type(global.type);
+                if (global.is_const) {
+                    cpp_type = "const " + cpp_type;
+                }
+                std::string init_val = "{}";
+                if (global.initial_value.has_value()) {
+                    init_val = to_cpp_operand(*global.initial_value);
+                }
+                add_storage_allocation(global.name, cpp_type, init_val);
+            }
+        }
+    } else {
+        collect_ir_declarations(ir_module);
+    }
 }
 
 void CppEmitter::add_standard_header(std::string header) {
@@ -263,6 +280,12 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
         if (lit->getRawText() == "null") {
             return "nullptr";
         }
+        if (lit->getRawText() == "9223372036854775808") {
+            return "(9223372036854775807LL + 1LL)";
+        }
+        if (lit->getRawText() == "9223372036854775807") {
+            return "9223372036854775807LL";
+        }
         return lit->getRawText();
     }
 
@@ -280,6 +303,13 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
     }
 
     if (const auto* un = dynamic_cast<const ast::UnaryExpr*>(expr)) {
+        if (un->getOp() == lexer::TokenKind::Minus) {
+            if (const auto* lit = dynamic_cast<const ast::LiteralExpr*>(un->getOperand())) {
+                if (lit->getRawText() == "9223372036854775808") {
+                    return "(-9223372036854775807LL - 1LL)";
+                }
+            }
+        }
         std::string_view op_str = lexer::getTokenKindName(un->getOp());
         if (un->isPrefix()) {
             return std::string(op_str) + translate_expression(un->getOperand());
@@ -288,6 +318,12 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
     }
 
     if (const auto* bin = dynamic_cast<const ast::BinaryExpr*>(expr)) {
+        if (in_zonk_expr_ && bin->getOp() == lexer::TokenKind::Slash) {
+            return "keet::div_safe(" + translate_expression(bin->getLeft()) + ", " + translate_expression(bin->getRight()) + ")";
+        }
+        if (in_zonk_expr_ && bin->getOp() == lexer::TokenKind::Percent) {
+            return "keet::mod_safe(" + translate_expression(bin->getLeft()) + ", " + translate_expression(bin->getRight()) + ")";
+        }
         std::string_view op_str = lexer::getTokenKindName(bin->getOp());
         return translate_expression(bin->getLeft()) + " " + std::string(op_str) + " " + translate_expression(bin->getRight());
     }
@@ -348,6 +384,9 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             if (m_name == "clear") {
                 return obj_s + ".clear()";
             }
+            if (m_name == "clamp") {
+                return "keet::clamp(" + obj_s + ", " + args_str + ")";
+            }
 
             if (is_this) {
                 return "this->" + m_name + "(" + args_str + ")";
@@ -360,6 +399,9 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
 
     if (const auto* cast = dynamic_cast<const ast::TypeCastExpr*>(expr)) {
         std::string target_t = HeaderEmitter::to_cpp_type(cast->getTargetType());
+        if (target_t == "int64_t") {
+            return "keet::to_int(" + translate_expression(cast->getExpr()) + ")";
+        }
         if (cast->isAssertion()) {
             if (target_t == "int64_t" || target_t == "double" || target_t == "bool" || target_t == "char") {
                 return "static_cast<" + target_t + ">(" + translate_expression(cast->getExpr()) + ")";
@@ -395,11 +437,15 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
     }
 
     if (const auto* znk = dynamic_cast<const ast::ZonkExpr*>(expr)) {
+        bool prev_zonk = in_zonk_expr_;
+        in_zonk_expr_ = true;
+        std::string prim_str = translate_expression(znk->getPrimary());
+        in_zonk_expr_ = prev_zonk;
         if (znk->hasRecoveryBlock()) {
             std::string err_v = znk->getErrorVarName().empty() ? "err" : znk->getErrorVarName();
-            std::string res = "([&]() {\n"
+            std::string res = "([&]() -> decltype(" + prim_str + ") {\n"
                               "            try {\n"
-                              "                return " + translate_expression(znk->getPrimary()) + ";\n"
+                              "                return " + prim_str + ";\n"
                               "            } catch (const keet::error& " + err_v + ") {\n";
             res += translate_block(znk->getRecoveryBlock(), 4);
             res += "            }\n"
@@ -407,7 +453,7 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             return res;
         }
         if (znk->getFallback()) {
-            return "([&]() { try { return " + translate_expression(znk->getPrimary()) +
+            return "([&]() -> decltype(" + prim_str + ") { try { return " + prim_str +
                    "; } catch (...) { return " + translate_expression(znk->getFallback()) + "; } })()";
         }
     }
