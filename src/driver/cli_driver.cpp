@@ -547,6 +547,7 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
     sema::registerUniverseSymbols(*universe);
 
     std::unordered_map<std::string, std::shared_ptr<sema::Scope>> module_scopes;
+    module_scopes["<stdlib>/io"] = sema::createStdlibModuleScope("io", universe);
 
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
@@ -559,6 +560,10 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
 
         auto module_scope = std::make_shared<sema::Scope>(sema::ScopeKind::Module, universe);
         for (const auto& edge : node->outgoingEdges) {
+            if (edge.toCanonicalPath == "<stdlib>/io" || edge.rawImportPath == "io") {
+                auto ioModSym = std::make_shared<sema::Symbol>("io", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(ioModSym, false);
+            }
             auto it = module_scopes.find(edge.toCanonicalPath);
             if (it != module_scopes.end() && it->second) {
                 for (const auto& [name, sym] : it->second->getSymbols()) {
@@ -669,6 +674,7 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
     const resolver::ModuleNode* target_node = nullptr;
 
     std::unordered_map<std::string, std::shared_ptr<sema::Scope>> module_scopes;
+    module_scopes["<stdlib>/io"] = sema::createStdlibModuleScope("io", universe);
 
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
@@ -681,6 +687,10 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
 
         auto module_scope = std::make_shared<sema::Scope>(sema::ScopeKind::Module, universe);
         for (const auto& edge : node->outgoingEdges) {
+            if (edge.toCanonicalPath == "<stdlib>/io" || edge.rawImportPath == "io") {
+                auto ioModSym = std::make_shared<sema::Symbol>("io", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(ioModSym, false);
+            }
             auto it = module_scopes.find(edge.toCanonicalPath);
             if (it != module_scopes.end() && it->second) {
                 for (const auto& [name, sym] : it->second->getSymbols()) {
@@ -869,6 +879,7 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     sema::registerUniverseSymbols(*universe);
 
     std::unordered_map<std::string, std::shared_ptr<sema::Scope>> module_scopes;
+    module_scopes["<stdlib>/io"] = sema::createStdlibModuleScope("io", universe);
 
     // 1. Semantic and type checking across all modules
     for (const auto* node : ordered_nodes) {
@@ -878,6 +889,10 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
 
         auto module_scope = std::make_shared<sema::Scope>(sema::ScopeKind::Module, universe);
         for (const auto& edge : node->outgoingEdges) {
+            if (edge.toCanonicalPath == "<stdlib>/io" || edge.rawImportPath == "io") {
+                auto ioModSym = std::make_shared<sema::Symbol>("io", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(ioModSym, false);
+            }
             auto it = module_scopes.find(edge.toCanonicalPath);
             if (it != module_scopes.end() && it->second) {
                 for (const auto& [name, sym] : it->second->getSymbols()) {

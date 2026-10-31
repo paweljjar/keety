@@ -2746,3 +2746,132 @@ TEST_CASE("Mutable Reference Borrow Checker - Default Argument Mutable Borrow (E
     }
 }
 
+TEST_CASE("Standard io module type checking and semantic validation", "[typechecker][io]") {
+    SECTION("Valid import io and variadic io.println calls") {
+        ParseResult res(
+            "import io;\n"
+            "fn main(): void {\n"
+            "    io.println(\"Status:\", 200, true);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Valid io.readln and io.input calls") {
+        ParseResult res(
+            "import io;\n"
+            "fn main(): void {\n"
+            "    let line: string = io.readln();\n"
+            "    let name: string = io.input(\"Name: \");\n"
+            "    let emptyPrompt: string = io.input();\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Valid inline color helpers and trailing io.Color formatting") {
+        ParseResult res(
+            "import io;\n"
+            "fn main(): void {\n"
+            "    let colored: string = io.green(\"Success\");\n"
+            "    let warn: string = io.yellow(\"Alert\");\n"
+            "    let strong: string = io.bold(\"Important\");\n"
+            "    io.println(\"Completed\", io.Color.Green);\n"
+            "    let c: io.Color = io.Color.Red;\n"
+            "    io.println(\"Critical error\", c);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Selective import from io") {
+        ParseResult res(
+            "from \"io\" import println, Color;\n"
+            "fn main(): void {\n"
+            "    println(\"Direct selective call\", Color.Blue);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Reject calling io without import with E2003") {
+        ParseResult res(
+            "fn main(): void {\n"
+            "    io.println(\"No import\");\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::UndeclaredIdentifier));
+    }
+
+    SECTION("Reject passing non-string argument to io.input with E3003") {
+        ParseResult res(
+            "import io;\n"
+            "fn main(): void {\n"
+            "    let s: string = io.input(42);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Reject passing non-string argument to inline color helper with E3003") {
+        ParseResult res(
+            "import io;\n"
+            "fn main(): void {\n"
+            "    let s: string = io.red(100);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Reject unexpected arguments to io.readln with E3003") {
+        ParseResult res(
+            "import io;\n"
+            "fn main(): void {\n"
+            "    let s: string = io.readln(\"unexpected\");\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Reject unknown member on io module with E3011") {
+        ParseResult res(
+            "import io;\n"
+            "fn main(): void {\n"
+            "    io.unknownMember();\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::InvalidMemberAccess));
+    }
+
+    SECTION("Reject unknown member on io.Color with E3011") {
+        ParseResult res(
+            "import io;\n"
+            "fn main(): void {\n"
+            "    let c = io.Color.Orange;\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::InvalidMemberAccess));
+    }
+
+    SECTION("Reject non-trailing io.Color in io.println with E3003") {
+        ParseResult res(
+            "import io;\n"
+            "fn main(): void {\n"
+            "    io.println(io.Color.Red, \"unexpected trailing text\");\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+}
+

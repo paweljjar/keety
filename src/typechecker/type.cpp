@@ -364,6 +364,9 @@ TypePtr Type::fromAnnotation(const ast::TypeAnnotation* annot) {
     } else if (const auto* m = dynamic_cast<const ast::MapType*>(annot)) {
         return map(fromAnnotation(m->getKeyType()), fromAnnotation(m->getValueType()));
     } else if (const auto* customT = dynamic_cast<const ast::CustomType*>(annot)) {
+        if (customT->isQualified()) {
+            return custom(customT->getModuleQualifier() + "." + customT->getName());
+        }
         return custom(customT->getName());
     } else if (const auto* unionT = dynamic_cast<const ast::UnionType*>(annot)) {
         std::vector<TypePtr> variants;
@@ -476,7 +479,12 @@ bool CustomType::equals(const Type& other) const {
     if (this == &other) return true;
     if (other.getKind() != TypeKind::Custom) return false;
     const auto& o = static_cast<const CustomType&>(other);
-    return name_ == o.name_;
+    if (name_ == o.name_) return true;
+    if ((name_ == "Color" && o.name_ == "io.Color") ||
+        (name_ == "io.Color" && o.name_ == "Color")) {
+        return true;
+    }
+    return false;
 }
 
 bool CustomType::isAssignableTo(const Type& target) const {

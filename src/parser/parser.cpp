@@ -1337,9 +1337,17 @@ std::unique_ptr<ast::TypeAnnotation> Parser::parseSingleTypeAnnotation() {
         return std::make_unique<ast::LiteralType>(tok.span, raw);
     }
 
-    // 5. Custom / nominal identifier
+    // 5. Custom / nominal identifier (including qualified names like io.Color)
     if (check(lexer::TokenKind::Identifier)) {
-        const auto& nameTok = advance();
+        auto nameTok = advance();
+        if (match(lexer::TokenKind::Dot)) {
+            if (check(lexer::TokenKind::Identifier)) {
+                auto memberTok = advance();
+                diag::SourceSpan fullSpan{nameTok.span.start, memberTok.span.end};
+                return std::make_unique<ast::CustomType>(
+                    fullSpan, std::string(memberTok.lexeme), std::vector<std::unique_ptr<ast::TypeAnnotation>>{}, std::string(nameTok.lexeme));
+            }
+        }
         return std::make_unique<ast::CustomType>(nameTok.span, std::string(nameTok.lexeme));
     }
 

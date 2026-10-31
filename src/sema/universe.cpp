@@ -98,4 +98,60 @@ void registerUniverseSymbols(Scope& universe) {
     universe.define(typeofSym);
 }
 
+bool isStdlibModule(std::string_view name) noexcept {
+    return name == "io" || name == "std.io" || name == "keet.io";
+}
+
+void populateIoModuleScope(Scope& ioScope) {
+    diag::SourceSpan span{};
+
+    auto makeFn = [&](const char* name) {
+        auto sym = std::make_shared<Symbol>(name, SymbolKind::Function, span);
+        sym->setExported(true);
+        sym->setConst(true);
+        ioScope.define(sym, false);
+    };
+
+    makeFn("print");
+    makeFn("println");
+    makeFn("readln");
+    makeFn("readLine");
+    makeFn("input");
+    makeFn("red");
+    makeFn("green");
+    makeFn("yellow");
+    makeFn("blue");
+    makeFn("magenta");
+    makeFn("cyan");
+    makeFn("white");
+    makeFn("gray");
+    makeFn("bold");
+    makeFn("flush");
+
+    // io.Color enum
+    auto colorEnum = std::make_shared<Symbol>("Color", SymbolKind::Enum, span);
+    colorEnum->setExported(true);
+    colorEnum->setIsType(true);
+    colorEnum->setConst(true);
+    ioScope.define(colorEnum, false);
+
+    const std::vector<const char*> colorMembers = {
+        "Default", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White", "Gray"
+    };
+    for (const char* memberName : colorMembers) {
+        auto valSym = std::make_shared<Symbol>(memberName, SymbolKind::EnumValue, span);
+        valSym->setExported(true);
+        valSym->setConst(true);
+        ioScope.define(valSym, false);
+    }
+}
+
+std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, const std::shared_ptr<Scope>& universe) {
+    auto scope = std::make_shared<Scope>(ScopeKind::Module, universe);
+    if (moduleName == "io" || moduleName == "std.io" || moduleName == "keet.io") {
+        populateIoModuleScope(*scope);
+    }
+    return scope;
+}
+
 } // namespace keety::sema

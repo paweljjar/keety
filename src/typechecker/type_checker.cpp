@@ -1410,6 +1410,216 @@ bool TypeChecker::checkAssignment(
     return true;
 }
 
+bool TypeChecker::isIoColorType(const TypePtr& t) const noexcept {
+    if (!t) return false;
+    if (t->isCustom()) {
+        const auto& name = static_cast<const CustomType*>(t.get())->getName();
+        return name == "Color" || name == "io.Color";
+    }
+    return false;
+}
+
+TypePtr TypeChecker::checkIoMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!member || !call) return Type::unknownType();
+    const std::string& mName = member->getMemberName();
+
+    if (mName == "print" || mName == "println") {
+        for (size_t i = 0; i < call->getArgs().size(); ++i) {
+            const auto& arg = call->getArgs()[i];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope);
+                if (aType && aType->isVoid()) {
+                    if (emitter_) {
+                        emitter_->report(diag::Diagnostic::makeError(
+                            diag::ErrorCode::TypeMismatch,
+                            "cannot pass void expression as argument to io." + mName,
+                            arg.value->getSpan().start).withLabel(arg.value->getSpan(), "void argument"));
+                    }
+                    hasErrors_ = true;
+                }
+                if (isIoColorType(aType) && i != call->getArgs().size() - 1) {
+                    if (emitter_) {
+                        emitter_->report(diag::Diagnostic::makeError(
+                            diag::ErrorCode::TypeMismatch,
+                            "io.Color may only appear as the trailing argument of io." + mName,
+                            arg.value->getSpan().start).withLabel(arg.value->getSpan(), "color not in trailing position"));
+                    }
+                    hasErrors_ = true;
+                }
+            }
+        }
+        return Type::voidType();
+    }
+
+    if (mName == "readln" || mName == "readLine") {
+        if (!call->getArgs().empty()) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function 'io." + mName + "' expects 0 arguments, but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "unexpected arguments"));
+            }
+            hasErrors_ = true;
+        }
+        return Type::stringType();
+    }
+
+    if (mName == "input") {
+        if (call->getArgs().size() > 1) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function 'io.input' expects at most 1 argument (prompt?: string), but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "too many arguments"));
+            }
+            hasErrors_ = true;
+        }
+        if (call->getArgs().size() == 1) {
+            const auto& arg = call->getArgs()[0];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::stringType());
+                if (aType && !aType->isString()) {
+                    reportTypeMismatch(Type::stringType(), aType, arg.value->getSpan(), "io.input prompt argument");
+                }
+            }
+        }
+        return Type::stringType();
+    }
+
+    if (mName == "red" || mName == "green" || mName == "yellow" ||
+        mName == "blue" || mName == "magenta" || mName == "cyan" ||
+        mName == "white" || mName == "gray" || mName == "bold") {
+        if (call->getArgs().size() != 1) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function 'io." + mName + "' expects exactly 1 argument (s: string), but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "wrong argument count"));
+            }
+            hasErrors_ = true;
+        } else {
+            const auto& arg = call->getArgs()[0];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::stringType());
+                if (aType && !aType->isString()) {
+                    reportTypeMismatch(Type::stringType(), aType, arg.value->getSpan(), "io." + mName + " argument");
+                }
+            }
+        }
+        return Type::stringType();
+    }
+
+    if (mName == "flush") {
+        return Type::voidType();
+    }
+
+    if (emitter_) {
+        emitter_->report(diag::Diagnostic::makeError(
+            diag::ErrorCode::InvalidMemberAccess,
+            "module 'io' has no member function '" + mName + "'",
+            member->getSpan().start).withLabel(member->getSpan(), "unknown member function"));
+    }
+    hasErrors_ = true;
+    return Type::unknownType();
+}
+
+TypePtr TypeChecker::checkIoDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!callee || !call) return Type::unknownType();
+    const std::string& name = callee->getName();
+
+    if (name == "print" || name == "println") {
+        for (size_t i = 0; i < call->getArgs().size(); ++i) {
+            const auto& arg = call->getArgs()[i];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope);
+                if (aType && aType->isVoid()) {
+                    if (emitter_) {
+                        emitter_->report(diag::Diagnostic::makeError(
+                            diag::ErrorCode::TypeMismatch,
+                            "cannot pass void expression as argument to " + name,
+                            arg.value->getSpan().start).withLabel(arg.value->getSpan(), "void argument"));
+                    }
+                    hasErrors_ = true;
+                }
+                if (isIoColorType(aType) && i != call->getArgs().size() - 1) {
+                    if (emitter_) {
+                        emitter_->report(diag::Diagnostic::makeError(
+                            diag::ErrorCode::TypeMismatch,
+                            "io.Color may only appear as the trailing argument of " + name,
+                            arg.value->getSpan().start).withLabel(arg.value->getSpan(), "color not in trailing position"));
+                    }
+                    hasErrors_ = true;
+                }
+            }
+        }
+        return Type::voidType();
+    }
+
+    if (name == "readln" || name == "readLine") {
+        if (!call->getArgs().empty()) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function '" + name + "' expects 0 arguments, but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "unexpected arguments"));
+            }
+            hasErrors_ = true;
+        }
+        return Type::stringType();
+    }
+
+    if (name == "input") {
+        if (call->getArgs().size() > 1) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function 'input' expects at most 1 argument (prompt?: string), but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "too many arguments"));
+            }
+            hasErrors_ = true;
+        }
+        if (call->getArgs().size() == 1) {
+            const auto& arg = call->getArgs()[0];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::stringType());
+                if (aType && !aType->isString()) {
+                    reportTypeMismatch(Type::stringType(), aType, arg.value->getSpan(), "input prompt argument");
+                }
+            }
+        }
+        return Type::stringType();
+    }
+
+    if (name == "red" || name == "green" || name == "yellow" ||
+        name == "blue" || name == "magenta" || name == "cyan" ||
+        name == "white" || name == "gray" || name == "bold") {
+        if (call->getArgs().size() != 1) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function '" + name + "' expects exactly 1 argument (s: string), but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "wrong argument count"));
+            }
+            hasErrors_ = true;
+        } else {
+            const auto& arg = call->getArgs()[0];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::stringType());
+                if (aType && !aType->isString()) {
+                    reportTypeMismatch(Type::stringType(), aType, arg.value->getSpan(), name + " argument");
+                }
+            }
+        }
+        return Type::stringType();
+    }
+
+    if (name == "flush") {
+        return Type::voidType();
+    }
+
+    return Type::unknownType();
+}
+
 bool TypeChecker::checkZeroCoercion(const parser::ModuleAST& module, sema::Scope* rootScope) {
     return checkTypes(module, rootScope);
 }
@@ -1429,7 +1639,42 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
     // Pass 1: Register top-level module declarations in scope so forward calls can resolve
     for (const auto& decl : module.declarations) {
         if (!decl) continue;
-        if (const auto* varDecl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+        if (const auto* importDecl = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+            const std::string& modPath = importDecl->getModulePath();
+            if (modPath == "io" || modPath == "std.io" || modPath == "keet.io") {
+                if (importDecl->getSymbols().empty()) {
+                    std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "io";
+                    auto modSym = std::make_shared<sema::Symbol>(boundName, sema::SymbolKind::Module, importDecl->getSpan());
+                    modSym->setExported(importDecl->isReExported());
+                    auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, modSym, emitter_);
+                    if (!res.success) hasErrors_ = true;
+                } else {
+                    auto ioScope = sema::createStdlibModuleScope("io");
+                    for (const auto& symItem : importDecl->getSymbols()) {
+                        auto exportedSym = ioScope->lookupCurrent(symItem.originalName);
+                        if (exportedSym) {
+                            std::string importAsName = symItem.getEffectiveName();
+                            auto importedSym = std::make_shared<sema::Symbol>(
+                                importAsName, exportedSym->getKind(), symItem.span
+                            );
+                            importedSym->setExported(importDecl->isReExported());
+                            importedSym->setIsType(exportedSym->isType());
+                            auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, importedSym, emitter_);
+                            if (!res.success) hasErrors_ = true;
+                        } else {
+                            if (emitter_) {
+                                emitter_->report(diag::Diagnostic::makeError(
+                                    diag::ErrorCode::SymbolNotExported,
+                                    "symbol '" + symItem.originalName + "' is not exported by module 'io'",
+                                    symItem.span.start).withLabel(symItem.span, "symbol not exported"));
+                            }
+                            hasErrors_ = true;
+                        }
+                    }
+                }
+            }
+        }
+ else if (const auto* varDecl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
             auto sym = std::make_shared<sema::Symbol>(varDecl->getName(), sema::SymbolKind::Variable, varDecl->getSpan());
             sym->setTypeAnnotation(varDecl->getType());
             sym->setAstNode(varDecl);
@@ -2364,6 +2609,23 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
 
         // Member call: built-in numeric conversions (.toFloat(), .toInt(), etc.) or class method call
         if (const auto* member = dynamic_cast<const ast::MemberExpr*>(call->getCallee())) {
+            if (const auto* objIdent = dynamic_cast<const ast::IdentExpr*>(member->getObject())) {
+                auto sym = scope.lookup(objIdent->getName());
+                if (objIdent->getName() == "io" || (sym && sym->isModule() && sym->getName() == "io")) {
+                    if (!sym) {
+                        if (emitter_) {
+                            emitter_->report(diag::Diagnostic::makeError(
+                                diag::ErrorCode::UndeclaredIdentifier,
+                                "undeclared identifier '" + objIdent->getName() + "'",
+                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                        }
+                        hasErrors_ = true;
+                        return Type::unknownType();
+                    }
+                    return checkIoMemberCall(member, call, scope);
+                }
+            }
+
             auto objType = member->getObject() ? inferType(*member->getObject(), scope) : Type::unknownType();
 
             if (member->getMemberName() == "toFloat" ||
@@ -2520,6 +2782,15 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
         // Function call: lookup in scope and check arguments
         if (const auto* calleeIdent = dynamic_cast<const ast::IdentExpr*>(call->getCallee())) {
             auto sym = scope.lookup(calleeIdent->getName());
+            if (sym && sym->isImportedSymbol()) {
+                const std::string& name = calleeIdent->getName();
+                if (name == "print" || name == "println" || name == "readln" || name == "readLine" ||
+                    name == "input" || name == "red" || name == "green" || name == "yellow" ||
+                    name == "blue" || name == "magenta" || name == "cyan" || name == "white" ||
+                    name == "gray" || name == "bold" || name == "flush") {
+                    return checkIoDirectCall(calleeIdent, call, scope);
+                }
+            }
             const ast::FnDecl* fnDecl = nullptr;
             const ast::ClassDecl* clsDecl = nullptr;
             if (sym && sym->getAstNode()) {
@@ -2802,8 +3073,91 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     return Type::fromAnnotation(fieldSym->getTypeAnnotation());
                 }
             }
+            auto sym = scope.lookup(objIdent->getName());
+            if (objIdent->getName() == "io" || (sym && sym->isModule() && sym->getName() == "io")) {
+                if (!sym) {
+                    if (emitter_) {
+                        emitter_->report(diag::Diagnostic::makeError(
+                            diag::ErrorCode::UndeclaredIdentifier,
+                            "undeclared identifier '" + objIdent->getName() + "'",
+                            objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                    }
+                    hasErrors_ = true;
+                    return Type::unknownType();
+                }
+                if (member->getMemberName() == "Color") {
+                    return Type::custom("io.Color");
+                }
+                if (member->getMemberName() == "red" || member->getMemberName() == "green" ||
+                    member->getMemberName() == "yellow" || member->getMemberName() == "blue" ||
+                    member->getMemberName() == "magenta" || member->getMemberName() == "cyan" ||
+                    member->getMemberName() == "white" || member->getMemberName() == "gray" ||
+                    member->getMemberName() == "bold") {
+                    return Type::function({Type::stringType()}, Type::stringType(), false);
+                }
+                if (member->getMemberName() == "readln" || member->getMemberName() == "readLine") {
+                    return Type::function({}, Type::stringType(), false);
+                }
+                if (member->getMemberName() == "input") {
+                    return Type::function({Type::stringType()}, Type::stringType(), false);
+                }
+                if (member->getMemberName() == "print" || member->getMemberName() == "println" || member->getMemberName() == "flush") {
+                    return Type::function({}, Type::voidType(), false);
+                }
+                if (emitter_) {
+                    emitter_->report(diag::Diagnostic::makeError(
+                        diag::ErrorCode::InvalidMemberAccess,
+                        "module 'io' has no member '" + member->getMemberName() + "'",
+                        member->getSpan().start).withLabel(member->getSpan(), "unknown module member"));
+                }
+                hasErrors_ = true;
+                return Type::unknownType();
+            }
+            if (sym && (sym->isEnum() || sym->isType()) && (objIdent->getName() == "Color" || sym->getName() == "Color")) {
+                const std::string& memberName = member->getMemberName();
+                const std::vector<std::string_view> validMembers = {
+                    "Default", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White", "Gray"
+                };
+                for (auto m : validMembers) {
+                    if (m == memberName) {
+                        return Type::custom("io.Color");
+                    }
+                }
+                if (emitter_) {
+                    emitter_->report(diag::Diagnostic::makeError(
+                        diag::ErrorCode::InvalidMemberAccess,
+                        "enum 'Color' has no member '" + memberName + "'",
+                        member->getSpan().start).withLabel(member->getSpan(), "unknown enum member"));
+                }
+                hasErrors_ = true;
+                return Type::unknownType();
+            }
         }
         auto objType = member->getObject() ? inferType(*member->getObject(), scope) : Type::unknownType();
+        if (objType && isIoColorType(objType)) {
+            const std::string& memberName = member->getMemberName();
+            const std::vector<std::string_view> validMembers = {
+                "Default", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White", "Gray"
+            };
+            bool found = false;
+            for (auto m : validMembers) {
+                if (m == memberName) {
+                    found = true;
+                    break;
+                }
+            }
+            if (found) {
+                return Type::custom("io.Color");
+            }
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::InvalidMemberAccess,
+                    "enum 'io.Color' has no member '" + memberName + "'",
+                    member->getSpan().start).withLabel(member->getSpan(), "unknown enum member"));
+            }
+            hasErrors_ = true;
+            return Type::unknownType();
+        }
         if (objType && (objType->isError() || (objType->isCustom() && static_cast<const CustomType*>(objType.get())->getName() == "error"))) {
             if (member->getMemberName() == "message" || member->getMemberName() == "name") {
                 return Type::stringType();

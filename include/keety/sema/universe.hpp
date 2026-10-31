@@ -35,4 +35,13 @@ void registerUniverseSymbols(Scope& universe);
 /// Returns the complete list of all predeclared symbol names.
 [[nodiscard]] const std::vector<std::string_view>& getAllUniverseSymbolNames() noexcept;
 
+/// Checks if an identifier or import path is a recognized standard library module.
+[[nodiscard]] bool isStdlibModule(std::string_view name) noexcept;
+
+/// Creates a Scope populated with all exported symbols of a standard library module.
+[[nodiscard]] std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, const std::shared_ptr<Scope>& universe = nullptr);
+
+/// Populates an existing Scope with all exported symbols of the 'io' standard library module.
+void populateIoModuleScope(Scope& ioScope);
+
 } // namespace keety::sema

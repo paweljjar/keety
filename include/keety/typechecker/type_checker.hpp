@@ -216,6 +216,10 @@ private:
     void reportDefaultArgMutableBorrow(std::string_view paramName, diag::SourceSpan span);
     void reportCannotAssignToConstant(std::string_view name, diag::SourceSpan span);
     void checkTypeAnnotationValidity(const ast::TypeAnnotation* annot);
+
+    [[nodiscard]] bool isIoColorType(const TypePtr& t) const noexcept;
+    TypePtr checkIoMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope);
+    TypePtr checkIoDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope);
 };
 
 } // namespace keety::typechecker

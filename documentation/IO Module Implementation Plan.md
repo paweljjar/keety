@@ -31,11 +31,11 @@ This document outlines the hierarchical implementation plan (`Phase -> Task`) fo
 ## Phase 2: Compiler Symbol Registration & Semantic Analysis (`sema` & `typechecker`)
 *Objective: Register the built-in `io` module, its functions, and the `io.Color` enum in the `keety` compiler front-end.*
 
-- [ ] **Task 2.1: Register Built-in `io` Module in `ModulePathResolver` and `Universe`**
+- [x] **Task 2.1: Register Built-in `io` Module in `ModulePathResolver` and `Universe`**
   - Update `src/resolver/module_path_resolver.cpp` and `src/sema/universe.cpp` so that `import io;` resolves as a built-in standard library module without searching the filesystem for an `io.keet` file.
   - Populate the module scope with `io` symbols when `import io;` is declared.
 
-- [ ] **Task 2.2: Define `io` Function Signatures and `io.Color` in `TypeChecker`**
+- [x] **Task 2.2: Define `io` Function Signatures and `io.Color` in `TypeChecker`**
   - Update `src/typechecker/type_checker.cpp` to type-check member calls and enum accesses on the `io` module:
     - `io.print(...args): void` (accepts $\ge 0$ printable arguments, plus an optional trailing `io.Color`).
     - `io.println(...args): void` (accepts $\ge 0$ printable arguments, plus an optional trailing `io.Color`).
@@ -44,7 +44,7 @@ This document outlines the hierarchical implementation plan (`Phase -> Task`) fo
     - `io.red(s: string): string`, `io.green(s: string): string`, `io.yellow(s: string): string`, `io.blue(s: string): string`, `io.magenta(s: string): string`, `io.cyan(s: string): string`, `io.white(s: string): string`, `io.gray(s: string): string`, `io.bold(s: string): string`.
     - `io.Color` enum members: `Default`, `Red`, `Green`, `Yellow`, `Blue`, `Magenta`, `Cyan`, `White`, `Gray`.
 
-- [ ] **Task 2.3: Semantic Validation & Diagnostics (`diag`)**
+- [x] **Task 2.3: Semantic Validation & Diagnostics (`diag`)**
   - Emit clear diagnostic errors when invalid argument types or arities are passed to `io.*` functions (e.g., passing an `int` to `io.input(42)` or `io.red(100)`, or passing arguments to `io.readln("x")`).
 
 ---
