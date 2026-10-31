@@ -522,5 +522,82 @@ TEST_CASE("C++ Implementation Emitter translates standard io module calls and co
     }
 }
 
+TEST_CASE("C++ Implementation Emitter translates standard fs module calls and zonk expressions", "[emitter][cpp][fs]") {
+    SECTION("Translates fs method calls to ::keet::fs::*") {
+        std::string source = R"(
+            import fs;
+
+            fn test_fs(): void {
+                fs.write_text("file.txt", "hello");
+                let data: string = fs.read_text("file.txt");
+                let ex: bool = fs.exists("file.txt");
+                let cur: string = fs.cwd();
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "fs_demo");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("#include <keet/runtime.hpp>") != std::string::npos);
+        REQUIRE(cpp.find("::keet::fs::write_text(\"file.txt\", \"hello\");") != std::string::npos);
+        REQUIRE(cpp.find("::keet::fs::read_text(\"file.txt\");") != std::string::npos);
+        REQUIRE(cpp.find("::keet::fs::exists(\"file.txt\");") != std::string::npos);
+        REQUIRE(cpp.find("::keet::fs::cwd();") != std::string::npos);
+    }
+
+    SECTION("Translates selective imports from fs module") {
+        std::string source = R"(
+            from "fs" import read_text, exists;
+
+            fn test_selective(): void {
+                let data: string = read_text("cfg.json");
+                let found: bool = exists("cfg.json");
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "fs_selective");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("#include <keet/runtime.hpp>") != std::string::npos);
+        REQUIRE(cpp.find("::keet::fs::read_text(\"cfg.json\");") != std::string::npos);
+        REQUIRE(cpp.find("::keet::fs::exists(\"cfg.json\");") != std::string::npos);
+    }
+
+    SECTION("Translates IR module with fs runtime calls") {
+        keety::ir::Module irMod("ir_fs_mod");
+        auto fn = std::make_unique<keety::ir::Function>("run", std::make_shared<keety::typechecker::Type>(keety::typechecker::TypeKind::Void));
+        auto* bb = fn->create_basic_block("entry");
+        std::vector<keety::ir::Operand> args;
+        args.push_back(keety::ir::Operand::create_string("test.txt"));
+        bb->append_instruction(std::make_unique<keety::ir::CallInst>(std::nullopt, "@keet.fs.read_text", std::move(args)));
+        bb->append_instruction(std::make_unique<keety::ir::ReturnInst>());
+        irMod.add_function(std::move(fn));
+
+        keety::emitter::CppEmitter emitter(irMod);
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("::keet::fs::read_text(\"test.txt\");") != std::string::npos);
+    }
+
+    SECTION("Translates fs fallible call wrapped in zonk expression") {
+        std::string source = R"(
+            import fs;
+
+            fn load_config(): string {
+                let cfg: string = fs.read_text("missing.json") zonk "{}";
+                return cfg;
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "fs_zonk");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("::keet::fs::read_text(\"missing.json\")") != std::string::npos);
+        REQUIRE(cpp.find("catch (...)") != std::string::npos);
+    }
+}
+
 
 

@@ -236,3 +236,37 @@ TEST_CASE("Invoke instruction connects normal and exceptional landing pad edges 
     std::string text = fn.to_string();
     CHECK(text.find("invoke @dispatchRequest(\"request\") to @normal.1 unwind @catch.2") != std::string::npos);
 }
+
+TEST_CASE("Fallible fs.read_text in zonk expression lowers to CFG with landing pads", "[zonk_lowering][fs]") {
+    std::string src = R"(
+        import fs;
+
+        fn loadConfigFile(path: string): string {
+            let config: string = fs.read_text(path) zonk "{}";
+            return config;
+        }
+    )";
+    auto ast = parse_source(src, "fs_zonk_test");
+    AstLowerer lowerer;
+    auto mod = lowerer.lower_module(ast);
+
+    REQUIRE(mod != nullptr);
+    Function* fn = mod->find_function("loadConfigFile");
+    REQUIRE(fn != nullptr);
+
+    std::string err;
+    CHECK(fn->validate_cfg(err));
+    CHECK(err.empty());
+
+    BasicBlock* try_bb = fn->find_basic_block("zonk.try.1");
+    BasicBlock* catch_bb = fn->find_basic_block("zonk.catch.2");
+    BasicBlock* end_bb = fn->find_basic_block("zonk.end.3");
+
+    REQUIRE(try_bb != nullptr);
+    REQUIRE(catch_bb != nullptr);
+    REQUIRE(end_bb != nullptr);
+
+    CHECK(try_bb->has_landing_pad());
+    CHECK(try_bb->get_landing_pad() == catch_bb);
+    CHECK(catch_bb->is_landing_pad());
+}

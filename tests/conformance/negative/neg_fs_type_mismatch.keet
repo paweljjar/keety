@@ -1,0 +1,6 @@
+import fs;
+
+fn main(): void {
+    // fs.read_text expects string (path); passing an integer causes E3003
+    let s: string = fs.read_text(42);
+}

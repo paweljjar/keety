@@ -17,7 +17,8 @@ tests/
 │   │   ├── 03_unions/
 │   │   ├── 04_oop/
 │   │   ├── 05_control_errors/
-│   │   └── 06_io/
+│   │   ├── 06_io/
+│   │   └── 07_fs/
 │   └── negative/      # Must fail compilation at designated stage with expected error codes
 │       ├── E1000_modules/
 │       ├── E2000_scoping/
@@ -251,6 +252,33 @@ keety test [--conformance | --benchmarks | --all] [--filter <pattern>]
 
 ---
 
+### Group 7: Standard File System Module & Path Operations
+* **Test 7.1 (`fs_operations.keet`):**
+  * **Objective:** Validate standard `fs` module imports, path normalization, directory creation, file writing, appending, reading text, line-oriented reading with CRLF/LF stripping, metadata queries (`exists`, `is_file`, `is_dir`, `file_size`), directory listing, file copy, atomic rename, single and recursive deletion, and `zonk` fallback recovery.
+  * **Input:**
+    ```keet
+    import fs;
+    import io;
+
+    fn main(): int {
+        let cur: string = fs.cwd();
+        let sandbox: string = fs.join("temp_fs_conformance", "inner_dir");
+        fs.mkdir(sandbox);
+        let target_file: string = fs.join(sandbox, "data.txt");
+        fs.write_text(target_file, "First Line\nSecond Line\n");
+        let read_str: string = fs.read_text(target_file);
+        fs.append_text(target_file, "Third Line\n");
+        let lines: array<string> = fs.read_lines(target_file);
+        let sz: int = fs.file_size(target_file);
+        let fallback: string = fs.read_text("missing.txt") zonk "DEFAULT";
+        fs.remove_all("temp_fs_conformance");
+        return 0;
+    }
+    ```
+  * **Assertion:** Exits cleanly with status code `0`.
+
+---
+
 ## 3. Negative Compiler Diagnostic Test Cases (Compile-Time Rejection)
 
 | Test File | Target Error Code | Expected Diagnostic Trigger |
@@ -265,6 +293,7 @@ keety test [--conformance | --benchmarks | --all] [--filter <pattern>]
 | `neg_implicit_widening.keet` | `E3002` | Assigning integer directly to float without cast: `let f: float = 42;`. |
 | `neg_async_mut.keet` | `E4004` | Declaring `mut` reference parameter inside an `async fn`. |
 | `neg_io_type_mismatch.keet` | `E3003` | Passing invalid argument type to standard `io` function or member: `io.input(42)`. |
+| `neg_fs_type_mismatch.keet` | `E3003` | Passing invalid argument type to standard `fs` function or member: `fs.read_text(42)`. |
 
 ---
 

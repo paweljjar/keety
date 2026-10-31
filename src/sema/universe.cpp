@@ -99,7 +99,8 @@ void registerUniverseSymbols(Scope& universe) {
 }
 
 bool isStdlibModule(std::string_view name) noexcept {
-    return name == "io" || name == "std.io" || name == "keet.io";
+    return name == "io" || name == "std.io" || name == "keet.io" ||
+           name == "fs" || name == "std.fs" || name == "keet.fs";
 }
 
 void populateIoModuleScope(Scope& ioScope) {
@@ -150,10 +151,43 @@ void populateIoModuleScope(Scope& ioScope) {
     }
 }
 
+void populateFsModuleScope(Scope& fsScope) {
+    diag::SourceSpan span{};
+
+    auto makeFn = [&](const char* name) {
+        auto sym = std::make_shared<Symbol>(name, SymbolKind::Function, span);
+        sym->setExported(true);
+        sym->setConst(true);
+        fsScope.define(sym, false);
+    };
+
+    makeFn("read_text");
+    makeFn("read_lines");
+    makeFn("write_text");
+    makeFn("append_text");
+    makeFn("exists");
+    makeFn("is_file");
+    makeFn("is_dir");
+    makeFn("file_size");
+    makeFn("mkdir");
+    makeFn("remove");
+    makeFn("remove_all");
+    makeFn("copy");
+    makeFn("rename");
+    makeFn("list_dir");
+    makeFn("cwd");
+    makeFn("join");
+    makeFn("filename");
+    makeFn("extension");
+    makeFn("parent_dir");
+}
+
 std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, const std::shared_ptr<Scope>& universe) {
     auto scope = std::make_shared<Scope>(ScopeKind::Module, universe);
     if (moduleName == "io" || moduleName == "std.io" || moduleName == "keet.io") {
         populateIoModuleScope(*scope);
+    } else if (moduleName == "fs" || moduleName == "std.fs" || moduleName == "keet.fs") {
+        populateFsModuleScope(*scope);
     }
     return scope;
 }

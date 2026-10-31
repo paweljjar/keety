@@ -44,4 +44,7 @@ void registerUniverseSymbols(Scope& universe);
 /// Populates an existing Scope with all exported symbols of the 'io' standard library module.
 void populateIoModuleScope(Scope& ioScope);
 
+/// Populates an existing Scope with all exported symbols of the 'fs' standard library module.
+void populateFsModuleScope(Scope& fsScope);
+
 } // namespace keety::sema

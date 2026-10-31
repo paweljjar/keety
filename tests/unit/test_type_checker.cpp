@@ -2875,3 +2875,101 @@ TEST_CASE("Standard io module type checking and semantic validation", "[typechec
     }
 }
 
+TEST_CASE("Standard fs module type checking and semantic validation", "[typechecker][fs]") {
+    SECTION("Valid import fs and fs.* function calls") {
+        ParseResult res(
+            "import fs;\n"
+            "fn test_fs(): void {\n"
+            "    let ok_w: bool = fs.write_text(\"test.txt\", \"data\");\n"
+            "    let ok_a: bool = fs.append_text(\"test.txt\", \"more\");\n"
+            "    let text: string = fs.read_text(\"test.txt\");\n"
+            "    let lines: array<string> = fs.read_lines(\"test.txt\");\n"
+            "    let ex: bool = fs.exists(\"test.txt\");\n"
+            "    let is_f: bool = fs.is_file(\"test.txt\");\n"
+            "    let is_d: bool = fs.is_dir(\"test.txt\");\n"
+            "    let sz: int = fs.file_size(\"test.txt\");\n"
+            "    let mk: bool = fs.mkdir(\"sub_dir\");\n"
+            "    let entries: array<string> = fs.list_dir(\"sub_dir\");\n"
+            "    let cp: bool = fs.copy(\"test.txt\", \"test2.txt\");\n"
+            "    let rn: bool = fs.rename(\"test2.txt\", \"test3.txt\");\n"
+            "    let rm: bool = fs.remove(\"test3.txt\");\n"
+            "    let rma: int = fs.remove_all(\"sub_dir\");\n"
+            "    let cur: string = fs.cwd();\n"
+            "    let joined: string = fs.join(\"a\", \"b\");\n"
+            "    let fname: string = fs.filename(\"a/b.txt\");\n"
+            "    let ext: string = fs.extension(\"a/b.txt\");\n"
+            "    let pdir: string = fs.parent_dir(\"a/b.txt\");\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Valid selective import from fs module") {
+        ParseResult res(
+            "from \"fs\" import read_text, write_text, exists;\n"
+            "fn test_selective(): void {\n"
+            "    write_text(\"cfg.json\", \"{}\");\n"
+            "    let data: string = read_text(\"cfg.json\");\n"
+            "    let found: bool = exists(\"cfg.json\");\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Valid fs call with zonk fallback expression") {
+        ParseResult res(
+            "import fs;\n"
+            "fn load_config(): string {\n"
+            "    let data: string = fs.read_text(\"cfg.json\") zonk \"{}\";\n"
+            "    return data;\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Reject invalid argument count to fs.read_text with E3003") {
+        ParseResult res(
+            "import fs;\n"
+            "fn test_invalid(): void {\n"
+            "    let data = fs.read_text(\"a\", \"b\");\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Reject non-string argument to fs.exists with E3003") {
+        ParseResult res(
+            "import fs;\n"
+            "fn test_invalid(): void {\n"
+            "    let ex = fs.exists(12345);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Reject unknown member on fs with E3011") {
+        ParseResult res(
+            "import fs;\n"
+            "fn test_invalid(): void {\n"
+            "    let r = fs.non_existent_func();\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::InvalidMemberAccess));
+    }
+
+    SECTION("Reject importing non-exported symbol from fs with E1005") {
+        ParseResult res(
+            "from \"fs\" import unknown_fs_symbol;\n"
+            "fn test_invalid(): void {}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::SymbolNotExported));
+    }
+}
+

@@ -27,6 +27,8 @@ std::unique_ptr<Module> AstLowerer::lower_module(const parser::ModuleAST& module
     current_module_ = mod.get();
     has_io_import_ = false;
     imported_io_symbols_.clear();
+    has_fs_import_ = false;
+    imported_fs_symbols_.clear();
 
     for (const auto& decl : module_ast.declarations) {
         if (!decl) continue;
@@ -37,6 +39,11 @@ std::unique_ptr<Module> AstLowerer::lower_module(const parser::ModuleAST& module
                 has_io_import_ = true;
                 for (const auto& s : imp->getSymbols()) {
                     imported_io_symbols_.insert(s.getEffectiveName());
+                }
+            } else if (p == "fs" || p == "std.fs" || p == "keet.fs") {
+                has_fs_import_ = true;
+                for (const auto& s : imp->getSymbols()) {
+                    imported_fs_symbols_.insert(s.getEffectiveName());
                 }
             }
         } else if (const auto* var_decl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
@@ -773,6 +780,12 @@ Operand AstLowerer::lower_call_expr(const ast::CallExpr& expr) {
                 emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
                 return dest;
             }
+            if (obj_id->getName() == "fs") {
+                const std::string& m_name = member->getMemberName();
+                std::string callee_name = "@keet.fs." + m_name;
+                emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
+                return dest;
+            }
         }
         Operand receiver = lower_expression(*member->getObject());
         emit(std::make_unique<MethodCallInst>(dest, receiver, member->getMemberName(), std::move(args)));
@@ -785,6 +798,18 @@ Operand AstLowerer::lower_call_expr(const ast::CallExpr& expr) {
             name == "yellow" || name == "blue" || name == "magenta" || name == "cyan" ||
             name == "white" || name == "gray" || name == "bold")) {
             std::string callee_name = "@keet.io." + (name == "readLine" ? "readln" : name);
+            emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
+            return dest;
+        }
+        if (has_fs_import_ && (imported_fs_symbols_.count(name) ||
+            name == "read_text" || name == "read_lines" || name == "write_text" ||
+            name == "append_text" || name == "exists" || name == "is_file" ||
+            name == "is_dir" || name == "file_size" || name == "mkdir" ||
+            name == "remove" || name == "remove_all" || name == "copy" ||
+            name == "rename" || name == "list_dir" || name == "cwd" ||
+            name == "join" || name == "filename" || name == "extension" ||
+            name == "parent_dir")) {
+            std::string callee_name = "@keet.fs." + name;
             emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
             return dest;
         }

@@ -2491,7 +2491,7 @@ While the [universe block](#predeclared-identifiers) remains intentionally minim
 | Module | Primary Exports & Capabilities |
 | :--- | :--- |
 | `io` | Console and stream I/O: `print(...args: Any, color?: io.Color): void`, `println(...args: Any, color?: io.Color): void`, `eprint(...args: Any, color?: io.Color): void`, `eprintln(...args: Any, color?: io.Color): void`, `flush(): void`, `read_line(): string | null`, `readln(): string`, `eof(): bool`, `input(prompt?: string): string`, `Color` enum, ANSI inline styling helpers (`red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, `gray`, `bold`). |
-| `fs` | File system and path manipulation (fallible operations integrate with `zonk`): `readAll(path: string): string`, `writeAll(path: string, data: string): void`, `exists(path: string): bool`, `remove(path: string): bool`, `listDir(path: string): array<string>`, `Path` class. |
+| `fs` | File system and path manipulation (fallible operations integrate with `zonk`): `read_text(path: string): string`, `read_lines(path: string): array<string>`, `write_text(path: string, content: string): bool`, `append_text(path: string, content: string): bool`, `exists(path: string): bool`, `is_file(path: string): bool`, `is_dir(path: string): bool`, `file_size(path: string): int`, `mkdir(path: string): bool`, `remove(path: string): bool`, `remove_all(path: string): int`, `copy(src: string, dst: string): bool`, `rename(src: string, dst: string): bool`, `list_dir(path: string): array<string>`, `cwd(): string`, `join(base: string, child: string): string`, `filename(path: string): string`, `extension(path: string): string`, `parent_dir(path: string): string`. |
 | `sys` | Process environment and lifecycle control: `args: array<string>`, `exit(code: int): void`, `getEnv(key: string): string | null`, `setEnv(key: string, val: string): void`, `platform(): string`, `cwd(): string`. |
 | `math` | IEEE 754 floating-point and integer math utilities: `PI: float`, `E: float`, `sin(x: float): float`, `cos(x: float): float`, `tan(x: float): float`, `sqrt(x: float): float`, `pow(base: float, exp: float): float`, `log(x: float): float`, `min<T: int | float>(a: T, b: T): T`, `max<T: int | float>(a: T, b: T): T`. |
 | `time` | Monotonic and wall-clock time utilities: `now(): Timestamp`, `monotonicMs(): int`, `sleep(ms: int): void`, `Duration` class, `Timestamp` class. |
@@ -2559,6 +2559,54 @@ fn bold(s: string): string;
    - `io.readln()` reads a single line from standard input and returns an empty string `""` on EOF (preserved for backward compatibility).
    - `io.eof()` returns `true` if a previous read operation on standard input reached the end of the stream (i.e., stream `eofbit` is set), and `false` otherwise.
    - `io.input(prompt?: string)` writes `prompt` to standard output without a newline, flushes the stream immediately before blocking on input, and returns `io.readln()`.
+
+### Standard Library: `fs` (File System Operations)
+
+The built-in `fs` standard library module provides cross-platform file system operations, file stream reading and writing, directory tree traversal, and path normalization. It is brought into scope via `import fs;`, `import fs as alias;`, or selective imports (`from "fs" import read_text, write_text, exists;`).
+
+#### Module Declarations & Signatures
+
+```keet
+// File Reading & Writing (Fallible, zonk-compatible)
+fn read_text(path: string): string;
+fn read_lines(path: string): array<string>;
+fn write_text(path: string, content: string): bool;
+fn append_text(path: string, content: string): bool;
+
+// File & Directory Queries (Non-throwing predicates & scalar queries)
+fn exists(path: string): bool;
+fn is_file(path: string): bool;
+fn is_dir(path: string): bool;
+fn file_size(path: string): int;
+
+// Directory & File Manipulation (Fallible mutations)
+fn mkdir(path: string): bool;
+fn remove(path: string): bool;
+fn remove_all(path: string): int;
+fn copy(src: string, dst: string): bool;
+fn rename(src: string, dst: string): bool;
+fn list_dir(path: string): array<string>;
+
+// Path Utilities (Pure string transformations)
+fn cwd(): string;
+fn join(base: string, child: string): string;
+fn filename(path: string): string;
+fn extension(path: string): string;
+fn parent_dir(path: string): string;
+```
+
+#### Example Usage with Error Recovery (`zonk`)
+
+```keet
+import fs;
+import io;
+
+fn main(): void {
+    let configPath: string = fs.join("config", "app.json");
+    let rawConfig: string = fs.read_text(configPath) zonk "{}";
+    io.println("Configuration loaded:", rawConfig);
+}
+```
 
 ## C++ AOT translation and header generation
 

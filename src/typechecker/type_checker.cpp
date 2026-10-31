@@ -1690,6 +1690,181 @@ TypePtr TypeChecker::checkIoDirectCall(const ast::IdentExpr* callee, const ast::
     return Type::unknownType();
 }
 
+TypePtr TypeChecker::checkFsMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!member || !call) return Type::unknownType();
+    const std::string& name = member->getMemberName();
+
+    auto checkArgCount = [&](size_t expected) -> bool {
+        if (call->getArgs().size() != expected) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function 'fs." + name + "' expects " + std::to_string(expected) +
+                    (expected == 1 ? " argument" : " arguments") + ", but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "wrong argument count"));
+            }
+            hasErrors_ = true;
+            return false;
+        }
+        return true;
+    };
+
+    auto checkStringArg = [&](size_t idx, const char* argName) {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::stringType());
+                if (aType && !aType->isString()) {
+                    reportTypeMismatch(Type::stringType(), aType, arg.value->getSpan(), "fs." + name + " " + argName + " argument");
+                }
+            }
+        }
+    };
+
+    if (name == "cwd") {
+        checkArgCount(0);
+        return Type::stringType();
+    }
+    if (name == "read_text" || name == "filename" || name == "extension" || name == "parent_dir") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "path");
+        }
+        return Type::stringType();
+    }
+    if (name == "read_lines" || name == "list_dir") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "path");
+        }
+        return Type::array(Type::stringType());
+    }
+    if (name == "exists" || name == "is_file" || name == "is_dir" || name == "mkdir" || name == "remove") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "path");
+        }
+        return Type::boolType();
+    }
+    if (name == "file_size" || name == "remove_all") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "path");
+        }
+        return Type::intType();
+    }
+    if (name == "write_text" || name == "append_text") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "path");
+            checkStringArg(1, "content");
+        }
+        return Type::boolType();
+    }
+    if (name == "copy" || name == "rename") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "src");
+            checkStringArg(1, "dst");
+        }
+        return Type::boolType();
+    }
+    if (name == "join") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "base");
+            checkStringArg(1, "child");
+        }
+        return Type::stringType();
+    }
+
+    if (emitter_) {
+        emitter_->report(diag::Diagnostic::makeError(
+            diag::ErrorCode::InvalidMemberAccess,
+            "module 'fs' has no member function '" + name + "'",
+            member->getSpan().start).withLabel(member->getSpan(), "unknown member function"));
+    }
+    hasErrors_ = true;
+    return Type::unknownType();
+}
+
+TypePtr TypeChecker::checkFsDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!callee || !call) return Type::unknownType();
+    const std::string& name = callee->getName();
+
+    auto checkArgCount = [&](size_t expected) -> bool {
+        if (call->getArgs().size() != expected) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function '" + name + "' expects " + std::to_string(expected) +
+                    (expected == 1 ? " argument" : " arguments") + ", but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "wrong argument count"));
+            }
+            hasErrors_ = true;
+            return false;
+        }
+        return true;
+    };
+
+    auto checkStringArg = [&](size_t idx, const char* argName) {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::stringType());
+                if (aType && !aType->isString()) {
+                    reportTypeMismatch(Type::stringType(), aType, arg.value->getSpan(), name + " " + argName + " argument");
+                }
+            }
+        }
+    };
+
+    if (name == "cwd") {
+        checkArgCount(0);
+        return Type::stringType();
+    }
+    if (name == "read_text" || name == "filename" || name == "extension" || name == "parent_dir") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "path");
+        }
+        return Type::stringType();
+    }
+    if (name == "read_lines" || name == "list_dir") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "path");
+        }
+        return Type::array(Type::stringType());
+    }
+    if (name == "exists" || name == "is_file" || name == "is_dir" || name == "mkdir" || name == "remove") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "path");
+        }
+        return Type::boolType();
+    }
+    if (name == "file_size" || name == "remove_all") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "path");
+        }
+        return Type::intType();
+    }
+    if (name == "write_text" || name == "append_text") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "path");
+            checkStringArg(1, "content");
+        }
+        return Type::boolType();
+    }
+    if (name == "copy" || name == "rename") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "src");
+            checkStringArg(1, "dst");
+        }
+        return Type::boolType();
+    }
+    if (name == "join") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "base");
+            checkStringArg(1, "child");
+        }
+        return Type::stringType();
+    }
+
+    return Type::unknownType();
+}
+
 bool TypeChecker::checkZeroCoercion(const parser::ModuleAST& module, sema::Scope* rootScope) {
     return checkTypes(module, rootScope);
 }
@@ -1740,6 +1915,41 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                                 emitter_->report(diag::Diagnostic::makeError(
                                     diag::ErrorCode::SymbolNotExported,
                                     "symbol '" + symItem.originalName + "' is not exported by module 'io'",
+                                    symItem.span.start).withLabel(symItem.span, "symbol not exported"));
+                            }
+                            hasErrors_ = true;
+                        }
+                    }
+                }
+            } else if (modPath == "fs" || modPath == "std.fs" || modPath == "keet.fs") {
+                if (importDecl->getSymbols().empty()) {
+                    std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "fs";
+                    if (!targetScope->lookupCurrent(boundName)) {
+                        auto modSym = std::make_shared<sema::Symbol>(boundName, sema::SymbolKind::Module, importDecl->getSpan());
+                        modSym->setExported(importDecl->isReExported());
+                        auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, modSym, emitter_);
+                        if (!res.success) hasErrors_ = true;
+                    }
+                } else {
+                    auto fsScope = sema::createStdlibModuleScope("fs");
+                    for (const auto& symItem : importDecl->getSymbols()) {
+                        auto exportedSym = fsScope->lookupCurrent(symItem.originalName);
+                        if (exportedSym) {
+                            std::string importAsName = symItem.getEffectiveName();
+                            if (!targetScope->lookupCurrent(importAsName)) {
+                                auto importedSym = std::make_shared<sema::Symbol>(
+                                    importAsName, exportedSym->getKind(), symItem.span
+                                );
+                                importedSym->setExported(importDecl->isReExported());
+                                importedSym->setIsType(exportedSym->isType());
+                                auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, importedSym, emitter_);
+                                if (!res.success) hasErrors_ = true;
+                            }
+                        } else {
+                            if (emitter_) {
+                                emitter_->report(diag::Diagnostic::makeError(
+                                    diag::ErrorCode::SymbolNotExported,
+                                    "symbol '" + symItem.originalName + "' is not exported by module 'fs'",
                                     symItem.span.start).withLabel(symItem.span, "symbol not exported"));
                             }
                             hasErrors_ = true;
@@ -2698,6 +2908,19 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     }
                     return checkIoMemberCall(member, call, scope);
                 }
+                if (objIdent->getName() == "fs" || (sym && sym->isModule() && sym->getName() == "fs")) {
+                    if (!sym) {
+                        if (emitter_) {
+                            emitter_->report(diag::Diagnostic::makeError(
+                                diag::ErrorCode::UndeclaredIdentifier,
+                                "undeclared identifier '" + objIdent->getName() + "'",
+                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                        }
+                        hasErrors_ = true;
+                        return Type::unknownType();
+                    }
+                    return checkFsMemberCall(member, call, scope);
+                }
             }
 
             auto objType = member->getObject() ? inferType(*member->getObject(), scope) : Type::unknownType();
@@ -2864,6 +3087,15 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     name == "blue" || name == "magenta" || name == "cyan" || name == "white" ||
                     name == "gray" || name == "bold" || name == "flush") {
                     return checkIoDirectCall(calleeIdent, call, scope);
+                }
+                if (name == "read_text" || name == "read_lines" || name == "write_text" ||
+                    name == "append_text" || name == "exists" || name == "is_file" ||
+                    name == "is_dir" || name == "file_size" || name == "mkdir" ||
+                    name == "remove" || name == "remove_all" || name == "copy" ||
+                    name == "rename" || name == "list_dir" || name == "cwd" ||
+                    name == "join" || name == "filename" || name == "extension" ||
+                    name == "parent_dir") {
+                    return checkFsDirectCall(calleeIdent, call, scope);
                 }
             }
             const ast::FnDecl* fnDecl = nullptr;
@@ -3183,6 +3415,48 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     emitter_->report(diag::Diagnostic::makeError(
                         diag::ErrorCode::InvalidMemberAccess,
                         "module 'io' has no member '" + member->getMemberName() + "'",
+                        member->getSpan().start).withLabel(member->getSpan(), "unknown module member"));
+                }
+                hasErrors_ = true;
+                return Type::unknownType();
+            }
+            if (objIdent->getName() == "fs" || (sym && sym->isModule() && sym->getName() == "fs")) {
+                if (!sym) {
+                    if (emitter_) {
+                        emitter_->report(diag::Diagnostic::makeError(
+                            diag::ErrorCode::UndeclaredIdentifier,
+                            "undeclared identifier '" + objIdent->getName() + "'",
+                            objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                    }
+                    hasErrors_ = true;
+                    return Type::unknownType();
+                }
+                const std::string& mName = member->getMemberName();
+                if (mName == "read_text" || mName == "filename" || mName == "extension" || mName == "parent_dir") {
+                    return Type::function({Type::stringType()}, Type::stringType(), false);
+                }
+                if (mName == "read_lines" || mName == "list_dir") {
+                    return Type::function({Type::stringType()}, Type::array(Type::stringType()), false);
+                }
+                if (mName == "write_text" || mName == "append_text" || mName == "copy" || mName == "rename") {
+                    return Type::function({Type::stringType(), Type::stringType()}, Type::boolType(), false);
+                }
+                if (mName == "exists" || mName == "is_file" || mName == "is_dir" || mName == "mkdir" || mName == "remove") {
+                    return Type::function({Type::stringType()}, Type::boolType(), false);
+                }
+                if (mName == "file_size" || mName == "remove_all") {
+                    return Type::function({Type::stringType()}, Type::intType(), false);
+                }
+                if (mName == "cwd") {
+                    return Type::function({}, Type::stringType(), false);
+                }
+                if (mName == "join") {
+                    return Type::function({Type::stringType(), Type::stringType()}, Type::stringType(), false);
+                }
+                if (emitter_) {
+                    emitter_->report(diag::Diagnostic::makeError(
+                        diag::ErrorCode::InvalidMemberAccess,
+                        "module 'fs' has no member '" + member->getMemberName() + "'",
                         member->getSpan().start).withLabel(member->getSpan(), "unknown module member"));
                 }
                 hasErrors_ = true;

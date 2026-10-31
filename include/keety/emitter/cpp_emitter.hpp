@@ -126,6 +126,8 @@ private:
     mutable std::unordered_map<std::string, std::string> narrowed_vars_{};
     bool has_io_import_{false};
     std::unordered_set<std::string> imported_io_symbols_{};
+    bool has_fs_import_{false};
+    std::unordered_set<std::string> imported_fs_symbols_{};
 };
 
 } // namespace keety::emitter

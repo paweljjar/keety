@@ -1,0 +1,105 @@
+import fs;
+import io;
+
+fn main(): int {
+    io.println("Running KeetScript fs conformance operations...");
+
+    // 1. Path utilities
+    let cur: string = fs.cwd();
+    if (cur == "") {
+        return 1;
+    }
+
+    if (fs.filename("dir/test_file.txt") != "test_file.txt") {
+        return 2;
+    }
+
+    if (fs.extension("dir/test_file.txt") != ".txt") {
+        return 3;
+    }
+
+    if (fs.extension("dir/test_file") != "") {
+        return 4;
+    }
+
+    if (fs.parent_dir("dir/sub/file.txt") != "dir/sub") {
+        return 5;
+    }
+
+    let sandbox: string = fs.join("temp_fs_conformance", "inner_dir");
+
+    // 2. Directory creation
+    fs.mkdir(sandbox);
+    if (!fs.exists(sandbox) || !fs.is_dir(sandbox)) {
+        return 6;
+    }
+
+    // 3. Write and read text
+    let target_file: string = fs.join(sandbox, "data.txt");
+    fs.write_text(target_file, "First Line\nSecond Line\n");
+
+    if (!fs.exists(target_file) || !fs.is_file(target_file)) {
+        return 7;
+    }
+
+    let read_str: string = fs.read_text(target_file);
+    if (read_str != "First Line\nSecond Line\n") {
+        return 8;
+    }
+
+    // 4. Append text and read lines
+    fs.append_text(target_file, "Third Line\n");
+    let lines: array<string> = fs.read_lines(target_file);
+    if (lines.len() != 3) {
+        return 9;
+    }
+    if (lines[0] != "First Line" || lines[1] != "Second Line" || lines[2] != "Third Line") {
+        return 10;
+    }
+
+    // 5. File size
+    let sz: int = fs.file_size(target_file);
+    if (sz <= 0) {
+        return 11;
+    }
+
+    // 6. Copy and Rename
+    let copy_file: string = fs.join(sandbox, "copy.txt");
+    fs.copy(target_file, copy_file);
+    if (!fs.exists(copy_file)) {
+        return 12;
+    }
+
+    let moved_file: string = fs.join(sandbox, "moved.txt");
+    fs.rename(copy_file, moved_file);
+    if (fs.exists(copy_file) || !fs.exists(moved_file)) {
+        return 13;
+    }
+
+    // 7. List directory
+    let entries: array<string> = fs.list_dir(sandbox);
+    if (entries.len() != 2) {
+        return 14;
+    }
+
+    // 8. Zonk error recovery fallback
+    let missing_path: string = fs.join(sandbox, "missing_file_404.txt");
+    let fallback_val: string = fs.read_text(missing_path) zonk "FALLBACK_VALUE";
+    if (fallback_val != "FALLBACK_VALUE") {
+        return 15;
+    }
+
+    // 9. Cleanup with remove and remove_all
+    fs.remove(moved_file);
+    if (fs.exists(moved_file)) {
+        return 16;
+    }
+
+    let count: int = fs.remove_all("temp_fs_conformance");
+    if (count <= 0 || fs.exists("temp_fs_conformance")) {
+        return 17;
+    }
+
+    io.println("All fs module conformance operations passed successfully!");
+    return 0;
+}

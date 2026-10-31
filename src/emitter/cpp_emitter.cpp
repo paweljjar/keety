@@ -148,6 +148,12 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                 for (const auto& s : imp->getSymbols()) {
                     imported_io_symbols_.insert(s.getEffectiveName());
                 }
+            } else if (p == "fs" || p == "std.fs" || p == "keet.fs") {
+                has_fs_import_ = true;
+                add_standard_header("<keet/runtime.hpp>");
+                for (const auto& s : imp->getSymbols()) {
+                    imported_fs_symbols_.insert(s.getEffectiveName());
+                }
             }
         }
     }
@@ -419,6 +425,17 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
                     return "::keet::io::readln(" + args_str + ")";
                 }
             }
+            if (obj_s == "fs") {
+                if (m_name == "read_text" || m_name == "read_lines" || m_name == "write_text" ||
+                    m_name == "append_text" || m_name == "exists" || m_name == "is_file" ||
+                    m_name == "is_dir" || m_name == "file_size" || m_name == "mkdir" ||
+                    m_name == "remove" || m_name == "remove_all" || m_name == "copy" ||
+                    m_name == "rename" || m_name == "list_dir" || m_name == "cwd" ||
+                    m_name == "join" || m_name == "filename" || m_name == "extension" ||
+                    m_name == "parent_dir") {
+                    return "::keet::fs::" + m_name + "(" + args_str + ")";
+                }
+            }
             // Container member mapping
             if (m_name == "push") {
                 return obj_s + ".push_back(" + args_str + ")";
@@ -479,6 +496,16 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
                 name == "white" || name == "gray" || name == "bold")) {
                 std::string fn_name = (name == "readLine" ? "readln" : name);
                 return "::keet::io::" + fn_name + "(" + args_str + ")";
+            }
+            if (has_fs_import_ && (imported_fs_symbols_.count(name) ||
+                name == "read_text" || name == "read_lines" || name == "write_text" ||
+                name == "append_text" || name == "exists" || name == "is_file" ||
+                name == "is_dir" || name == "file_size" || name == "mkdir" ||
+                name == "remove" || name == "remove_all" || name == "copy" ||
+                name == "rename" || name == "list_dir" || name == "cwd" ||
+                name == "join" || name == "filename" || name == "extension" ||
+                name == "parent_dir")) {
+                return "::keet::fs::" + name + "(" + args_str + ")";
             }
         }
 
@@ -1122,6 +1149,9 @@ std::string CppEmitter::translate_ir_function(const ir::Function& fn) const {
                 if (callee.rfind("keet.io.", 0) == 0) {
                     std::string func_name = callee.substr(8);
                     call_expr = "::keet::io::" + func_name + "(";
+                } else if (callee.rfind("keet.fs.", 0) == 0) {
+                    std::string func_name = callee.substr(8);
+                    call_expr = "::keet::fs::" + func_name + "(";
                 } else {
                     call_expr = callee + "(";
                 }

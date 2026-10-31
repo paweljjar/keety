@@ -21,6 +21,7 @@ add_executable(keety_unit_tests
     unit/test_runtime_deep_copy_ptr.cpp
     unit/test_runtime_numeric.cpp
     unit/test_runtime_io.cpp
+    unit/test_runtime_fs.cpp
     unit/test_token.cpp
     unit/test_lexer.cpp
     unit/test_blank_ident.cpp
@@ -63,6 +64,7 @@ add_executable(keety_unit_tests
     conformance/test_conformance_classes.cpp
     conformance/test_conformance_control_flow.cpp
     conformance/test_conformance_io.cpp
+    conformance/test_conformance_fs.cpp
     conformance/test_conformance_negative.cpp
 )
 
