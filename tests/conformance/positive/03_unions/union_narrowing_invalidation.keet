@@ -1,0 +1,88 @@
+fn mutateAndVerify(): int {
+    let val: int | string | null = 10;
+    if (typeof(val) == "int") {
+        let initial: int = val as int;
+        if (initial != 10) {
+            return 1;
+        }
+        val = "hello";
+    }
+
+    if (typeof(val) == "string") {
+        let text: string = val as string;
+        if (text != "hello") {
+            return 2;
+        }
+        val = null;
+    }
+
+    if (val == null) {
+        return 0;
+    }
+
+    return 3;
+}
+
+fn testGuardedReassignment(): int {
+    let item: int | string = 100;
+    let state: int = 0;
+
+    if (typeof(item) == "int") {
+        let doubled: int = (item as int) * 2;
+        if (doubled != 200) {
+            return 1;
+        }
+        item = "reassigned";
+        if (typeof(item) == "string") {
+            let s: string = item as string;
+            if (s == "reassigned") {
+                state = 42;
+            }
+        }
+    }
+
+    if (state != 42) {
+        return 2;
+    }
+    return 0;
+}
+
+fn testNullableInvalidation(): int {
+    let token: string | null = "session_token_123";
+    let cleared: bool = false;
+
+    if (token != null) {
+        let active: string = token as string;
+        if (active != "session_token_123") {
+            return 1;
+        }
+        token = null;
+        if (token == null) {
+            cleared = true;
+        }
+    }
+
+    if (!cleared) {
+        return 2;
+    }
+    return 0;
+}
+
+fn main(): int {
+    let r1: int = mutateAndVerify();
+    if (r1 != 0) {
+        return 10 + r1;
+    }
+
+    let r2: int = testGuardedReassignment();
+    if (r2 != 0) {
+        return 20 + r2;
+    }
+
+    let r3: int = testNullableInvalidation();
+    if (r3 != 0) {
+        return 30 + r3;
+    }
+
+    return 0;
+}

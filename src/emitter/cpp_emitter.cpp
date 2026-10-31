@@ -278,7 +278,7 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
 
     if (const auto* lit = dynamic_cast<const ast::LiteralExpr*>(expr)) {
         if (lit->getRawText() == "null") {
-            return "nullptr";
+            return "std::monostate{}";
         }
         if (lit->getRawText() == "9223372036854775808") {
             return "(9223372036854775807LL + 1LL)";
@@ -399,20 +399,17 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
 
     if (const auto* cast = dynamic_cast<const ast::TypeCastExpr*>(expr)) {
         std::string target_t = HeaderEmitter::to_cpp_type(cast->getTargetType());
+        if (cast->isAssertion()) {
+            return "std::get<" + target_t + ">(" + translate_expression(cast->getExpr()) + ")";
+        }
         if (target_t == "int64_t") {
             return "keet::to_int(" + translate_expression(cast->getExpr()) + ")";
-        }
-        if (cast->isAssertion()) {
-            if (target_t == "int64_t" || target_t == "double" || target_t == "bool" || target_t == "char") {
-                return "static_cast<" + target_t + ">(" + translate_expression(cast->getExpr()) + ")";
-            }
-            return "std::get<" + target_t + ">(" + translate_expression(cast->getExpr()) + ")";
         }
         return "static_cast<" + target_t + ">(" + translate_expression(cast->getExpr()) + ")";
     }
 
     if (const auto* top = dynamic_cast<const ast::TypeofExpr*>(expr)) {
-        return translate_expression(top->getExpr()) + ".index()";
+        return "keet::type_of(" + translate_expression(top->getExpr()) + ")";
     }
 
     if (const auto* arr = dynamic_cast<const ast::ArrayLitExpr*>(expr)) {

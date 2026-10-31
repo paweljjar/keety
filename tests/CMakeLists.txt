@@ -58,6 +58,7 @@ add_executable(keety_unit_tests
     unit/test_cli_driver.cpp
     conformance/test_conformance_scalars.cpp
     conformance/test_conformance_values_mut.cpp
+    conformance/test_conformance_unions.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE

@@ -143,7 +143,7 @@ This document specifies the operational development plan for the `keety` compile
 #### **Phase 6.2: Conformance Test Suite (`keety test --conformance`)**
 - [x] **Task 6.2.1:** Positive conformance tests: Scalars and Zero-UB (`scalars_wraparound`, `scalars_divzero_recover`, `scalars_float_clamp_bounds`).
 - [x] **Task 6.2.2:** Positive conformance tests: Value semantics and mutable borrowing (`value_semantics_collections`, `mut_parameter_swap`).
-- [ ] **Task 6.2.3:** Positive conformance tests: Unions and flow narrowing (`union_flow_narrowing`, `union_narrowing_invalidation`).
+- [x] **Task 6.2.3:** Positive conformance tests: Unions and flow narrowing (`union_flow_narrowing`, `union_narrowing_invalidation`).
 - [ ] **Task 6.2.4:** Positive conformance tests: OOP, inheritance, and constructors (`class_inheritance_constructor`).
 - [ ] **Task 6.2.5:** Positive conformance tests: Control flow and error recovery (`switch_named_loop_break`, `zonk_block_yield`).
 - [ ] **Task 6.2.6:** Negative compiler rejection tests: Verify exact diagnostic error codes (`neg_shadowing` $\rightarrow$ `E2001`, `neg_mut_alias` $\rightarrow$ `E4001`, `neg_circular_module` $\rightarrow$ `E1001`, etc.).

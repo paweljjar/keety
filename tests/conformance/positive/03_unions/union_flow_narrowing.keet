@@ -1,0 +1,77 @@
+fn formatValue(v: int | string | null): string {
+    if (typeof(v) == "int") {
+        let i: int = v as int;
+        if (i == 42) {
+            return "int: forty-two";
+        }
+        return "int: other";
+    } elif (typeof(v) == "string") {
+        let s: string = v as string;
+        return "str: " + s;
+    } else {
+        return "empty";
+    }
+}
+
+fn getOrDefault(v: int | null, def: int): int {
+    if (v != null) {
+        return v as int;
+    }
+    return def;
+}
+
+fn isPositiveInt(v: int | string): bool {
+    if (typeof(v) == "int") {
+        let i: int = v as int;
+        if (i > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn main(): int {
+    let r1: string = formatValue(42);
+    if (r1 != "int: forty-two") {
+        return 1;
+    }
+
+    let r2: string = formatValue(100);
+    if (r2 != "int: other") {
+        return 2;
+    }
+
+    let r3: string = formatValue("hello");
+    if (r3 != "str: hello") {
+        return 3;
+    }
+
+    let r4: string = formatValue(null);
+    if (r4 != "empty") {
+        return 4;
+    }
+
+    let opt1: int | null = 55;
+    if (getOrDefault(opt1, 10) != 55) {
+        return 5;
+    }
+
+    let opt2: int | null = null;
+    if (getOrDefault(opt2, 10) != 10) {
+        return 6;
+    }
+
+    if (!isPositiveInt(15)) {
+        return 7;
+    }
+
+    if (isPositiveInt(-8)) {
+        return 8;
+    }
+
+    if (isPositiveInt("test")) {
+        return 9;
+    }
+
+    return 0;
+}
