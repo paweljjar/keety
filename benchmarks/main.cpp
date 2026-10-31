@@ -1,0 +1,43 @@
+#include "bench_numeric_vector.hpp"
+
+#include <cstdlib>
+#include <iostream>
+#include <string>
+#include <string_view>
+#include <vector>
+
+int main(int argc, char* argv[]) {
+    bool verbose = true;
+    int target_benchmark = 1;
+    size_t vector_size = 10000000;
+    size_t warmup = 5;
+    size_t measure = 10;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string_view arg = argv[i];
+        if (arg == "-v" || arg == "--verbose") {
+            verbose = true;
+        } else if (arg == "-q" || arg == "--quiet") {
+            verbose = false;
+        } else if (arg == "--benchmark" && i + 1 < argc) {
+            target_benchmark = std::atoi(argv[++i]);
+        } else if (arg == "--size" && i + 1 < argc) {
+            vector_size = static_cast<size_t>(std::atoll(argv[++i]));
+        } else if (arg == "--warmup" && i + 1 < argc) {
+            warmup = static_cast<size_t>(std::atoi(argv[++i]));
+        } else if (arg == "--measure" && i + 1 < argc) {
+            measure = static_cast<size_t>(std::atoi(argv[++i]));
+        }
+    }
+
+    bool all_passed = true;
+
+    if (target_benchmark == 1 || target_benchmark == 0) {
+        auto res = keety::benchmarks::run_numeric_vector_benchmark(vector_size, warmup, measure, verbose);
+        if (!res.passed) {
+            all_passed = false;
+        }
+    }
+
+    return all_passed ? EXIT_SUCCESS : EXIT_FAILURE;
+}

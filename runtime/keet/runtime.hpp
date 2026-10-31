@@ -6,3 +6,4 @@
 #include <keet/deep_copy_ptr.hpp>
 #include <keet/numeric.hpp>
 #include <keet/typeof.hpp>
+#include <keet/functional.hpp>

@@ -2353,6 +2353,75 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 return Type::charType();
             }
 
+            // Built-in array member methods: push, pop, len, length, clear, reserve, filter, map, reduce
+            if (objType && objType->isArray()) {
+                const auto& arrType = static_cast<const ArrayType&>(*objType);
+                auto elemType = arrType.getElementType();
+                const std::string& mName = member->getMemberName();
+
+                if (mName == "push") {
+                    if (!call->getArgs().empty() && call->getArgs()[0].value) {
+                        auto argType = inferType(*call->getArgs()[0].value, scope, elemType);
+                        checkAssignment(elemType, argType, call->getArgs()[0].value->getSpan(), "push element");
+                    }
+                    return Type::voidType();
+                }
+                if (mName == "pop") {
+                    return elemType;
+                }
+                if (mName == "len" || mName == "length") {
+                    return Type::intType();
+                }
+                if (mName == "clear") {
+                    return Type::voidType();
+                }
+                if (mName == "reserve") {
+                    if (!call->getArgs().empty() && call->getArgs()[0].value) {
+                        inferType(*call->getArgs()[0].value, scope, Type::intType());
+                    }
+                    return Type::voidType();
+                }
+                if (mName == "filter") {
+                    TypePtr expectedPred = Type::function({elemType}, Type::boolType(), false);
+                    if (!call->getArgs().empty() && call->getArgs()[0].value) {
+                        inferType(*call->getArgs()[0].value, scope, expectedPred);
+                    }
+                    return objType;
+                }
+                if (mName == "map") {
+                    TypePtr retElemType = nullptr;
+                    if (!call->getTypeArgs().empty() && call->getTypeArgs()[0]) {
+                        retElemType = Type::fromAnnotation(call->getTypeArgs()[0].get());
+                    }
+                    TypePtr expectedFunc = retElemType ? Type::function({elemType}, retElemType, false) : nullptr;
+                    if (!call->getArgs().empty() && call->getArgs()[0].value) {
+                        auto fnType = inferType(*call->getArgs()[0].value, scope, expectedFunc);
+                        if (!retElemType && fnType && fnType->isFunction()) {
+                            retElemType = static_cast<const FunctionType&>(*fnType).getReturnType();
+                        }
+                    }
+                    return Type::array(retElemType ? retElemType : elemType);
+                }
+                if (mName == "reduce") {
+                    TypePtr accType = nullptr;
+                    if (!call->getTypeArgs().empty() && call->getTypeArgs()[0]) {
+                        accType = Type::fromAnnotation(call->getTypeArgs()[0].get());
+                    }
+                    if (!call->getArgs().empty() && call->getArgs()[0].value) {
+                        auto initType = inferType(*call->getArgs()[0].value, scope, accType);
+                        if (!accType) accType = initType;
+                    }
+                    if (call->getArgs().size() > 1 && call->getArgs()[1].value) {
+                        TypePtr expectedFunc = accType ? Type::function({accType, elemType}, accType, false) : nullptr;
+                        auto fnType = inferType(*call->getArgs()[1].value, scope, expectedFunc);
+                        if (!accType && fnType && fnType->isFunction()) {
+                            accType = static_cast<const FunctionType&>(*fnType).getReturnType();
+                        }
+                    }
+                    return accType ? accType : elemType;
+                }
+            }
+
             // Method call on a class instance
             const ast::FnDecl* methodDecl = nullptr;
             if (objType && objType->isCustom()) {

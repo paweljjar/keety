@@ -384,6 +384,18 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             if (m_name == "clear") {
                 return obj_s + ".clear()";
             }
+            if (m_name == "reserve") {
+                return obj_s + ".reserve(" + args_str + ")";
+            }
+            if (m_name == "filter") {
+                return "keet::filter(" + obj_s + ", " + args_str + ")";
+            }
+            if (m_name == "map") {
+                return "keet::map(" + obj_s + ", " + args_str + ")";
+            }
+            if (m_name == "reduce") {
+                return "keet::reduce(" + obj_s + ", " + args_str + ")";
+            }
             if (m_name == "clamp") {
                 return "keet::clamp(" + obj_s + ", " + args_str + ")";
             }
@@ -395,6 +407,38 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
         }
 
         return translate_expression(call->getCallee()) + "(" + args_str + ")";
+    }
+
+    if (const auto* closure = dynamic_cast<const ast::ClosureExpr*>(expr)) {
+        std::string res = "[&](";
+        for (size_t i = 0; i < closure->getParams().size(); ++i) {
+            if (i > 0) res += ", ";
+            const auto& p = closure->getParams()[i];
+            if (p.type) {
+                std::string pt = HeaderEmitter::to_cpp_type(p.type.get());
+                if (p.isMut) {
+                    res += pt + "& " + p.name;
+                } else {
+                    res += pt + " " + p.name;
+                }
+            } else {
+                if (p.isMut) {
+                    res += "auto& " + p.name;
+                } else {
+                    res += "auto " + p.name;
+                }
+            }
+        }
+        res += ") ";
+        if (closure->getReturnType()) {
+            res += "-> " + HeaderEmitter::to_cpp_type(closure->getReturnType()) + " ";
+        }
+        res += "{\n";
+        if (closure->getBody()) {
+            res += translate_block(closure->getBody(), 1);
+        }
+        res += "}";
+        return res;
     }
 
     if (const auto* cast = dynamic_cast<const ast::TypeCastExpr*>(expr)) {

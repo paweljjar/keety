@@ -44,6 +44,7 @@ private:
     bool hasTopLevelSemicolonInParens();
     bool isZonkRecoveryBlock();
     bool isForInLoop();
+    bool isCallTypeArgs();
 
     // --- Pratt Expression Parsing ---
     std::unique_ptr<ast::Expr> parsePrimaryExpression();

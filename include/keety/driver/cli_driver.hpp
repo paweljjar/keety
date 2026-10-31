@@ -18,6 +18,7 @@ enum class CliCommand {
     Emit,    ///< keety emit <file> (--cpp | --hpp | --ast | --ir)
     Build,   ///< keety build <file>
     Run,     ///< keety run <file> [-- args]
+    Test,    ///< keety test [--benchmarks | --conformance]
     Version, ///< keety --version / -V
     Help,    ///< keety --help / -h
     Unknown  ///< Unrecognized command
@@ -47,6 +48,8 @@ struct CliOptions {
     OptimizationLevel opt_level{OptimizationLevel::O3};
     bool wrapv{true};
     bool verbose{false};
+    bool test_conformance{false};
+    bool test_benchmarks{false};
     std::vector<std::string> run_args{};
     diag::ColorMode color_mode{diag::ColorMode::Never};
 };
@@ -77,6 +80,9 @@ public:
 
     /// Executes `keety run <file> [-- args]` compilation, linking, and execution pipeline
     static int execute_run(const CliOptions& options, std::ostream& out = std::cout, std::ostream& err = std::cerr);
+
+    /// Executes `keety test [--benchmarks | --conformance]` test and benchmark suite
+    static int execute_test(const CliOptions& options, std::ostream& out = std::cout, std::ostream& err = std::cerr);
 
     /// Helper to compile and link to a binary, returning target binary path if successful
     static std::optional<std::filesystem::path> build_binary(const CliOptions& options, std::ostream& out, std::ostream& err);

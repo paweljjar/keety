@@ -304,6 +304,7 @@ std::string_view to_string(CliCommand cmd) noexcept {
     case CliCommand::Emit:    return "emit";
     case CliCommand::Build:   return "build";
     case CliCommand::Run:     return "run";
+    case CliCommand::Test:    return "test";
     case CliCommand::Version: return "version";
     case CliCommand::Help:    return "help";
     case CliCommand::Unknown: return "unknown";
@@ -365,6 +366,9 @@ CliOptions CliDriver::parse_args(const std::vector<std::string>& args) {
     } else if (first == "run") {
         options.command = CliCommand::Run;
         idx = 1;
+    } else if (first == "test") {
+        options.command = CliCommand::Test;
+        idx = 1;
     }
 
     for (; idx < args.size(); ++idx) {
@@ -380,6 +384,10 @@ CliOptions CliDriver::parse_args(const std::vector<std::string>& args) {
 
         if (arg == "-v" || arg == "--verbose") {
             options.verbose = true;
+        } else if (arg == "--benchmarks") {
+            options.test_benchmarks = true;
+        } else if (arg == "--conformance") {
+            options.test_conformance = true;
         } else if (arg == "-h" || arg == "--help") {
             options.command = CliCommand::Help;
             return options;
@@ -469,6 +477,7 @@ void CliDriver::print_help(std::ostream& out) {
         << "  emit <file> (--cpp|--hpp|--ast|--ir) Emit generated C++ or intermediate representations\n"
         << "  build <file>                         Compile KeetScript source into a native binary\n"
         << "  run <file> [-- args]                 Compile and immediately execute the target binary\n"
+        << "  test [--benchmarks|--conformance]    Run performance benchmarks or conformance test suite\n"
         << "  version                              Display keety version information\n"
         << "  help                                 Display this help message\n\n"
         << "Options:\n"
@@ -1042,6 +1051,70 @@ int CliDriver::execute_run(const CliOptions& options, std::ostream& out, std::os
     return exit_code;
 }
 
+int CliDriver::execute_test(const CliOptions& options, std::ostream& out, std::ostream& err) {
+    (void)err;
+    bool run_benchmarks = options.test_benchmarks;
+    bool run_conformance = options.test_conformance;
+
+    if (!run_benchmarks && !run_conformance) {
+        run_benchmarks = true;
+        run_conformance = true;
+    }
+
+    int overall_status = 0;
+
+    if (run_benchmarks) {
+        if (options.verbose) {
+            out << "[verbose] Running reference performance benchmarks...\n";
+        }
+        std::vector<std::filesystem::path> candidates = {
+            "./build/benchmarks/keety_benchmarks",
+            "./benchmarks/keety_benchmarks",
+            "keety_benchmarks"
+        };
+        std::filesystem::path bench_bin;
+        for (const auto& c : candidates) {
+            if (std::filesystem::exists(c)) {
+                bench_bin = c;
+                break;
+            }
+        }
+
+        if (!bench_bin.empty()) {
+            std::string cmd = quote_arg(bench_bin.string());
+            if (options.verbose) {
+                cmd += " --verbose";
+            }
+            for (const auto& a : options.run_args) {
+                cmd += " " + quote_arg(a);
+            }
+            int status = std::system(cmd.c_str());
+            if (status != 0) {
+                overall_status = 1;
+            }
+        } else {
+            std::string cmd = "ctest --test-dir build -R bench_numeric_vector --output-on-failure";
+            int status = std::system(cmd.c_str());
+            if (status != 0) {
+                overall_status = 1;
+            }
+        }
+    }
+
+    if (run_conformance) {
+        if (options.verbose) {
+            out << "[verbose] Running conformance test suite...\n";
+        }
+        std::string cmd = "ctest --test-dir build -R conformance --output-on-failure";
+        int status = std::system(cmd.c_str());
+        if (status != 0) {
+            overall_status = 1;
+        }
+    }
+
+    return overall_status;
+}
+
 int CliDriver::run(const CliOptions& options, std::ostream& out, std::ostream& err) {
     switch (options.command) {
     case CliCommand::Help:
@@ -1058,6 +1131,8 @@ int CliDriver::run(const CliOptions& options, std::ostream& out, std::ostream& e
         return execute_build(options, out, err);
     case CliCommand::Run:
         return execute_run(options, out, err);
+    case CliCommand::Test:
+        return execute_test(options, out, err);
     case CliCommand::Unknown:
         err << "error: unknown command or missing arguments.\n"
             << "Run 'keety --help' for usage.\n";

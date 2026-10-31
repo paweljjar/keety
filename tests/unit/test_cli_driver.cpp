@@ -40,6 +40,14 @@ TEST_CASE("CLI argument parser extracts commands and options", "[driver][cli]") 
         REQUIRE(run_opts.run_args.size() == 2);
         CHECK(run_opts.run_args[0] == "arg1");
         CHECK(run_opts.run_args[1] == "arg2");
+
+        auto test_bench_opts = CliDriver::parse_args({"test", "--benchmarks"});
+        CHECK(test_bench_opts.command == CliCommand::Test);
+        CHECK(test_bench_opts.test_benchmarks);
+
+        auto test_conf_opts = CliDriver::parse_args({"test", "--conformance"});
+        CHECK(test_conf_opts.command == CliCommand::Test);
+        CHECK(test_conf_opts.test_conformance);
     }
 
     SECTION("String conversions for commands and emit targets") {
@@ -47,6 +55,7 @@ TEST_CASE("CLI argument parser extracts commands and options", "[driver][cli]") 
         CHECK(to_string(CliCommand::Emit) == "emit");
         CHECK(to_string(CliCommand::Build) == "build");
         CHECK(to_string(CliCommand::Run) == "run");
+        CHECK(to_string(CliCommand::Test) == "test");
         CHECK(to_string(CliCommand::Version) == "version");
         CHECK(to_string(CliCommand::Help) == "help");
 

@@ -149,7 +149,7 @@ This document specifies the operational development plan for the `keety` compile
 - [x] **Task 6.2.6:** Negative compiler rejection tests: Verify exact diagnostic error codes (`neg_shadowing` $\rightarrow$ `E2001`, `neg_mut_alias` $\rightarrow$ `E4001`, `neg_circular_module` $\rightarrow$ `E1001`, etc.).
 
 #### **Phase 6.3: Reference Performance Benchmarks (`keety test --benchmarks`)**
-- [ ] **Task 6.3.1:** Benchmark 1: *Heavy Numeric Vector Processing* (target: ratio $\le 1.02\times$ C++17).
+- [x] **Task 6.3.1:** Benchmark 1: *Heavy Numeric Vector Processing* (target: ratio $\le 1.02\times$ C++17).
 - [ ] **Task 6.3.2:** Benchmark 2: *Hash Map & Union Variant Dispatch* (target: ratio $\le 1.04\times$ C++17).
 - [ ] **Task 6.3.3:** Benchmark 3: *High-Throughput String Ingestion* (target: ratio $\le 1.01\times$ C++17).
 - [ ] **Task 6.3.4:** Benchmark 4: *Asynchronous Task Concurrency* (target: ratio $\le 1.05\times$ C++17).

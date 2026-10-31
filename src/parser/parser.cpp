@@ -733,6 +733,42 @@ bool Parser::isForInLoop() {
     }
 }
 
+bool Parser::isCallTypeArgs() {
+    if (!check(lexer::TokenKind::Less)) {
+        return false;
+    }
+
+    size_t k = 0;
+    int angleDepth = 0;
+
+    while (true) {
+        const auto& tok = peek(k);
+        if (tok.is(lexer::TokenKind::Eof) ||
+            tok.is(lexer::TokenKind::Semicolon) ||
+            tok.is(lexer::TokenKind::LBrace) ||
+            tok.is(lexer::TokenKind::RBrace) ||
+            tok.is(lexer::TokenKind::Equal) ||
+            tok.is(lexer::TokenKind::Plus) ||
+            tok.is(lexer::TokenKind::Minus) ||
+            tok.is(lexer::TokenKind::Star) ||
+            tok.is(lexer::TokenKind::Slash) ||
+            tok.is(lexer::TokenKind::Percent)) {
+            return false;
+        }
+
+        if (tok.is(lexer::TokenKind::Less)) {
+            angleDepth++;
+        } else if (tok.is(lexer::TokenKind::Greater)) {
+            angleDepth--;
+            if (angleDepth == 0) {
+                return peek(k + 1).is(lexer::TokenKind::LParen);
+            }
+        }
+
+        k++;
+    }
+}
+
 std::unique_ptr<ast::Stmt> Parser::parseIfStatement() {
     diag::SourceLocation startLoc = lastConsumed_.span.start;
     expect(lexer::TokenKind::LParen, diag::ErrorCode::UnexpectedToken, "expected '(' after 'if'");
@@ -1598,7 +1634,16 @@ std::unique_ptr<ast::Expr> Parser::parsePrefixExpression() {
             const auto& rBracket = expect(lexer::TokenKind::RBracket, diag::ErrorCode::ExpectedClosingBracket, "expected ']' after index");
             diag::SourceSpan span{startLoc, rBracket.span.end};
             expr = std::make_unique<ast::IndexExpr>(span, std::move(expr), std::move(index));
-        } else if (match(lexer::TokenKind::LParen)) {
+        } else if (isCallTypeArgs() || match(lexer::TokenKind::LParen)) {
+            std::vector<std::unique_ptr<ast::TypeAnnotation>> typeArgs;
+            if (check(lexer::TokenKind::Less)) {
+                advance(); // consume '<'
+                do {
+                    typeArgs.push_back(parseTypeAnnotation());
+                } while (match(lexer::TokenKind::Comma));
+                expect(lexer::TokenKind::Greater, diag::ErrorCode::ExpectedClosingBracket, "expected '>' after call type arguments");
+                expect(lexer::TokenKind::LParen, diag::ErrorCode::UnexpectedToken, "expected '(' after type arguments");
+            }
             // Function call: callee(args...)
             std::vector<ast::CallArg> args;
             if (!check(lexer::TokenKind::RParen)) {
@@ -1612,7 +1657,7 @@ std::unique_ptr<ast::Expr> Parser::parsePrefixExpression() {
             }
             const auto& rParen = expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after call arguments");
             diag::SourceSpan span{startLoc, rParen.span.end};
-            expr = std::make_unique<ast::CallExpr>(span, std::move(expr), std::move(args));
+            expr = std::make_unique<ast::CallExpr>(span, std::move(expr), std::move(args), std::move(typeArgs));
         } else if (match(lexer::TokenKind::PlusPlus) || match(lexer::TokenKind::MinusMinus)) {
             lexer::TokenKind op = lastConsumed_.kind;
             diag::SourceSpan span{startLoc, lastConsumed_.span.end};
