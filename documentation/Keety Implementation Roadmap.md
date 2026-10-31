@@ -135,7 +135,7 @@ This document specifies the operational development plan for the `keety` compile
 ### **Stage VI: CLI Driver, Conformance Test Suite & Benchmarks**
 
 #### **Phase 6.1: CLI Interface (`keety`)**
-- [ ] **Task 6.1.1:** Implement `keety check <file>` command (instant IDE-grade validation without C++ emission).
+- [x] **Task 6.1.1:** Implement `keety check <file>` command (instant IDE-grade validation without C++ emission).
 - [ ] **Task 6.1.2:** Implement `keety emit <file> (--cpp | --hpp | --ast | --ir)`.
 - [ ] **Task 6.1.3:** Implement `keety build <file>` and `keety run <file> [-- args]`.
 - [ ] **Task 6.1.4:** Support CLI configuration flags (`--output-dir`, `--cxx`, `--opt`, `--verbose`).
