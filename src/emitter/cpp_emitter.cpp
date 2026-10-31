@@ -296,6 +296,10 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
         if (id->getName() == "main") {
             return "_keet_main";
         }
+        auto nit = narrowed_vars_.find(id->getName());
+        if (nit != narrowed_vars_.end()) {
+            return "std::get<" + nit->second + ">(" + id->getName() + ")";
+        }
         if (is_module_var(id->getName())) {
             return make_internal_var_name(id->getName());
         }
@@ -318,6 +322,13 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
     }
 
     if (const auto* bin = dynamic_cast<const ast::BinaryExpr*>(expr)) {
+        if (bin->getOp() == lexer::TokenKind::Equal) {
+            if (const auto* id = dynamic_cast<const ast::IdentExpr*>(bin->getLeft())) {
+                narrowed_vars_.erase(id->getName());
+                std::string lhs = is_module_var(id->getName()) ? make_internal_var_name(id->getName()) : id->getName();
+                return lhs + " = " + translate_expression(bin->getRight());
+            }
+        }
         if (in_zonk_expr_ && bin->getOp() == lexer::TokenKind::Slash) {
             return "keet::div_safe(" + translate_expression(bin->getLeft()) + ", " + translate_expression(bin->getRight()) + ")";
         }
@@ -329,9 +340,11 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
     }
 
     if (const auto* tern = dynamic_cast<const ast::TernaryExpr*>(expr)) {
-        return "(" + translate_expression(tern->getCondition()) + " ? " +
-               translate_expression(tern->getThenExpr()) + " : " +
-               translate_expression(tern->getElseExpr()) + ")";
+        std::string cond_s = translate_expression(tern->getCondition());
+        std::string then_s = translate_expression(tern->getThenExpr());
+        std::string else_s = translate_expression(tern->getElseExpr());
+        return "((" + cond_s + ") ? keet::branch_type_t<decltype(" + then_s + "), decltype(" + else_s + ")>(" + then_s + ") : " +
+               "keet::branch_type_t<decltype(" + then_s + "), decltype(" + else_s + ")>(" + else_s + "))";
     }
 
     if (const auto* idx = dynamic_cast<const ast::IndexExpr*>(expr)) {
@@ -399,6 +412,9 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             if (m_name == "clamp") {
                 return "keet::clamp(" + obj_s + ", " + args_str + ")";
             }
+            if (m_name == "toString") {
+                return "keet::to_string(" + obj_s + ")";
+            }
 
             if (is_this) {
                 return "this->" + m_name + "(" + args_str + ")";
@@ -444,6 +460,10 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
     if (const auto* cast = dynamic_cast<const ast::TypeCastExpr*>(expr)) {
         std::string target_t = HeaderEmitter::to_cpp_type(cast->getTargetType());
         if (cast->isAssertion()) {
+            if (const auto* id = dynamic_cast<const ast::IdentExpr*>(cast->getExpr())) {
+                std::string var_name = is_module_var(id->getName()) ? make_internal_var_name(id->getName()) : id->getName();
+                return "std::get<" + target_t + ">(" + var_name + ")";
+            }
             return "std::get<" + target_t + ">(" + translate_expression(cast->getExpr()) + ")";
         }
         if (target_t == "int64_t") {
@@ -474,6 +494,27 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
                    translate_expression(map->getEntries()[i].value.get()) + "}";
         }
         res += "}";
+        return res;
+    }
+
+    if (const auto* tpl = dynamic_cast<const ast::TemplateLitExpr*>(expr)) {
+        if (tpl->getParts().empty()) {
+            return "std::string(\"\")";
+        }
+        std::string res = "(";
+        bool first = true;
+        for (const auto& part : tpl->getParts()) {
+            if (!first) res += " + ";
+            first = false;
+            if (part.isExpr) {
+                res += "keet::to_string(" + translate_expression(part.expr.get()) + ")";
+            } else {
+                std::ostringstream ss;
+                ss << std::quoted(part.text);
+                res += "std::string(" + ss.str() + ")";
+            }
+        }
+        res += ")";
         return res;
     }
 
@@ -584,6 +625,33 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
     }
 
     if (const auto* if_stmt = dynamic_cast<const ast::IfStmt*>(stmt)) {
+        std::string narrowed_var;
+        std::string narrowed_type;
+        if (const auto* bin = dynamic_cast<const ast::BinaryExpr*>(if_stmt->getCondition())) {
+            if (bin->getOp() == lexer::TokenKind::EqualEqual) {
+                const ast::TypeofExpr* top = dynamic_cast<const ast::TypeofExpr*>(bin->getLeft());
+                const ast::LiteralExpr* lit = dynamic_cast<const ast::LiteralExpr*>(bin->getRight());
+                if (!top) {
+                    top = dynamic_cast<const ast::TypeofExpr*>(bin->getRight());
+                    lit = dynamic_cast<const ast::LiteralExpr*>(bin->getLeft());
+                }
+                if (top && lit && lit->getLiteralKind() == lexer::TokenKind::StringLiteral) {
+                    if (const auto* id = dynamic_cast<const ast::IdentExpr*>(top->getExpr())) {
+                        narrowed_var = id->getName();
+                        std::string tname = lit->getRawText();
+                        if (tname.size() >= 2 && (tname.front() == '"' || tname.front() == '\'')) {
+                            tname = tname.substr(1, tname.size() - 2);
+                        }
+                        if (tname == "int") narrowed_type = "int64_t";
+                        else if (tname == "string") narrowed_type = "std::string";
+                        else if (tname == "float") narrowed_type = "double";
+                        else if (tname == "bool") narrowed_type = "bool";
+                        else if (tname == "char") narrowed_type = "char";
+                    }
+                }
+            }
+        }
+
         std::string res = indent_str + "if (";
         if (if_stmt->hasInit()) {
             std::string init_s = translate_statement(if_stmt->getInit(), 0);
@@ -591,7 +659,28 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
             res += init_s + " ";
         }
         res += translate_expression(if_stmt->getCondition()) + ") {\n";
+
+        std::string prev_narrowed;
+        bool had_prev = false;
+        if (!narrowed_var.empty() && !narrowed_type.empty()) {
+            auto it = narrowed_vars_.find(narrowed_var);
+            if (it != narrowed_vars_.end()) {
+                prev_narrowed = it->second;
+                had_prev = true;
+            }
+            narrowed_vars_[narrowed_var] = narrowed_type;
+        }
+
         res += translate_block(if_stmt->getThenBranch(), indent + 1);
+
+        if (!narrowed_var.empty() && !narrowed_type.empty()) {
+            if (had_prev) {
+                narrowed_vars_[narrowed_var] = prev_narrowed;
+            } else {
+                narrowed_vars_.erase(narrowed_var);
+            }
+        }
+
         res += indent_str + "}";
         if (if_stmt->hasElseBranch()) {
             if (const auto* else_if = dynamic_cast<const ast::IfStmt*>(if_stmt->getElseBranch())) {

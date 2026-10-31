@@ -421,6 +421,10 @@ bool TypeChecker::checkExplicitTypeAnnotations(const ast::Expr& expr) {
         if (zonk->getPrimary()) checkExplicitTypeAnnotations(*zonk->getPrimary());
         if (zonk->getFallback()) checkExplicitTypeAnnotations(*zonk->getFallback());
         if (zonk->getRecoveryBlock()) checkExplicitTypeAnnotations(*zonk->getRecoveryBlock());
+    } else if (const auto* tpl = dynamic_cast<const ast::TemplateLitExpr*>(&expr)) {
+        for (const auto& part : tpl->getParts()) {
+            if (part.isExpr && part.expr) checkExplicitTypeAnnotations(*part.expr);
+        }
     }
 
     return !hasErrors_;
@@ -2625,6 +2629,14 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
         return contextualType ? contextualType : Type::unionOf({thenType, elseType});
     }
 
+    if (const auto* tpl = dynamic_cast<const ast::TemplateLitExpr*>(&expr)) {
+        for (const auto& part : tpl->getParts()) {
+            if (part.isExpr && part.expr) {
+                inferType(*part.expr, scope);
+            }
+        }
+        return Type::stringType();
+    }
 
     if (const auto* arrLit = dynamic_cast<const ast::ArrayLitExpr*>(&expr)) {
         if (arrLit->getElements().empty()) {
@@ -3062,6 +3074,10 @@ void TypeChecker::checkClosuresInExpr(const ast::Expr* expr) {
         checkClosuresInExpr(zonk->getFallback());
         if (zonk->getRecoveryBlock()) {
             checkReachability(zonk->getRecoveryBlock());
+        }
+    } else if (const auto* tpl = dynamic_cast<const ast::TemplateLitExpr*>(expr)) {
+        for (const auto& part : tpl->getParts()) {
+            if (part.isExpr && part.expr) checkClosuresInExpr(part.expr.get());
         }
     }
 }

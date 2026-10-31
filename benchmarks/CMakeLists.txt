@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 add_executable(keety_benchmarks
     main.cpp
     bench_numeric_vector.cpp
+    bench_hash_map.cpp
 )
 
 target_include_directories(keety_benchmarks PRIVATE
@@ -31,6 +32,10 @@ endif()
 if(KEETY_BUILD_TESTS)
     add_test(
         NAME bench_numeric_vector
-        COMMAND keety_benchmarks --size 5000000 --warmup 2 --measure 5
+        COMMAND keety_benchmarks --benchmark 1 --size 5000000 --warmup 2 --measure 5
+    )
+    add_test(
+        NAME bench_hash_map
+        COMMAND keety_benchmarks --benchmark 2 --size 100000 --warmup 2 --measure 5
     )
 endif()

@@ -1465,6 +1465,52 @@ std::unique_ptr<ast::Expr> Parser::parsePrimaryExpression() {
         return std::make_unique<ast::LiteralExpr>(lastConsumed_.span, lexer::TokenKind::KwNull, "null");
     }
 
+    // Template string literal: `hello ${name}!` or `plain template`
+    if (match(lexer::TokenKind::TemplateNoSub)) {
+        std::string raw(lastConsumed_.lexeme);
+        std::string text = raw.size() >= 2 ? raw.substr(1, raw.size() - 2) : "";
+        std::vector<ast::TemplatePart> parts;
+        parts.push_back(ast::TemplatePart{std::move(text), nullptr, false});
+        return std::make_unique<ast::TemplateLitExpr>(lastConsumed_.span, std::move(parts));
+    }
+    if (match(lexer::TokenKind::TemplateHead)) {
+        startLoc = lastConsumed_.span.start;
+        std::string headRaw(lastConsumed_.lexeme);
+        // Head is `prefix${
+        std::string prefix = headRaw.size() >= 3 ? headRaw.substr(1, headRaw.size() - 3) : "";
+        std::vector<ast::TemplatePart> parts;
+        if (!prefix.empty()) {
+            parts.push_back(ast::TemplatePart{std::move(prefix), nullptr, false});
+        }
+
+        while (true) {
+            auto inner = parseExpression();
+            parts.push_back(ast::TemplatePart{"", std::move(inner), true});
+
+            if (match(lexer::TokenKind::TemplateMiddle)) {
+                std::string midRaw(lastConsumed_.lexeme);
+                // Middle is }middle${
+                std::string mid = midRaw.size() >= 3 ? midRaw.substr(1, midRaw.size() - 3) : "";
+                if (!mid.empty()) {
+                    parts.push_back(ast::TemplatePart{std::move(mid), nullptr, false});
+                }
+            } else if (match(lexer::TokenKind::TemplateTail)) {
+                std::string tailRaw(lastConsumed_.lexeme);
+                // Tail is }suffix`
+                std::string tail = tailRaw.size() >= 2 ? tailRaw.substr(1, tailRaw.size() - 2) : "";
+                if (!tail.empty()) {
+                    parts.push_back(ast::TemplatePart{std::move(tail), nullptr, false});
+                }
+                break;
+            } else {
+                expect(lexer::TokenKind::TemplateTail, diag::ErrorCode::UnexpectedToken, "expected closing '`' in template literal");
+                break;
+            }
+        }
+        diag::SourceSpan span{startLoc, lastConsumed_.span.end};
+        return std::make_unique<ast::TemplateLitExpr>(span, std::move(parts));
+    }
+
     // 2. Functional cast expressions: `int(x)`, `float(x)`, `bool(x)`, `char(x)`, `string(x)`
     if (check(lexer::TokenKind::KwInt) || check(lexer::TokenKind::KwFloat) ||
         check(lexer::TokenKind::KwChar) || check(lexer::TokenKind::KwString) ||

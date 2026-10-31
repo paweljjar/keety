@@ -262,4 +262,23 @@ private:
     std::unique_ptr<Expr> target_;
 };
 
+/// Template literal part: static text chunk or interpolated expression
+struct TemplatePart {
+    std::string text{};
+    std::unique_ptr<Expr> expr{nullptr};
+    bool isExpr{false};
+};
+
+/// Template string literal expression: `val_${i}` or `hello world`
+class TemplateLitExpr : public Expr {
+public:
+    TemplateLitExpr(diag::SourceSpan span, std::vector<TemplatePart> parts)
+        : Expr(span), parts_(std::move(parts)) {}
+
+    [[nodiscard]] const std::vector<TemplatePart>& getParts() const noexcept { return parts_; }
+
+private:
+    std::vector<TemplatePart> parts_;
+};
+
 } // namespace keety::ast

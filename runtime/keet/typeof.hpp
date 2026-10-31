@@ -2,8 +2,10 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -11,25 +13,107 @@ namespace keet {
 
 struct error;
 
-inline std::string type_of(int64_t) { return "int"; }
-inline std::string type_of(int) { return "int"; }
-inline std::string type_of(double) { return "float"; }
-inline std::string type_of(float) { return "float"; }
-inline std::string type_of(bool) { return "bool"; }
-inline std::string type_of(char) { return "char"; }
-inline std::string type_of(const std::string&) { return "string"; }
-inline std::string type_of(const char*) { return "string"; }
-inline std::string type_of(std::monostate) { return "null"; }
+inline constexpr std::string_view type_of(int64_t) noexcept { return "int"; }
+inline constexpr std::string_view type_of(int) noexcept { return "int"; }
+inline constexpr std::string_view type_of(double) noexcept { return "float"; }
+inline constexpr std::string_view type_of(float) noexcept { return "float"; }
+inline constexpr std::string_view type_of(bool) noexcept { return "bool"; }
+inline constexpr std::string_view type_of(char) noexcept { return "char"; }
+inline constexpr std::string_view type_of(const std::string&) noexcept { return "string"; }
+inline constexpr std::string_view type_of(const char*) noexcept { return "string"; }
+inline constexpr std::string_view type_of(std::monostate) noexcept { return "null"; }
 
 template <typename T>
-inline std::string type_of(const std::vector<T>&) { return "array"; }
+inline constexpr std::string_view type_of(const std::vector<T>&) noexcept { return "array"; }
 
 template <typename K, typename V>
-inline std::string type_of(const std::unordered_map<K, V>&) { return "map"; }
+inline constexpr std::string_view type_of(const std::unordered_map<K, V>&) noexcept { return "map"; }
 
 template <typename... Ts>
-inline std::string type_of(const std::variant<Ts...>& v) {
-    return std::visit([](const auto& arg) { return type_of(arg); }, v);
+inline bool is_type(const std::variant<Ts...>& v, std::string_view expected) {
+    if constexpr ((std::is_same_v<Ts, int64_t> || ...)) {
+        if (expected == "int") return std::holds_alternative<int64_t>(v);
+    }
+    if constexpr ((std::is_same_v<Ts, std::string> || ...)) {
+        if (expected == "string") return std::holds_alternative<std::string>(v);
+    }
+    if constexpr ((std::is_same_v<Ts, double> || ...)) {
+        if (expected == "float") return std::holds_alternative<double>(v);
+    }
+    if constexpr ((std::is_same_v<Ts, bool> || ...)) {
+        if (expected == "bool") return std::holds_alternative<bool>(v);
+    }
+    if constexpr ((std::is_same_v<Ts, char> || ...)) {
+        if (expected == "char") return std::holds_alternative<char>(v);
+    }
+    if constexpr ((std::is_same_v<Ts, std::monostate> || ...)) {
+        if (expected == "null") return std::holds_alternative<std::monostate>(v);
+    }
+    return std::visit([](const auto& arg) -> std::string_view { return type_of(arg); }, v) == expected;
+}
+
+template <typename Variant>
+struct variant_type_info {
+    const Variant& v;
+
+    bool operator==(std::string_view expected) const {
+        return is_type(v, expected);
+    }
+    bool operator==(const char* expected) const {
+        return is_type(v, std::string_view(expected));
+    }
+    bool operator!=(std::string_view expected) const {
+        return !is_type(v, expected);
+    }
+    bool operator!=(const char* expected) const {
+        return !is_type(v, std::string_view(expected));
+    }
+    operator std::string_view() const {
+        return std::visit([](const auto& arg) -> std::string_view { return type_of(arg); }, v);
+    }
+    operator std::string() const {
+        return std::string(operator std::string_view());
+    }
+};
+
+template <typename... Ts>
+inline variant_type_info<std::variant<Ts...>> type_of(const std::variant<Ts...>& v) {
+    return variant_type_info<std::variant<Ts...>>{v};
+}
+
+// Convert arbitrary values to string representation
+template <typename T>
+[[nodiscard]] inline std::string to_string(const T& val) {
+    if constexpr (std::is_same_v<std::decay_t<T>, std::string>) {
+        return val;
+    } else if constexpr (std::is_same_v<std::decay_t<T>, const char*>) {
+        return std::string(val);
+    } else if constexpr (std::is_same_v<std::decay_t<T>, char>) {
+        return std::string(1, val);
+    } else if constexpr (std::is_same_v<std::decay_t<T>, bool>) {
+        return val ? "true" : "false";
+    } else {
+        return std::to_string(val);
+    }
+}
+
+// Polymorphic conditional branch type
+template <typename T1, typename T2>
+using branch_type_t = std::conditional_t<
+    std::is_same_v<std::decay_t<T1>, std::decay_t<T2>>,
+    std::decay_t<T1>,
+    std::variant<std::decay_t<T1>, std::decay_t<T2>>
+>;
+
+// Polymorphic conditional branch returning common type or union variant
+template <typename Cond, typename T1, typename T2>
+inline auto branch(Cond&& cond, T1&& t1, T2&& t2) {
+    if constexpr (std::is_same_v<std::decay_t<T1>, std::decay_t<T2>>) {
+        return cond ? std::forward<T1>(t1) : std::forward<T2>(t2);
+    } else {
+        using V = std::variant<std::decay_t<T1>, std::decay_t<T2>>;
+        return cond ? V(std::forward<T1>(t1)) : V(std::forward<T2>(t2));
+    }
 }
 
 } // namespace keet
@@ -57,4 +141,15 @@ inline bool operator!=(const std::variant<Ts...>& v, std::monostate) {
 template <typename... Ts>
 inline bool operator!=(std::monostate, const std::variant<Ts...>& v) {
     return !(v == std::monostate{});
+}
+
+// Safe numeric accumulation for variants
+template <typename T, typename... Ts>
+inline std::enable_if_t<std::is_integral_v<T>, T&> operator+=(T& a, const std::variant<Ts...>& v) {
+    std::visit([&](const auto& val) {
+        if constexpr (std::is_integral_v<std::decay_t<decltype(val)>>) {
+            a += val;
+        }
+    }, v);
+    return a;
 }

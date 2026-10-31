@@ -122,6 +122,7 @@ private:
     bool main_returns_int_{false};
     bool manual_root_override_{false};
     mutable bool in_zonk_expr_{false};
+    mutable std::unordered_map<std::string, std::string> narrowed_vars_{};
 };
 
 } // namespace keety::emitter
