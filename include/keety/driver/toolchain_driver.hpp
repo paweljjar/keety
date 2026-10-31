@@ -24,6 +24,14 @@ enum class OptimizationLevel {
 
 [[nodiscard]] std::string_view to_compiler_flag(OptimizationLevel level, CompilerKind kind) noexcept;
 
+/// Output binary artifact kind
+enum class BinaryKind {
+    Executable,   ///< Standalone executable binary
+    SharedLibrary ///< Dynamic / shared library (.so, .dylib, .dll)
+};
+
+[[nodiscard]] std::string_view to_string(BinaryKind kind) noexcept;
+
 /// Configuration options for native C++ compiler invocation
 struct CompileOptions {
     OptimizationLevel opt_level{OptimizationLevel::O3};
@@ -38,6 +46,16 @@ struct CompileOptions {
     bool verbose{false};
 };
 
+/// Configuration options for native toolchain linker invocation
+struct LinkOptions {
+    BinaryKind kind{BinaryKind::Executable};
+    std::vector<std::filesystem::path> library_directories{};
+    std::vector<std::string> libraries{};
+    std::vector<std::string> extra_linker_flags{};
+    std::optional<std::filesystem::path> working_directory{std::nullopt};
+    bool verbose{false};
+};
+
 /// Result of a native compiler invocation
 struct CompilationResult {
     bool success{false};
@@ -47,7 +65,16 @@ struct CompilationResult {
     std::filesystem::path output_file{};
 };
 
-/// High-level native toolchain driver for invoking platform C++ compilers
+/// Result of a native linker invocation
+struct LinkResult {
+    bool success{false};
+    int exit_code{-1};
+    std::string command_line{};
+    std::string output{};
+    std::filesystem::path output_file{};
+};
+
+/// High-level native toolchain driver for invoking platform C++ compilers and linkers
 class ToolchainDriver {
 public:
     /// Constructs driver with automatically detected default platform toolchain
@@ -64,6 +91,15 @@ public:
 
     /// Sets or updates the active toolchain configuration
     void set_toolchain(ToolchainInfo info);
+
+    /// Returns platform-specific executable binary extension (".exe" on Windows, "" on POSIX)
+    [[nodiscard]] static std::string get_executable_extension() noexcept;
+
+    /// Returns platform-specific shared library extension (".dylib" on macOS, ".so" on Linux, ".dll" on Windows)
+    [[nodiscard]] static std::string get_shared_library_extension() noexcept;
+
+    /// Returns platform-specific object file extension (".obj" on Windows, ".o" on POSIX)
+    [[nodiscard]] static std::string get_object_file_extension(CompilerKind kind) noexcept;
 
     /// Assembles command-line argument list for compilation
     [[nodiscard]] std::vector<std::string> build_compile_args(
@@ -88,6 +124,43 @@ public:
         const std::vector<std::filesystem::path>& source_files,
         const std::filesystem::path& output_dir,
         const CompileOptions& options = {}) const;
+
+    /// Assembles command-line argument list for linking object files
+    [[nodiscard]] std::vector<std::string> build_link_args(
+        const std::vector<std::filesystem::path>& object_files,
+        const std::filesystem::path& output_file,
+        const LinkOptions& options = {}) const;
+
+    /// Assembles formatted single-string shell command for linking object files
+    [[nodiscard]] std::string build_link_command(
+        const std::vector<std::filesystem::path>& object_files,
+        const std::filesystem::path& output_file,
+        const LinkOptions& options = {}) const;
+
+    /// Executes the native linker synchronously to create an executable binary or shared library
+    [[nodiscard]] LinkResult link(
+        const std::vector<std::filesystem::path>& object_files,
+        const std::filesystem::path& output_file,
+        const LinkOptions& options = {}) const;
+
+    /// Convenience method to link object files into an executable binary
+    [[nodiscard]] LinkResult link_executable(
+        const std::vector<std::filesystem::path>& object_files,
+        const std::filesystem::path& output_file,
+        const LinkOptions& options = {}) const;
+
+    /// Convenience method to link object files into a shared library
+    [[nodiscard]] LinkResult link_shared_library(
+        const std::vector<std::filesystem::path>& object_files,
+        const std::filesystem::path& output_file,
+        const LinkOptions& options = {}) const;
+
+    /// Compiles source files and links them into the final binary artifact in a unified pipeline
+    [[nodiscard]] LinkResult compile_and_link(
+        const std::vector<std::filesystem::path>& source_files,
+        const std::filesystem::path& output_binary,
+        const CompileOptions& compile_opts = {},
+        const LinkOptions& link_opts = {}) const;
 
 private:
     ToolchainInfo toolchain_{};
