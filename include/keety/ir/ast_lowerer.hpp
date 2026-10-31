@@ -12,6 +12,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -112,6 +113,9 @@ private:
     // Helpers
     BasicBlock* find_break_target(const std::string& label) const;
     BasicBlock* find_continue_target(const std::string& label) const;
+
+    bool has_io_import_{false};
+    std::unordered_set<std::string> imported_io_symbols_;
 };
 
 } // namespace keety::ir

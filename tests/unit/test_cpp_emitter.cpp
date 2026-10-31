@@ -465,4 +465,62 @@ TEST_CASE("C++ Implementation Emitter emits root main process wrapper with excep
     }
 }
 
+TEST_CASE("C++ Implementation Emitter translates standard io module calls and color expressions", "[emitter][cpp][io]") {
+    SECTION("Translates io print, println, styling helpers, and Color expressions") {
+        const std::string source = R"(
+            import io;
+
+            fn test_io(): void {
+                io.print("Val: ", 10);
+                io.println("Status: ", io.green("OK"), io.Color.Green);
+                let name: string = io.input("Name: ");
+                let c: io.Color = io.Color.Red;
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "io_demo");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("#include <keet/runtime.hpp>") != std::string::npos);
+        REQUIRE(cpp.find("::keet::io::print(\"Val: \", 10);") != std::string::npos);
+        REQUIRE(cpp.find("::keet::io::println(\"Status: \", ::keet::io::green(\"OK\"), ::keet::io::Color::Green);") != std::string::npos);
+        REQUIRE(cpp.find("::keet::io::input(\"Name: \");") != std::string::npos);
+        REQUIRE(cpp.find("::keet::io::Color c = ::keet::io::Color::Red;") != std::string::npos);
+    }
+
+    SECTION("Translates selective imports from io module") {
+        const std::string source = R"(
+            from "io" import println, green, Color;
+
+            fn test_selective(): void {
+                println("Info", green("All good"), Color.Blue);
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "io_selective");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("#include <keet/runtime.hpp>") != std::string::npos);
+        REQUIRE(cpp.find("::keet::io::println(\"Info\", ::keet::io::green(\"All good\"), ::keet::io::Color::Blue);") != std::string::npos);
+    }
+
+    SECTION("Translates IR module with io runtime calls") {
+        keety::ir::Module irMod("ir_io_mod");
+        auto fn = std::make_unique<keety::ir::Function>("run", std::make_shared<keety::typechecker::Type>(keety::typechecker::TypeKind::Void));
+        auto* bb = fn->create_basic_block("entry");
+        std::vector<keety::ir::Operand> args;
+        args.push_back(keety::ir::Operand::create_string("Hello IR"));
+        bb->append_instruction(std::make_unique<keety::ir::CallInst>(std::nullopt, "@keet.io.println", std::move(args)));
+        bb->append_instruction(std::make_unique<keety::ir::ReturnInst>());
+        irMod.add_function(std::move(fn));
+
+        keety::emitter::CppEmitter emitter(irMod);
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("::keet::io::println(\"Hello IR\");") != std::string::npos);
+    }
+}
+
+
 

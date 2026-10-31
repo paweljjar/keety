@@ -137,6 +137,21 @@ void CppEmitter::collect_declarations(const parser::ModuleAST& ast) {
 }
 
 void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Decl>>& decls) {
+    // 0. Preliminary pass: scan for standard library imports (e.g. io)
+    for (const auto& decl : decls) {
+        if (!decl) continue;
+        if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+            const std::string& p = imp->getModulePath();
+            if (p == "io" || p == "std.io" || p == "keet.io") {
+                has_io_import_ = true;
+                add_standard_header("<keet/runtime.hpp>");
+                for (const auto& s : imp->getSymbols()) {
+                    imported_io_symbols_.insert(s.getEffectiveName());
+                }
+            }
+        }
+    }
+
     // 1. First pass: register and allocate storage for all module-level variables
     for (const auto& decl : decls) {
         if (!decl) continue;
@@ -356,6 +371,16 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             if (obj_id->getName() == "this") {
                 return "this->" + mem->getMemberName();
             }
+            if (obj_id->getName() == "Color") {
+                return "::keet::io::Color::" + mem->getMemberName();
+            }
+        }
+        if (const auto* obj_mem = dynamic_cast<const ast::MemberExpr*>(mem->getObject())) {
+            if (const auto* root_id = dynamic_cast<const ast::IdentExpr*>(obj_mem->getObject())) {
+                if (root_id->getName() == "io" && obj_mem->getMemberName() == "Color") {
+                    return "::keet::io::Color::" + mem->getMemberName();
+                }
+            }
         }
         return translate_expression(mem->getObject()) + "." + mem->getMemberName();
     }
@@ -381,6 +406,18 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             }
 
             std::string m_name = mem->getMemberName();
+            if (obj_s == "io") {
+                if (m_name == "print" || m_name == "println" || m_name == "readln" ||
+                    m_name == "input" || m_name == "flush" || m_name == "red" ||
+                    m_name == "green" || m_name == "yellow" || m_name == "blue" ||
+                    m_name == "magenta" || m_name == "cyan" || m_name == "white" ||
+                    m_name == "gray" || m_name == "bold") {
+                    return "::keet::io::" + m_name + "(" + args_str + ")";
+                }
+                if (m_name == "readLine") {
+                    return "::keet::io::readln(" + args_str + ")";
+                }
+            }
             // Container member mapping
             if (m_name == "push") {
                 return obj_s + ".push_back(" + args_str + ")";
@@ -429,6 +466,18 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
                 return "this->" + m_name + "(" + args_str + ")";
             }
             return obj_s + "." + m_name + "(" + args_str + ")";
+        }
+
+        if (const auto* callee_id = dynamic_cast<const ast::IdentExpr*>(call->getCallee())) {
+            const std::string& name = callee_id->getName();
+            if (has_io_import_ && (imported_io_symbols_.count(name) ||
+                name == "print" || name == "println" || name == "readln" || name == "readLine" ||
+                name == "input" || name == "flush" || name == "red" || name == "green" ||
+                name == "yellow" || name == "blue" || name == "magenta" || name == "cyan" ||
+                name == "white" || name == "gray" || name == "bold")) {
+                std::string fn_name = (name == "readLine" ? "readln" : name);
+                return "::keet::io::" + fn_name + "(" + args_str + ")";
+            }
         }
 
         return translate_expression(call->getCallee()) + "(" + args_str + ")";
@@ -1059,6 +1108,46 @@ std::string CppEmitter::translate_ir_function(const ir::Function& fn) const {
                     ss << "            goto " << cbr->get_false_target()->get_label() << ";\n";
                 }
                 ss << "        }\n";
+                break;
+            }
+            case ir::Opcode::Call: {
+                const auto* call = dynamic_cast<const ir::CallInst*>(inst.get());
+                std::string callee = call->get_callee();
+                if (!callee.empty() && callee.front() == '@') {
+                    callee = callee.substr(1);
+                }
+                std::string call_expr;
+                if (callee.rfind("keet.io.", 0) == 0) {
+                    std::string func_name = callee.substr(8);
+                    call_expr = "::keet::io::" + func_name + "(";
+                } else {
+                    call_expr = callee + "(";
+                }
+                for (size_t i = 0; i < call->get_args().size(); ++i) {
+                    if (i > 0) call_expr += ", ";
+                    call_expr += to_cpp_ir_operand(call->get_args()[i]);
+                }
+                call_expr += ")";
+                if (call->get_dest().has_value()) {
+                    ss << "        auto " << to_cpp_ir_operand(*call->get_dest()) << " = " << call_expr << ";\n";
+                } else {
+                    ss << "        " << call_expr << ";\n";
+                }
+                break;
+            }
+            case ir::Opcode::MethodCall: {
+                const auto* mcall = dynamic_cast<const ir::MethodCallInst*>(inst.get());
+                std::string call_expr = to_cpp_ir_operand(mcall->get_receiver()) + "." + mcall->get_method() + "(";
+                for (size_t i = 0; i < mcall->get_args().size(); ++i) {
+                    if (i > 0) call_expr += ", ";
+                    call_expr += to_cpp_ir_operand(mcall->get_args()[i]);
+                }
+                call_expr += ")";
+                if (mcall->get_dest().has_value()) {
+                    ss << "        auto " << to_cpp_ir_operand(*mcall->get_dest()) << " = " << call_expr << ";\n";
+                } else {
+                    ss << "        " << call_expr << ";\n";
+                }
                 break;
             }
             default:

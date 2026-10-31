@@ -10,6 +10,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace keety::emitter {
@@ -123,6 +124,8 @@ private:
     bool manual_root_override_{false};
     mutable bool in_zonk_expr_{false};
     mutable std::unordered_map<std::string, std::string> narrowed_vars_{};
+    bool has_io_import_{false};
+    std::unordered_set<std::string> imported_io_symbols_{};
 };
 
 } // namespace keety::emitter

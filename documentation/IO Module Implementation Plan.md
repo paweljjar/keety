@@ -52,11 +52,11 @@ This document outlines the hierarchical implementation plan (`Phase -> Task`) fo
 ## Phase 3: IR Lowering & C++20 Code Generation (`ir` & `emitter`)
 *Objective: Lower `io.*` AST nodes into Keet IR (K-IR) instructions and emit clean C++20 runtime calls.*
 
-- [ ] **Task 3.1: Lower `io` Calls and `io.Color` in `ASTLowerer` (`src/ir/ast_lowerer.cpp`)**
+- [x] **Task 3.1: Lower `io` Calls and `io.Color` in `ASTLowerer` (`src/ir/ast_lowerer.cpp`)**
   - Lower `io.*` member call expressions into intrinsic/runtime calls (`@keet.io.print`, `@keet.io.println`, `@keet.io.readln`, `@keet.io.input`, `@keet.io.red`, etc.).
   - Lower `io.Color.<Member>` accesses into typed constant/enum operands in K-IR.
 
-- [ ] **Task 3.2: Emit C++20 `::keet::io::*` Calls in `CppEmitter` & `HeaderEmitter`**
+- [x] **Task 3.2: Emit C++20 `::keet::io::*` Calls in `CppEmitter` & `HeaderEmitter`**
   - Update `src/emitter/cpp_emitter.cpp` to translate K-IR `@keet.io.*` instructions into `::keet::io::print(...)`, `::keet::io::println(...)`, `::keet::io::readln()`, `::keet::io::input(...)`, `::keet::io::red(...)`, and `::keet::io::Color::*`.
   - Ensure generated C++ files include `<keet/runtime.hpp>` (which includes `<keet/io.hpp>`).
 
@@ -70,15 +70,15 @@ This document outlines the hierarchical implementation plan (`Phase -> Task`) fo
   - Test `keet::io::red`, `green`, `yellow`, `bold`, and `Color` with `set_color_enabled(true)` (verifying exact ANSI escape sequences) and `set_color_enabled(false)` (verifying plain text output).
   - Test `keet::io::readln` and `keet::io::input` using mocked `std::istringstream` inputs (including LF `\n` and CRLF `\r\n` line endings).
 
-- [ ] **Task 4.2: Compiler Unit Tests (`tests/unit/test_type_checker.cpp`, `tests/unit/test_cpp_emitter.cpp`)**
+- [x] **Task 4.2: Compiler Unit Tests (`tests/unit/test_type_checker.cpp`, `tests/unit/test_cpp_emitter.cpp`)**
   - Add unit tests verifying valid `import io;` resolution, valid `io.*` calls, and rejection of invalid argument types/counts.
   - Add emitter tests verifying that `io.println("Status:", io.green("OK"))` and `io.input("Name: ")` emit the expected C++20 code.
 
-- [ ] **Task 4.3: End-to-End Conformance Tests (`tests/conformance/`)**
+- [x] **Task 4.3: End-to-End Conformance Tests (`tests/conformance/`)**
   - Create positive conformance test `tests/conformance/positive/06_io/io_console.keet` and its test runner in `tests/conformance/test_conformance_io.cpp` to compile and execute a full KeetScript program using `io.print`, `io.println`, `io.Color`, `io.green`, `io.readln`, and `io.input`.
   - Create negative conformance test `tests/conformance/negative/neg_io_type_mismatch.keet` verifying compile-time rejection of invalid `io` calls.
 
-- [ ] **Task 4.4: CMake & CTest Registration (`tests/CMakeLists.txt`)**
+- [x] **Task 4.4: CMake & CTest Registration (`tests/CMakeLists.txt`)**
   - Register `test_runtime_io.cpp` and `test_conformance_io.cpp` in `tests/CMakeLists.txt`.
   - Run `ctest --test-dir build --output-on-failure` and ensure 100% of tests pass with zero warnings.
 

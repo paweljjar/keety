@@ -1,0 +1,6 @@
+import io;
+
+fn main(): void {
+    // io.input expects string or no argument; passing an integer causes E3003
+    let s: string = io.input(42);
+}

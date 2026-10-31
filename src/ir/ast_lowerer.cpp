@@ -25,11 +25,21 @@ void AstLowerer::emit(std::unique_ptr<Instruction> inst) {
 std::unique_ptr<Module> AstLowerer::lower_module(const parser::ModuleAST& module_ast) {
     auto mod = std::make_unique<Module>(module_ast.moduleName);
     current_module_ = mod.get();
+    has_io_import_ = false;
+    imported_io_symbols_.clear();
 
     for (const auto& decl : module_ast.declarations) {
         if (!decl) continue;
 
-        if (const auto* var_decl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+        if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+            const std::string& p = imp->getModulePath();
+            if (p == "io" || p == "std.io" || p == "keet.io") {
+                has_io_import_ = true;
+                for (const auto& s : imp->getSymbols()) {
+                    imported_io_symbols_.insert(s.getEffectiveName());
+                }
+            }
+        } else if (const auto* var_decl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
             typechecker::TypePtr type = typechecker::Type::fromAnnotation(var_decl->getType());
             std::optional<Operand> init_val = std::nullopt;
             if (var_decl->hasInitializer()) {
@@ -756,9 +766,27 @@ Operand AstLowerer::lower_call_expr(const ast::CallExpr& expr) {
     Operand dest = current_fn_->create_temp(nullptr);
 
     if (const auto* member = dynamic_cast<const ast::MemberExpr*>(expr.getCallee())) {
+        if (const auto* obj_id = dynamic_cast<const ast::IdentExpr*>(member->getObject())) {
+            if (obj_id->getName() == "io") {
+                const std::string& m_name = member->getMemberName();
+                std::string callee_name = "@keet.io." + (m_name == "readLine" ? "readln" : m_name);
+                emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
+                return dest;
+            }
+        }
         Operand receiver = lower_expression(*member->getObject());
         emit(std::make_unique<MethodCallInst>(dest, receiver, member->getMemberName(), std::move(args)));
     } else if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(expr.getCallee())) {
+        const std::string& name = ident->getName();
+        if (has_io_import_ && (imported_io_symbols_.count(name) ||
+            name == "print" || name == "println" || name == "readln" || name == "readLine" ||
+            name == "input" || name == "flush" || name == "red" || name == "green" ||
+            name == "yellow" || name == "blue" || name == "magenta" || name == "cyan" ||
+            name == "white" || name == "gray" || name == "bold")) {
+            std::string callee_name = "@keet.io." + (name == "readLine" ? "readln" : name);
+            emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
+            return dest;
+        }
         emit(std::make_unique<CallInst>(dest, ident->getName(), std::move(args)));
     } else {
         Operand callee_op = lower_expression(*expr.getCallee());
@@ -769,6 +797,22 @@ Operand AstLowerer::lower_call_expr(const ast::CallExpr& expr) {
 }
 
 Operand AstLowerer::lower_member_expr(const ast::MemberExpr& expr) {
+    bool is_color_enum = false;
+    if (const auto* obj_id = dynamic_cast<const ast::IdentExpr*>(expr.getObject())) {
+        if (obj_id->getName() == "Color") {
+            is_color_enum = true;
+        }
+    } else if (const auto* obj_mem = dynamic_cast<const ast::MemberExpr*>(expr.getObject())) {
+        if (const auto* root_id = dynamic_cast<const ast::IdentExpr*>(obj_mem->getObject())) {
+            if (root_id->getName() == "io" && obj_mem->getMemberName() == "Color") {
+                is_color_enum = true;
+            }
+        }
+    }
+    if (is_color_enum) {
+        return Operand::create_var("::keet::io::Color::" + expr.getMemberName(), typechecker::Type::custom("io.Color"));
+    }
+
     Operand obj = lower_expression(*expr.getObject());
     Operand dest = current_fn_->create_temp(nullptr);
     emit(std::make_unique<MemberLoadInst>(dest, obj, expr.getMemberName()));

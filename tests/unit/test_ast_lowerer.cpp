@@ -336,3 +336,60 @@ TEST_CASE("AST lowerer translates module globals, calls and collections", "[ast_
     CHECK(text.find("array_construct [1, 2, 3]") != std::string::npos);
     CHECK(text.find("arr[0]") != std::string::npos);
 }
+
+TEST_CASE("AST lowerer translates standard io module calls and color expressions", "[ast_lowerer][io]") {
+    SECTION("Translates io print, println, input, and Color member accesses") {
+        std::string src = R"(
+            import io;
+
+            fn run_io(): void {
+                io.print("Hello, ", 42);
+                io.println("Done", io.Color.Green);
+                let s: string = io.input("Enter name: ");
+            }
+        )";
+        auto ast = parse_source(src, "io_test");
+        AstLowerer lowerer;
+        auto mod = lowerer.lower_module(ast);
+
+        REQUIRE(mod != nullptr);
+        Function* fn = mod->find_function("run_io");
+        REQUIRE(fn != nullptr);
+
+        std::string err;
+        CHECK(fn->validate_cfg(err));
+
+        std::string ir_text = fn->to_string();
+        CHECK(ir_text.find("call @keet.io.print") != std::string::npos);
+        CHECK(ir_text.find("call @keet.io.println") != std::string::npos);
+        CHECK(ir_text.find("::keet::io::Color::Green") != std::string::npos);
+        CHECK(ir_text.find("call @keet.io.input") != std::string::npos);
+    }
+
+    SECTION("Translates selective imports from io module") {
+        std::string src = R"(
+            from "io" import println, Color, red;
+
+            fn run_selective(): void {
+                println("Alert", Color.Red);
+                let msg: string = red("Error");
+            }
+        )";
+        auto ast = parse_source(src, "io_selective");
+        AstLowerer lowerer;
+        auto mod = lowerer.lower_module(ast);
+
+        REQUIRE(mod != nullptr);
+        Function* fn = mod->find_function("run_selective");
+        REQUIRE(fn != nullptr);
+
+        std::string err;
+        CHECK(fn->validate_cfg(err));
+
+        std::string ir_text = fn->to_string();
+        CHECK(ir_text.find("call @keet.io.println") != std::string::npos);
+        CHECK(ir_text.find("::keet::io::Color::Red") != std::string::npos);
+        CHECK(ir_text.find("call @keet.io.red") != std::string::npos);
+    }
+}
+

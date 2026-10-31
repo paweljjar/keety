@@ -212,4 +212,20 @@ TEST_CASE("Negative compiler rejection conformance: Diagnostic error codes", "[c
         CHECK(err.str().find("E4002") != std::string::npos);
         CHECK(err.str().find("error[E4002]") != std::string::npos);
     }
+
+    SECTION("Reject argument type mismatch in standard io call with E3003 in neg_io_type_mismatch") {
+        auto test_file = locate_conformance_test("negative/neg_io_type_mismatch.keet");
+        REQUIRE(!test_file.empty());
+        REQUIRE(std::filesystem::exists(test_file));
+
+        std::ostringstream out;
+        std::ostringstream err;
+        auto opts = CliDriver::parse_args({"check", test_file.string()});
+
+        int exit_code = CliDriver::run(opts, out, err);
+        CHECK(exit_code == 1);
+        CHECK(err.str().find("E3003") != std::string::npos);
+        CHECK(err.str().find("error[E3003]") != std::string::npos);
+    }
 }
+

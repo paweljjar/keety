@@ -62,6 +62,7 @@ add_executable(keety_unit_tests
     conformance/test_conformance_unions.cpp
     conformance/test_conformance_classes.cpp
     conformance/test_conformance_control_flow.cpp
+    conformance/test_conformance_io.cpp
     conformance/test_conformance_negative.cpp
 )
 

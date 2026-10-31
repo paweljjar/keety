@@ -310,6 +310,10 @@ std::string HeaderEmitter::to_cpp_type(const ast::TypeAnnotation* type, const st
     }
 
     if (const auto* cust = dynamic_cast<const ast::CustomType*>(type)) {
+        if ((cust->isQualified() && cust->getModuleQualifier() == "io" && cust->getName() == "Color") ||
+            (!cust->isQualified() && cust->getName() == "Color")) {
+            return "::keet::io::Color";
+        }
         std::string prefix;
         if (cust->isQualified()) {
             prefix = make_module_namespace(cust->getModuleQualifier()) + "::";
@@ -389,6 +393,9 @@ std::string HeaderEmitter::to_cpp_type(const typechecker::TypePtr& type, const s
     }
     case typechecker::TypeKind::Custom: {
         const auto* cust = dynamic_cast<const typechecker::CustomType*>(type.get());
+        if (cust && (cust->getName() == "Color" || cust->getName() == "io.Color")) {
+            return "::keet::io::Color";
+        }
         return cust ? cust->getName() : "auto";
     }
     case typechecker::TypeKind::Literal:
@@ -444,6 +451,18 @@ std::string HeaderEmitter::to_cpp_expr(const ast::Expr* expr) {
     }
 
     if (const auto* mem = dynamic_cast<const ast::MemberExpr*>(expr)) {
+        if (const auto* obj_id = dynamic_cast<const ast::IdentExpr*>(mem->getObject())) {
+            if (obj_id->getName() == "Color") {
+                return "::keet::io::Color::" + mem->getMemberName();
+            }
+        }
+        if (const auto* obj_mem = dynamic_cast<const ast::MemberExpr*>(mem->getObject())) {
+            if (const auto* root_id = dynamic_cast<const ast::IdentExpr*>(obj_mem->getObject())) {
+                if (root_id->getName() == "io" && obj_mem->getMemberName() == "Color") {
+                    return "::keet::io::Color::" + mem->getMemberName();
+                }
+            }
+        }
         return to_cpp_expr(mem->getObject()) + "." + mem->getMemberName();
     }
 

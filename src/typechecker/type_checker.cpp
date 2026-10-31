@@ -1644,23 +1644,27 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
             if (modPath == "io" || modPath == "std.io" || modPath == "keet.io") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "io";
-                    auto modSym = std::make_shared<sema::Symbol>(boundName, sema::SymbolKind::Module, importDecl->getSpan());
-                    modSym->setExported(importDecl->isReExported());
-                    auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, modSym, emitter_);
-                    if (!res.success) hasErrors_ = true;
+                    if (!targetScope->lookupCurrent(boundName)) {
+                        auto modSym = std::make_shared<sema::Symbol>(boundName, sema::SymbolKind::Module, importDecl->getSpan());
+                        modSym->setExported(importDecl->isReExported());
+                        auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, modSym, emitter_);
+                        if (!res.success) hasErrors_ = true;
+                    }
                 } else {
                     auto ioScope = sema::createStdlibModuleScope("io");
                     for (const auto& symItem : importDecl->getSymbols()) {
                         auto exportedSym = ioScope->lookupCurrent(symItem.originalName);
                         if (exportedSym) {
                             std::string importAsName = symItem.getEffectiveName();
-                            auto importedSym = std::make_shared<sema::Symbol>(
-                                importAsName, exportedSym->getKind(), symItem.span
-                            );
-                            importedSym->setExported(importDecl->isReExported());
-                            importedSym->setIsType(exportedSym->isType());
-                            auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, importedSym, emitter_);
-                            if (!res.success) hasErrors_ = true;
+                            if (!targetScope->lookupCurrent(importAsName)) {
+                                auto importedSym = std::make_shared<sema::Symbol>(
+                                    importAsName, exportedSym->getKind(), symItem.span
+                                );
+                                importedSym->setExported(importDecl->isReExported());
+                                importedSym->setIsType(exportedSym->isType());
+                                auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, importedSym, emitter_);
+                                if (!res.success) hasErrors_ = true;
+                            }
                         } else {
                             if (emitter_) {
                                 emitter_->report(diag::Diagnostic::makeError(

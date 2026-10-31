@@ -262,7 +262,11 @@ std::string InvokeInst::to_string() const {
     if (dest_.has_value()) {
         ss << dest_->to_string() << " = ";
     }
-    ss << "invoke @" << callee_ << "(";
+    std::string target = callee_;
+    if (!target.empty() && target.front() != '@') {
+        target = "@" + target;
+    }
+    ss << "invoke " << target << "(";
     for (size_t i = 0; i < args_.size(); ++i) {
         if (i > 0) ss << ", ";
         ss << args_[i].to_string();
@@ -381,7 +385,11 @@ std::string CallInst::to_string() const {
     if (dest_.has_value()) {
         ss << dest_->to_string() << " = ";
     }
-    ss << "call @" << callee_ << "(";
+    std::string target = callee_;
+    if (!target.empty() && target.front() != '@') {
+        target = "@" + target;
+    }
+    ss << "call " << target << "(";
     for (size_t i = 0; i < args_.size(); ++i) {
         if (i > 0) ss << ", ";
         ss << args_[i].to_string();

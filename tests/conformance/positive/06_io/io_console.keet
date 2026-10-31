@@ -1,0 +1,31 @@
+import io;
+
+fn main(): int {
+    io.print("KeetScript standard I/O test running...\n");
+    io.print("Primitives: ", 123, " ", 45.67, " ", true, " ", 'K', "\n");
+    io.println("Line with trailing color", io.Color.Green);
+    
+    let styled_ok: string = io.green("SUCCESS");
+    let styled_warn: string = io.yellow("WARNING");
+    let styled_bold: string = io.bold("BOLD");
+    io.println("Status:", styled_ok, styled_warn, styled_bold);
+
+    let line1: string = io.readln();
+    if (line1 != "hello keetscript") {
+        return 1;
+    }
+
+    let line2: string = io.input("Enter value: ");
+    if (line2 != "sample input") {
+        return 2;
+    }
+
+    let defaultColor: io.Color = io.Color.Default;
+    let redColor: io.Color = io.Color.Red;
+    if (defaultColor == redColor) {
+        return 3;
+    }
+
+    io.println("All standard I/O conformance checks passed!");
+    return 0;
+}
