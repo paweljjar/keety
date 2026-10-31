@@ -54,6 +54,7 @@ add_executable(keety_unit_tests
     unit/test_header_emitter.cpp
     unit/test_cpp_emitter.cpp
     unit/test_toolchain_detector.cpp
+    unit/test_toolchain_driver.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE

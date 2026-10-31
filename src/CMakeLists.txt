@@ -30,6 +30,7 @@ add_library(keety_core STATIC
     emitter/header_emitter.cpp
     emitter/cpp_emitter.cpp
     driver/toolchain_detector.cpp
+    driver/toolchain_driver.cpp
 )
 
 target_include_directories(keety_core PUBLIC
