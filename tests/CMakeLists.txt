@@ -53,6 +53,7 @@ add_executable(keety_unit_tests
     unit/test_recursive_boxing.cpp
     unit/test_header_emitter.cpp
     unit/test_cpp_emitter.cpp
+    unit/test_toolchain_detector.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE

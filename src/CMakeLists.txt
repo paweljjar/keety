@@ -29,6 +29,7 @@ add_library(keety_core STATIC
     ir/recursive_boxing.cpp
     emitter/header_emitter.cpp
     emitter/cpp_emitter.cpp
+    driver/toolchain_detector.cpp
 )
 
 target_include_directories(keety_core PUBLIC

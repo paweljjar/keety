@@ -126,7 +126,7 @@ This document specifies the operational development plan for the `keety` compile
 - [x] **Task 5.2.3:** Emit root `main(int argc, char* argv[])` with uncaught `keet::error` and `std::exception` handlers.
 
 #### **Phase 5.3: Native Toolchain Driver**
-- [ ] **Task 5.3.1:** Detect platform C++ toolchain (`clang++`, `g++`, `cl.exe`).
+- [x] **Task 5.3.1:** Detect platform C++ toolchain (`clang++`, `g++`, `cl.exe`).
 - [ ] **Task 5.3.2:** Execute native compiler invocations with `-std=c++17`, optimization level (`-O3`), and `-fwrapv`.
 - [ ] **Task 5.3.3:** Link object files into final executable binaries or shared libraries.
 
