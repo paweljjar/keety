@@ -13,13 +13,63 @@
 #include <keety/typechecker/type_checker.hpp>
 #include <keety/version.hpp>
 
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 
+#if !defined(_WIN32)
+#include <sys/wait.h>
+#endif
+
 namespace keety::driver {
 
 namespace {
+
+std::string quote_arg(const std::string& arg) {
+    if (arg.empty()) {
+        return "\"\"";
+    }
+    bool needs_quote = false;
+    for (char c : arg) {
+        if (c == ' ' || c == '\t' || c == '\"' || c == '(' || c == ')') {
+            needs_quote = true;
+            break;
+        }
+    }
+    if (!needs_quote) {
+        return arg;
+    }
+    std::string result = "\"";
+    for (char c : arg) {
+        if (c == '\"') {
+            result += "\\\"";
+        } else {
+            result += c;
+        }
+    }
+    result += "\"";
+    return result;
+}
+
+std::filesystem::path find_runtime_directory() {
+    const char* env_dir = std::getenv("KEETY_RUNTIME_DIR");
+    if (env_dir && std::filesystem::exists(std::filesystem::path(env_dir) / "keet" / "runtime.hpp")) {
+        return env_dir;
+    }
+    std::filesystem::path curr = std::filesystem::current_path();
+    for (int i = 0; i < 5; ++i) {
+        std::filesystem::path candidate = curr / "runtime";
+        if (std::filesystem::exists(candidate / "keet" / "runtime.hpp")) {
+            return candidate;
+        }
+        if (!curr.has_parent_path() || curr.parent_path() == curr) {
+            break;
+        }
+        curr = curr.parent_path();
+    }
+    return "";
+}
 
 void dump_indent(std::ostream& os, int indent) {
     for (int i = 0; i < indent; ++i) {
@@ -654,6 +704,227 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
     return 0;
 }
 
+std::optional<std::filesystem::path> CliDriver::build_binary(
+    const CliOptions& options, std::ostream& out, std::ostream& err) {
+
+    (void)out;
+    if (options.input_file.empty()) {
+        err << "error: 'keety " << to_string(options.command) << "' requires a target input file.\n"
+            << "usage: keety " << to_string(options.command) << " <file.keet>\n";
+        return std::nullopt;
+    }
+
+    if (!std::filesystem::exists(options.input_file)) {
+        err << "error: input file not found: " << options.input_file.string() << "\n";
+        return std::nullopt;
+    }
+
+    diag::SourceManager sm;
+    diag::DiagnosticEmitter emitter(sm, options.color_mode);
+
+    std::filesystem::path project_root = options.input_file.has_parent_path()
+        ? options.input_file.parent_path()
+        : std::filesystem::current_path();
+
+    resolver::ModulePathResolver path_resolver(project_root, &emitter);
+    resolver::ModuleGraph graph;
+
+    bool graph_ok = graph.buildGraph(options.input_file, sm, path_resolver, &emitter);
+    if (!graph_ok || emitter.hasErrors()) {
+        for (const auto& d : emitter.getDiagnostics()) {
+            err << emitter.format(d);
+        }
+        return std::nullopt;
+    }
+
+    // Check for circular dependency cycles
+    resolver::CycleDetector cycle_detector(graph, &emitter);
+    if (!cycle_detector.detectCycles() || emitter.hasErrors()) {
+        for (const auto& d : emitter.getDiagnostics()) {
+            err << emitter.format(d);
+        }
+        return std::nullopt;
+    }
+
+    // Topologically sort module dependency graph
+    resolver::TopologicalSorter sorter(graph);
+    std::filesystem::path canonical_entry = std::filesystem::weakly_canonical(options.input_file);
+    auto ordered_nodes = sorter.sortNodes(canonical_entry.string());
+
+    auto universe = std::make_shared<sema::Scope>(sema::ScopeKind::Universe);
+    sema::registerUniverseSymbols(*universe);
+
+    // 1. Semantic and type checking across all modules
+    for (const auto* node : ordered_nodes) {
+        if (!node || !node->ast) {
+            continue;
+        }
+
+        auto module_scope = std::make_shared<sema::Scope>(sema::ScopeKind::Module, universe);
+        typechecker::TypeChecker checker(&emitter);
+        checker.checkTypes(*node->ast, module_scope.get());
+
+        if (emitter.hasErrors()) {
+            for (const auto& d : emitter.getDiagnostics()) {
+                err << emitter.format(d);
+            }
+            return std::nullopt;
+        }
+    }
+
+    // 2. Determine build directory and target binary path
+    std::filesystem::path target_binary;
+    std::filesystem::path build_dir;
+
+    std::string exec_ext = ToolchainDriver::get_executable_extension();
+
+    if (!options.output_dir.empty()) {
+        if (std::filesystem::is_directory(options.output_dir) ||
+            options.output_dir.string().back() == '/' ||
+            options.output_dir.string().back() == '\\') {
+            target_binary = options.output_dir / (options.input_file.stem().string() + exec_ext);
+            build_dir = options.output_dir / ".keety_build";
+        } else {
+            target_binary = options.output_dir;
+            build_dir = target_binary.has_parent_path()
+                ? (target_binary.parent_path() / ".keety_build")
+                : (std::filesystem::current_path() / ".keety_build");
+        }
+    } else {
+        std::filesystem::path parent = options.input_file.has_parent_path()
+            ? options.input_file.parent_path()
+            : std::filesystem::current_path();
+        target_binary = parent / (options.input_file.stem().string() + exec_ext);
+        build_dir = parent / ".keety_build";
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(build_dir, ec);
+
+    // 3. Emit C++ headers and implementations
+    std::vector<std::filesystem::path> generated_cpp_files;
+
+    for (const auto* node : ordered_nodes) {
+        if (!node || !node->ast) {
+            continue;
+        }
+
+        ir::AstLowerer lowerer(&emitter);
+        auto ir_mod = lowerer.lower_module(*node->ast);
+        if (emitter.hasErrors() || !ir_mod) {
+            for (const auto& d : emitter.getDiagnostics()) {
+                err << emitter.format(d);
+            }
+            return std::nullopt;
+        }
+
+        // Header emission
+        emitter::HeaderEmitter header_emitter(*node->ast, *ir_mod);
+        std::string hpp_content = header_emitter.emit();
+        std::filesystem::path hpp_path = build_dir / (node->moduleName + ".hpp");
+        std::ofstream hpp_file(hpp_path);
+        hpp_file << hpp_content;
+
+        // C++ source emission
+        emitter::CppEmitterOptions cpp_opts;
+        cpp_opts.header_include = "\"" + node->moduleName + ".hpp\"";
+        if (node->canonicalPath == canonical_entry.string()) {
+            cpp_opts.is_root_module = true;
+        }
+        emitter::CppEmitter cpp_emitter(*node->ast, *ir_mod, cpp_opts);
+        std::string cpp_content = cpp_emitter.emit();
+        std::filesystem::path cpp_path = build_dir / (node->moduleName + ".cpp");
+        std::ofstream cpp_file(cpp_path);
+        cpp_file << cpp_content;
+
+        generated_cpp_files.push_back(cpp_path);
+    }
+
+    // 4. Native Toolchain compilation & linking
+    ToolchainDriver toolchain_driver;
+    if (!options.cxx_compiler.empty()) {
+        auto custom_tc = ToolchainDetector::probe(options.cxx_compiler);
+        if (!custom_tc || !custom_tc->is_valid()) {
+            err << "error: specified C++ compiler '" << options.cxx_compiler << "' is invalid or not found.\n";
+            return std::nullopt;
+        }
+        toolchain_driver.set_toolchain(*custom_tc);
+    }
+
+    if (!toolchain_driver.has_valid_toolchain()) {
+        err << "error: no suitable native C++ toolchain found (clang++, g++, cl.exe).\n";
+        return std::nullopt;
+    }
+
+    CompileOptions comp_opts;
+    comp_opts.opt_level = options.opt_level;
+    comp_opts.wrapv = options.wrapv;
+    comp_opts.cpp_standard = "c++17";
+    comp_opts.compile_only = true;
+    comp_opts.include_directories.push_back(build_dir);
+
+    auto runtime_dir = find_runtime_directory();
+    if (!runtime_dir.empty()) {
+        comp_opts.include_directories.push_back(runtime_dir);
+    }
+
+    std::vector<std::filesystem::path> object_files;
+    std::string obj_ext = ToolchainDriver::get_object_file_extension(toolchain_driver.get_toolchain().kind);
+
+    for (const auto& cpp_src : generated_cpp_files) {
+        std::filesystem::path obj_path = build_dir / (cpp_src.stem().string() + obj_ext);
+        auto comp_res = toolchain_driver.compile(cpp_src, obj_path, comp_opts);
+        if (!comp_res.success) {
+            err << "error: compilation failed for '" << cpp_src.filename().string() << "':\n"
+                << comp_res.output << "\n";
+            return std::nullopt;
+        }
+        object_files.push_back(obj_path);
+    }
+
+    LinkOptions link_opts;
+    link_opts.kind = BinaryKind::Executable;
+    auto link_res = toolchain_driver.link_executable(object_files, target_binary, link_opts);
+    if (!link_res.success) {
+        err << "error: linking failed for '" << target_binary.filename().string() << "':\n"
+            << link_res.output << "\n";
+        return std::nullopt;
+    }
+
+    return target_binary;
+}
+
+int CliDriver::execute_build(const CliOptions& options, std::ostream& out, std::ostream& err) {
+    auto bin = build_binary(options, out, err);
+    if (!bin) {
+        return 1;
+    }
+    if (options.verbose) {
+        out << "Built executable: " << bin->string() << "\n";
+    }
+    return 0;
+}
+
+int CliDriver::execute_run(const CliOptions& options, std::ostream& out, std::ostream& err) {
+    auto bin = build_binary(options, out, err);
+    if (!bin) {
+        return 1;
+    }
+
+    std::string cmd = quote_arg(bin->string());
+    for (const auto& a : options.run_args) {
+        cmd += " " + quote_arg(a);
+    }
+
+    int run_status = std::system(cmd.c_str());
+#if !defined(_WIN32)
+    if (WIFEXITED(run_status)) {
+        return WEXITSTATUS(run_status);
+    }
+#endif
+    return run_status;
+}
+
 int CliDriver::run(const CliOptions& options, std::ostream& out, std::ostream& err) {
     switch (options.command) {
     case CliCommand::Help:
@@ -667,11 +938,9 @@ int CliDriver::run(const CliOptions& options, std::ostream& out, std::ostream& e
     case CliCommand::Emit:
         return execute_emit(options, out, err);
     case CliCommand::Build:
-        err << "error: 'keety build' is not yet implemented.\n";
-        return 1;
+        return execute_build(options, out, err);
     case CliCommand::Run:
-        err << "error: 'keety run' is not yet implemented.\n";
-        return 1;
+        return execute_run(options, out, err);
     case CliCommand::Unknown:
         err << "error: unknown command or missing arguments.\n"
             << "Run 'keety --help' for usage.\n";

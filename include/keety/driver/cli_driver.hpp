@@ -71,6 +71,15 @@ public:
     /// Executes `keety emit <file> (--cpp | --hpp | --ast | --ir)` emission pipeline
     static int execute_emit(const CliOptions& options, std::ostream& out = std::cout, std::ostream& err = std::cerr);
 
+    /// Executes `keety build <file>` compilation and native linking pipeline
+    static int execute_build(const CliOptions& options, std::ostream& out = std::cout, std::ostream& err = std::cerr);
+
+    /// Executes `keety run <file> [-- args]` compilation, linking, and execution pipeline
+    static int execute_run(const CliOptions& options, std::ostream& out = std::cout, std::ostream& err = std::cerr);
+
+    /// Helper to compile and link to a binary, returning target binary path if successful
+    static std::optional<std::filesystem::path> build_binary(const CliOptions& options, std::ostream& out, std::ostream& err);
+
     /// Prints CLI help documentation
     static void print_help(std::ostream& out);
 

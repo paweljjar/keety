@@ -351,3 +351,99 @@ TEST_CASE("CLI emit generates AST, IR, HPP and CPP to stream and directory", "[d
     std::error_code ec;
     std::filesystem::remove_all(temp_dir, ec);
 }
+
+TEST_CASE("CLI build compiles native executable and CLI run executes it", "[driver][cli]") {
+    ToolchainDriver driver;
+    if (!driver.has_valid_toolchain()) {
+        return;
+    }
+
+    auto temp_dir = std::filesystem::temp_directory_path() / "keety_cli_build_run_test";
+    std::filesystem::create_directories(temp_dir);
+
+    auto src_file = temp_dir / "runner.keet";
+    {
+        std::ofstream out(src_file);
+        out << "fn main(): int {\n"
+            << "    return 42;\n"
+            << "}\n";
+    }
+
+    SECTION("Build produces executable binary") {
+        auto bin_path = temp_dir / ("runner_app" + ToolchainDriver::get_executable_extension());
+        std::ostringstream out;
+        std::ostringstream err;
+        CliOptions opts;
+        opts.command = CliCommand::Build;
+        opts.input_file = src_file;
+        opts.output_dir = bin_path;
+        opts.verbose = true;
+
+        int build_res = CliDriver::run(opts, out, err);
+        CHECK(build_res == 0);
+        REQUIRE(std::filesystem::exists(bin_path));
+
+        std::string run_cmd = "\"" + bin_path.string() + "\"";
+        int sys_code = std::system(run_cmd.c_str());
+#if !defined(_WIN32)
+        if (WIFEXITED(sys_code)) {
+            sys_code = WEXITSTATUS(sys_code);
+        }
+#endif
+        CHECK(sys_code == 42);
+    }
+
+    SECTION("Run compiles and directly executes program") {
+        std::ostringstream out;
+        std::ostringstream err;
+        CliOptions opts;
+        opts.command = CliCommand::Run;
+        opts.input_file = src_file;
+
+        int run_res = CliDriver::run(opts, out, err);
+        CHECK(run_res == 42);
+    }
+
+    SECTION("Build handles multi-module imports") {
+        auto helper_file = temp_dir / "helper.keet";
+        {
+            std::ofstream out(helper_file);
+            out << "fn get_code(): int {\n"
+                << "    return 10;\n"
+                << "}\n";
+        }
+
+        auto entry_file = temp_dir / "entry.keet";
+        {
+            std::ofstream out(entry_file);
+            out << "import \"./helper\";\n"
+                << "fn main(): int {\n"
+                << "    return 0;\n"
+                << "}\n";
+        }
+
+        auto bin_path = temp_dir / ("multi_app" + ToolchainDriver::get_executable_extension());
+        std::ostringstream out;
+        std::ostringstream err;
+        CliOptions opts;
+        opts.command = CliCommand::Build;
+        opts.input_file = entry_file;
+        opts.output_dir = bin_path;
+
+        int build_res = CliDriver::run(opts, out, err);
+        CHECK(build_res == 0);
+        REQUIRE(std::filesystem::exists(bin_path));
+
+        std::string run_cmd = "\"" + bin_path.string() + "\"";
+        int sys_code = std::system(run_cmd.c_str());
+#if !defined(_WIN32)
+        if (WIFEXITED(sys_code)) {
+            sys_code = WEXITSTATUS(sys_code);
+        }
+#endif
+        CHECK(sys_code == 0);
+    }
+
+    std::error_code ec;
+    std::filesystem::remove_all(temp_dir, ec);
+}

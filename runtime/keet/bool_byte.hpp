@@ -31,8 +31,24 @@ struct BoolByte {
         return (val != 0) == b;
     }
 
-    [[nodiscard]] constexpr auto operator<=>(const BoolByte& other) const noexcept {
-        return (val != 0) <=> (other.val != 0);
+    [[nodiscard]] constexpr bool operator!=(const BoolByte& other) const noexcept {
+        return (val != 0) != (other.val != 0);
+    }
+
+    [[nodiscard]] constexpr bool operator<(const BoolByte& other) const noexcept {
+        return (val != 0) < (other.val != 0);
+    }
+
+    [[nodiscard]] constexpr bool operator<=(const BoolByte& other) const noexcept {
+        return (val != 0) <= (other.val != 0);
+    }
+
+    [[nodiscard]] constexpr bool operator>(const BoolByte& other) const noexcept {
+        return (val != 0) > (other.val != 0);
+    }
+
+    [[nodiscard]] constexpr bool operator>=(const BoolByte& other) const noexcept {
+        return (val != 0) >= (other.val != 0);
     }
 };
 
