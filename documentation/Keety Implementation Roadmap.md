@@ -146,7 +146,7 @@ This document specifies the operational development plan for the `keety` compile
 - [x] **Task 6.2.3:** Positive conformance tests: Unions and flow narrowing (`union_flow_narrowing`, `union_narrowing_invalidation`).
 - [x] **Task 6.2.4:** Positive conformance tests: OOP, inheritance, and constructors (`class_inheritance_constructor`).
 - [x] **Task 6.2.5:** Positive conformance tests: Control flow and error recovery (`switch_named_loop_break`, `zonk_block_yield`).
-- [ ] **Task 6.2.6:** Negative compiler rejection tests: Verify exact diagnostic error codes (`neg_shadowing` $\rightarrow$ `E2001`, `neg_mut_alias` $\rightarrow$ `E4001`, `neg_circular_module` $\rightarrow$ `E1001`, etc.).
+- [x] **Task 6.2.6:** Negative compiler rejection tests: Verify exact diagnostic error codes (`neg_shadowing` $\rightarrow$ `E2001`, `neg_mut_alias` $\rightarrow$ `E4001`, `neg_circular_module` $\rightarrow$ `E1001`, etc.).
 
 #### **Phase 6.3: Reference Performance Benchmarks (`keety test --benchmarks`)**
 - [ ] **Task 6.3.1:** Benchmark 1: *Heavy Numeric Vector Processing* (target: ratio $\le 1.02\times$ C++17).

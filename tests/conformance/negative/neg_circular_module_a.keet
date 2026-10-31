@@ -1,0 +1,3 @@
+import "./neg_circular_module_b";
+
+export let aVal: int = 10;

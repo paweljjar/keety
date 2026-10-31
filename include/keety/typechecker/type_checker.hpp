@@ -214,6 +214,7 @@ private:
     void reportMapElementMutableBorrow(std::string_view path, diag::SourceSpan span);
     void reportAsyncMutableParameter(std::string_view paramName, diag::SourceSpan span);
     void reportDefaultArgMutableBorrow(std::string_view paramName, diag::SourceSpan span);
+    void reportCannotAssignToConstant(std::string_view name, diag::SourceSpan span);
     void checkTypeAnnotationValidity(const ast::TypeAnnotation* annot);
 };
 

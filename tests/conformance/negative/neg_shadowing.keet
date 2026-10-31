@@ -1,0 +1,5 @@
+fn testShadow(val: int): void {
+    if (val > 0) {
+        let val: int = 10;
+    }
+}

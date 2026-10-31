@@ -1,4 +1,5 @@
 #include <keety/typechecker/type_checker.hpp>
+#include <keety/sema/shadow_checker.hpp>
 #include <keety/sema/universe.hpp>
 
 #include <algorithm>
@@ -1314,6 +1315,28 @@ void TypeChecker::reportDefaultArgMutableBorrow(
     }
 }
 
+void TypeChecker::reportCannotAssignToConstant(std::string_view name, diag::SourceSpan span) {
+    hasErrors_ = true;
+    if (emitter_ != nullptr) {
+        auto d = diag::Diagnostic::makeError(
+            diag::ErrorCode::CannotAssignToConstant,
+            "cannot assign to immutable constant '" + std::string(name) + "'",
+            span.isValid() ? span.start : diag::SourceLocation{});
+        if (span.isValid()) {
+            d.labels.push_back(diag::DiagnosticLabel{
+                span,
+                "cannot reassign to constant '" + std::string(name) + "'",
+                true
+            });
+        }
+        d.footers.push_back(diag::DiagnosticFooter{
+            diag::DiagnosticFooter::Kind::Help,
+            "constants declared with 'const' or 'define' are immutable; consider declaring with 'let' instead"
+        });
+        emitter_->report(d);
+    }
+}
+
 void TypeChecker::checkTypeAnnotationValidity(const ast::TypeAnnotation* annot) {
     if (!annot) return;
     if (const auto* fnType = dynamic_cast<const ast::FunctionType*>(annot)) {
@@ -1406,28 +1429,33 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
             sym->setTypeAnnotation(varDecl->getType());
             sym->setAstNode(varDecl);
             sym->setMutable(true);
-            targetScope->define(sym);
+            auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, sym, emitter_);
+            if (!res.success) hasErrors_ = true;
         } else if (const auto* constDecl = dynamic_cast<const ast::ConstDecl*>(decl.get())) {
             auto sym = std::make_shared<sema::Symbol>(constDecl->getName(), sema::SymbolKind::Constant, constDecl->getSpan());
             sym->setTypeAnnotation(constDecl->getType());
             sym->setAstNode(constDecl);
             sym->setConst(true);
-            targetScope->define(sym);
+            auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, sym, emitter_);
+            if (!res.success) hasErrors_ = true;
         } else if (const auto* defDecl = dynamic_cast<const ast::DefineDecl*>(decl.get())) {
             auto sym = std::make_shared<sema::Symbol>(defDecl->getName(), sema::SymbolKind::Define, defDecl->getSpan());
             sym->setTypeAnnotation(defDecl->getType());
             sym->setAstNode(defDecl);
             sym->setConst(true);
-            targetScope->define(sym);
+            auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, sym, emitter_);
+            if (!res.success) hasErrors_ = true;
         } else if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
             auto sym = std::make_shared<sema::Symbol>(fnDecl->getName(), sema::SymbolKind::Function, fnDecl->getSpan());
             sym->setTypeAnnotation(fnDecl->getReturnType());
             sym->setAstNode(fnDecl);
-            targetScope->define(sym);
+            auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, sym, emitter_);
+            if (!res.success) hasErrors_ = true;
         } else if (const auto* clsDecl = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
             auto sym = std::make_shared<sema::Symbol>(clsDecl->getName(), sema::SymbolKind::Class, clsDecl->getSpan());
             sym->setAstNode(clsDecl);
-            targetScope->define(sym);
+            auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, sym, emitter_);
+            if (!res.success) hasErrors_ = true;
         }
     }
 
@@ -1445,11 +1473,14 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
     if (const auto* varDecl = dynamic_cast<const ast::VarDecl*>(&decl)) {
         checkTypeAnnotationValidity(varDecl->getType());
         auto declType = Type::fromAnnotation(varDecl->getType());
-        auto sym = std::make_shared<sema::Symbol>(varDecl->getName(), sema::SymbolKind::Variable, varDecl->getSpan());
-        sym->setTypeAnnotation(varDecl->getType());
-        sym->setAstNode(varDecl);
-        sym->setMutable(true);
-        scope.define(sym);
+        if (!scope.isModule()) {
+            auto sym = std::make_shared<sema::Symbol>(varDecl->getName(), sema::SymbolKind::Variable, varDecl->getSpan());
+            sym->setTypeAnnotation(varDecl->getType());
+            sym->setAstNode(varDecl);
+            sym->setMutable(true);
+            auto res = sema::ShadowChecker::defineWithDiagnostics(scope, sym, emitter_);
+            if (!res.success) hasErrors_ = true;
+        }
 
         if (varDecl->hasInitializer()) {
             auto initType = inferType(*varDecl->getInitializer(), scope, declType);
@@ -1458,11 +1489,14 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
     } else if (const auto* constDecl = dynamic_cast<const ast::ConstDecl*>(&decl)) {
         checkTypeAnnotationValidity(constDecl->getType());
         auto declType = Type::fromAnnotation(constDecl->getType());
-        auto sym = std::make_shared<sema::Symbol>(constDecl->getName(), sema::SymbolKind::Constant, constDecl->getSpan());
-        sym->setTypeAnnotation(constDecl->getType());
-        sym->setAstNode(constDecl);
-        sym->setConst(true);
-        scope.define(sym);
+        if (!scope.isModule()) {
+            auto sym = std::make_shared<sema::Symbol>(constDecl->getName(), sema::SymbolKind::Constant, constDecl->getSpan());
+            sym->setTypeAnnotation(constDecl->getType());
+            sym->setAstNode(constDecl);
+            sym->setConst(true);
+            auto res = sema::ShadowChecker::defineWithDiagnostics(scope, sym, emitter_);
+            if (!res.success) hasErrors_ = true;
+        }
 
         if (constDecl->getInitializer()) {
             auto initType = inferType(*constDecl->getInitializer(), scope, declType);
@@ -1471,11 +1505,14 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
     } else if (const auto* defDecl = dynamic_cast<const ast::DefineDecl*>(&decl)) {
         checkTypeAnnotationValidity(defDecl->getType());
         auto declType = Type::fromAnnotation(defDecl->getType());
-        auto sym = std::make_shared<sema::Symbol>(defDecl->getName(), sema::SymbolKind::Define, defDecl->getSpan());
-        sym->setTypeAnnotation(defDecl->getType());
-        sym->setAstNode(defDecl);
-        sym->setConst(true);
-        scope.define(sym);
+        if (!scope.isModule()) {
+            auto sym = std::make_shared<sema::Symbol>(defDecl->getName(), sema::SymbolKind::Define, defDecl->getSpan());
+            sym->setTypeAnnotation(defDecl->getType());
+            sym->setAstNode(defDecl);
+            sym->setConst(true);
+            auto res = sema::ShadowChecker::defineWithDiagnostics(scope, sym, emitter_);
+            if (!res.success) hasErrors_ = true;
+        }
 
         if (defDecl->getValue()) {
             auto initType = inferType(*defDecl->getValue(), scope, declType);
@@ -1501,7 +1538,8 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
             pSym->setTypeAnnotation(param.type.get());
             pSym->setMutable(param.isMut);
             pSym->setConst(!param.isMut);
-            fnScope->define(pSym);
+            auto res = sema::ShadowChecker::defineWithDiagnostics(*fnScope, pSym, emitter_);
+            if (!res.success) hasErrors_ = true;
 
             if (param.defaultValue) {
                 auto defType = inferType(*param.defaultValue, *fnScope, pType);
@@ -1970,20 +2008,23 @@ bool TypeChecker::checkZeroCoercion(const ast::Stmt& stmt, sema::Scope& scope) {
                 auto kSym = std::make_shared<sema::Symbol>(forInStmt->getKeyName(), sema::SymbolKind::Variable, forInStmt->getSpan());
                 kSym->setTypeAnnotation(forInStmt->getKeyType());
                 kSym->setMutable(true);
-                forScope->define(kSym);
+                auto res = sema::ShadowChecker::defineWithDiagnostics(*forScope, kSym, emitter_);
+                if (!res.success) hasErrors_ = true;
             }
             if (forInStmt->getValueType()) {
                 auto vSym = std::make_shared<sema::Symbol>(forInStmt->getValueName(), sema::SymbolKind::Variable, forInStmt->getSpan());
                 vSym->setTypeAnnotation(forInStmt->getValueType());
                 vSym->setMutable(true);
-                forScope->define(vSym);
+                auto res = sema::ShadowChecker::defineWithDiagnostics(*forScope, vSym, emitter_);
+                if (!res.success) hasErrors_ = true;
             }
         } else {
             if (forInStmt->getValueType()) {
                 auto vSym = std::make_shared<sema::Symbol>(forInStmt->getValueName(), sema::SymbolKind::Variable, forInStmt->getSpan());
                 vSym->setTypeAnnotation(forInStmt->getValueType());
                 vSym->setMutable(true);
-                forScope->define(vSym);
+                auto res = sema::ShadowChecker::defineWithDiagnostics(*forScope, vSym, emitter_);
+                if (!res.success) hasErrors_ = true;
             }
         }
         if (forInStmt->getCollection()) {
@@ -2155,6 +2196,10 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             std::string varName;
             if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(binary->getLeft())) {
                 varName = ident->getName();
+                auto sym = scope.lookup(varName);
+                if (sym && (sym->isConstant() || sym->isConst())) {
+                    reportCannotAssignToConstant(varName, binary->getLeft()->getSpan());
+                }
             }
 
             TypePtr leftType = nullptr;
@@ -2608,7 +2653,8 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             pSym->setTypeAnnotation(p.type.get());
             pSym->setMutable(p.isMut);
             pSym->setConst(!p.isMut);
-            fnScope->define(pSym);
+            auto res = sema::ShadowChecker::defineWithDiagnostics(*fnScope, pSym, emitter_);
+            if (!res.success) hasErrors_ = true;
 
             if (p.defaultValue) {
                 auto defType = inferType(*p.defaultValue, *fnScope, pType);
@@ -2692,7 +2738,8 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             auto blockScope = scope.createChild(sema::ScopeKind::Block);
             if (!zonk->getErrorVarName().empty() && zonk->getErrorVarName() != "_") {
                 auto errSym = std::make_shared<sema::Symbol>(zonk->getErrorVarName(), sema::SymbolKind::Variable, zonk->getSpan());
-                blockScope->define(errSym);
+                auto res = sema::ShadowChecker::defineWithDiagnostics(*blockScope, errSym, emitter_);
+                if (!res.success) hasErrors_ = true;
                 blockScope->setNarrowedType(zonk->getErrorVarName(), Type::errorType());
             }
             checkZeroCoercion(*zonk->getRecoveryBlock(), *blockScope);

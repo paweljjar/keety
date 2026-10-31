@@ -1,0 +1,4 @@
+fn testConstAssign(): void {
+    const maxRetries: int = 3;
+    maxRetries = 5;
+}
