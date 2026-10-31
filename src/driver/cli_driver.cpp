@@ -268,6 +268,34 @@ std::string dump_ast(const parser::ModuleAST& ast) {
     return ss.str();
 }
 
+bool parse_opt_level(std::string_view val, OptimizationLevel& level) {
+    if (val == "0" || val == "O0") {
+        level = OptimizationLevel::O0;
+        return true;
+    }
+    if (val == "1" || val == "O1") {
+        level = OptimizationLevel::O1;
+        return true;
+    }
+    if (val == "2" || val == "O2") {
+        level = OptimizationLevel::O2;
+        return true;
+    }
+    if (val == "3" || val == "O3") {
+        level = OptimizationLevel::O3;
+        return true;
+    }
+    if (val == "s" || val == "Os") {
+        level = OptimizationLevel::Os;
+        return true;
+    }
+    if (val == "z" || val == "Oz") {
+        level = OptimizationLevel::Oz;
+        return true;
+    }
+    return false;
+}
+
 } // namespace
 
 std::string_view to_string(CliCommand cmd) noexcept {
@@ -376,14 +404,28 @@ CliOptions CliDriver::parse_args(const std::vector<std::string>& args) {
             options.emit_target = EmitTarget::Ast;
         } else if (arg == "--ir") {
             options.emit_target = EmitTarget::Ir;
-        } else if (arg == "-o" || arg == "--output-dir") {
+        } else if (arg == "--output-dir") {
+            if (idx + 1 < args.size()) {
+                options.output_dir = args[++idx];
+                options.output_is_dir = true;
+            }
+        } else if (arg.rfind("--output-dir=", 0) == 0) {
+            options.output_dir = arg.substr(13);
+            options.output_is_dir = true;
+        } else if (arg == "-o" || arg == "--output") {
             if (idx + 1 < args.size()) {
                 options.output_dir = args[++idx];
             }
+        } else if (arg.rfind("--output=", 0) == 0) {
+            options.output_dir = arg.substr(9);
+        } else if (arg.rfind("-o=", 0) == 0) {
+            options.output_dir = arg.substr(3);
         } else if (arg == "--cxx") {
             if (idx + 1 < args.size()) {
                 options.cxx_compiler = args[++idx];
             }
+        } else if (arg.rfind("--cxx=", 0) == 0) {
+            options.cxx_compiler = arg.substr(6);
         } else if (arg == "-O0") {
             options.opt_level = OptimizationLevel::O0;
         } else if (arg == "-O1") {
@@ -396,14 +438,12 @@ CliOptions CliDriver::parse_args(const std::vector<std::string>& args) {
             options.opt_level = OptimizationLevel::Os;
         } else if (arg == "-Oz") {
             options.opt_level = OptimizationLevel::Oz;
-        } else if (arg == "--opt" && idx + 1 < args.size()) {
-            std::string opt_val = args[++idx];
-            if (opt_val == "0") options.opt_level = OptimizationLevel::O0;
-            else if (opt_val == "1") options.opt_level = OptimizationLevel::O1;
-            else if (opt_val == "2") options.opt_level = OptimizationLevel::O2;
-            else if (opt_val == "3") options.opt_level = OptimizationLevel::O3;
-            else if (opt_val == "s") options.opt_level = OptimizationLevel::Os;
-            else if (opt_val == "z") options.opt_level = OptimizationLevel::Oz;
+        } else if ((arg == "-O" || arg == "--opt") && idx + 1 < args.size()) {
+            parse_opt_level(args[++idx], options.opt_level);
+        } else if (arg.rfind("--opt=", 0) == 0) {
+            parse_opt_level(arg.substr(6), options.opt_level);
+        } else if (arg.rfind("-O=", 0) == 0) {
+            parse_opt_level(arg.substr(3), options.opt_level);
         } else if (!arg.empty() && arg[0] != '-') {
             if (options.input_file.empty()) {
                 options.input_file = arg;
@@ -486,12 +526,23 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
     std::filesystem::path canonical_entry = std::filesystem::weakly_canonical(options.input_file);
     auto ordered_nodes = sorter.sortNodes(canonical_entry.string());
 
+    if (options.verbose) {
+        out << "[verbose] Resolved " << ordered_nodes.size() << " module(s) in dependency order:\n";
+        for (size_t i = 0; i < ordered_nodes.size(); ++i) {
+            out << "[verbose]   [" << (i + 1) << "] " << ordered_nodes[i]->moduleName << "\n";
+        }
+    }
+
     auto universe = std::make_shared<sema::Scope>(sema::ScopeKind::Universe);
     sema::registerUniverseSymbols(*universe);
 
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
             continue;
+        }
+
+        if (options.verbose) {
+            out << "[verbose] Validating semantics and lowering IR: " << node->moduleName << "\n";
         }
 
         auto module_scope = std::make_shared<sema::Scope>(sema::ScopeKind::Module, universe);
@@ -668,7 +719,8 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
         out << content;
     } else {
         std::filesystem::path dest;
-        if (std::filesystem::is_directory(options.output_dir) ||
+        if (options.output_is_dir ||
+            std::filesystem::is_directory(options.output_dir) ||
             options.output_dir.string().back() == '/' ||
             options.output_dir.string().back() == '\\') {
             std::string ext;
@@ -707,7 +759,6 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
 std::optional<std::filesystem::path> CliDriver::build_binary(
     const CliOptions& options, std::ostream& out, std::ostream& err) {
 
-    (void)out;
     if (options.input_file.empty()) {
         err << "error: 'keety " << to_string(options.command) << "' requires a target input file.\n"
             << "usage: keety " << to_string(options.command) << " <file.keet>\n";
@@ -719,12 +770,20 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
         return std::nullopt;
     }
 
+    if (options.verbose) {
+        out << "[verbose] Building project from entry: " << options.input_file.string() << "\n";
+    }
+
     diag::SourceManager sm;
     diag::DiagnosticEmitter emitter(sm, options.color_mode);
 
     std::filesystem::path project_root = options.input_file.has_parent_path()
         ? options.input_file.parent_path()
         : std::filesystem::current_path();
+
+    if (options.verbose) {
+        out << "[verbose] Project root: " << project_root.string() << "\n";
+    }
 
     resolver::ModulePathResolver path_resolver(project_root, &emitter);
     resolver::ModuleGraph graph;
@@ -750,6 +809,13 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     resolver::TopologicalSorter sorter(graph);
     std::filesystem::path canonical_entry = std::filesystem::weakly_canonical(options.input_file);
     auto ordered_nodes = sorter.sortNodes(canonical_entry.string());
+
+    if (options.verbose) {
+        out << "[verbose] Resolved " << ordered_nodes.size() << " module(s) in dependency order:\n";
+        for (size_t i = 0; i < ordered_nodes.size(); ++i) {
+            out << "[verbose]   [" << (i + 1) << "] " << ordered_nodes[i]->moduleName << "\n";
+        }
+    }
 
     auto universe = std::make_shared<sema::Scope>(sema::ScopeKind::Universe);
     sema::registerUniverseSymbols(*universe);
@@ -779,9 +845,12 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     std::string exec_ext = ToolchainDriver::get_executable_extension();
 
     if (!options.output_dir.empty()) {
-        if (std::filesystem::is_directory(options.output_dir) ||
+        std::error_code ec;
+        if (options.output_is_dir ||
+            std::filesystem::is_directory(options.output_dir) ||
             options.output_dir.string().back() == '/' ||
             options.output_dir.string().back() == '\\') {
+            std::filesystem::create_directories(options.output_dir, ec);
             target_binary = options.output_dir / (options.input_file.stem().string() + exec_ext);
             build_dir = options.output_dir / ".keety_build";
         } else {
@@ -800,6 +869,11 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
 
     std::error_code ec;
     std::filesystem::create_directories(build_dir, ec);
+
+    if (options.verbose) {
+        out << "[verbose] Target binary: " << target_binary.string() << "\n";
+        out << "[verbose] Build directory: " << build_dir.string() << "\n";
+    }
 
     // 3. Emit C++ headers and implementations
     std::vector<std::filesystem::path> generated_cpp_files;
@@ -837,6 +911,11 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
         std::ofstream cpp_file(cpp_path);
         cpp_file << cpp_content;
 
+        if (options.verbose) {
+            out << "[verbose] Emitted sources: " << hpp_path.filename().string()
+                << ", " << cpp_path.filename().string() << "\n";
+        }
+
         generated_cpp_files.push_back(cpp_path);
     }
 
@@ -849,6 +928,16 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
             return std::nullopt;
         }
         toolchain_driver.set_toolchain(*custom_tc);
+        if (options.verbose) {
+            out << "[verbose] Using specified C++ toolchain: " << custom_tc->compiler_path.string()
+                << " (" << to_string(custom_tc->kind) << " " << custom_tc->version << ")\n";
+        }
+    } else {
+        if (options.verbose && toolchain_driver.has_valid_toolchain()) {
+            const auto& tc = toolchain_driver.get_toolchain();
+            out << "[verbose] Using host C++ toolchain: " << tc.compiler_path.string()
+                << " (" << to_string(tc.kind) << " " << tc.version << ")\n";
+        }
     }
 
     if (!toolchain_driver.has_valid_toolchain()) {
@@ -863,9 +952,18 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     comp_opts.compile_only = true;
     comp_opts.include_directories.push_back(build_dir);
 
+    if (options.verbose) {
+        out << "[verbose] Optimization level: " << to_string(options.opt_level)
+            << " (flag: " << to_compiler_flag(options.opt_level, toolchain_driver.get_toolchain().kind) << ")\n";
+        out << "[verbose] Two's-complement overflow semantics: " << (options.wrapv ? "enabled" : "disabled") << "\n";
+    }
+
     auto runtime_dir = find_runtime_directory();
     if (!runtime_dir.empty()) {
         comp_opts.include_directories.push_back(runtime_dir);
+        if (options.verbose) {
+            out << "[verbose] KeetScript runtime include directory: " << runtime_dir.string() << "\n";
+        }
     }
 
     std::vector<std::filesystem::path> object_files;
@@ -873,6 +971,9 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
 
     for (const auto& cpp_src : generated_cpp_files) {
         std::filesystem::path obj_path = build_dir / (cpp_src.stem().string() + obj_ext);
+        if (options.verbose) {
+            out << "[verbose] Compiling: " << cpp_src.filename().string() << " -> " << obj_path.filename().string() << "\n";
+        }
         auto comp_res = toolchain_driver.compile(cpp_src, obj_path, comp_opts);
         if (!comp_res.success) {
             err << "error: compilation failed for '" << cpp_src.filename().string() << "':\n"
@@ -884,11 +985,19 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
 
     LinkOptions link_opts;
     link_opts.kind = BinaryKind::Executable;
+    if (options.verbose) {
+        out << "[verbose] Linking " << object_files.size() << " object file(s) into "
+            << target_binary.filename().string() << "\n";
+    }
     auto link_res = toolchain_driver.link_executable(object_files, target_binary, link_opts);
     if (!link_res.success) {
         err << "error: linking failed for '" << target_binary.filename().string() << "':\n"
             << link_res.output << "\n";
         return std::nullopt;
+    }
+
+    if (options.verbose) {
+        out << "[verbose] Linking finished: " << target_binary.string() << "\n";
     }
 
     return target_binary;
@@ -916,13 +1025,21 @@ int CliDriver::execute_run(const CliOptions& options, std::ostream& out, std::os
         cmd += " " + quote_arg(a);
     }
 
+    if (options.verbose) {
+        out << "[verbose] Executing: " << cmd << "\n";
+    }
+
     int run_status = std::system(cmd.c_str());
+    int exit_code = run_status;
 #if !defined(_WIN32)
     if (WIFEXITED(run_status)) {
-        return WEXITSTATUS(run_status);
+        exit_code = WEXITSTATUS(run_status);
     }
 #endif
-    return run_status;
+    if (options.verbose) {
+        out << "[verbose] Process exited with status code: " << exit_code << "\n";
+    }
+    return exit_code;
 }
 
 int CliDriver::run(const CliOptions& options, std::ostream& out, std::ostream& err) {

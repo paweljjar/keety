@@ -42,6 +42,7 @@ struct CliOptions {
     std::filesystem::path input_file{};
     EmitTarget emit_target{EmitTarget::None};
     std::filesystem::path output_dir{};
+    bool output_is_dir{false};
     std::string cxx_compiler{};
     OptimizationLevel opt_level{OptimizationLevel::O3};
     bool wrapv{true};

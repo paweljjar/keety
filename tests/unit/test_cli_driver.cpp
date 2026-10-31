@@ -447,3 +447,143 @@ TEST_CASE("CLI build compiles native executable and CLI run executes it", "[driv
     std::error_code ec;
     std::filesystem::remove_all(temp_dir, ec);
 }
+
+TEST_CASE("CLI configuration flags argument parsing", "[driver][cli]") {
+    SECTION("Parse output-dir variations") {
+        auto opts1 = CliDriver::parse_args({"build", "main.keet", "--output-dir", "custom_build"});
+        CHECK(opts1.output_dir == "custom_build");
+        CHECK(opts1.output_is_dir == true);
+
+        auto opts2 = CliDriver::parse_args({"emit", "main.keet", "--cpp", "--output-dir=build_out"});
+        CHECK(opts2.output_dir == "build_out");
+        CHECK(opts2.output_is_dir == true);
+
+        auto opts3 = CliDriver::parse_args({"build", "main.keet", "--output=dist/bin"});
+        CHECK(opts3.output_dir == "dist/bin");
+        CHECK(opts3.output_is_dir == false);
+
+        auto opts4 = CliDriver::parse_args({"build", "main.keet", "-o=dist/app"});
+        CHECK(opts4.output_dir == "dist/app");
+    }
+
+    SECTION("Parse cxx compiler option") {
+        auto opts1 = CliDriver::parse_args({"build", "main.keet", "--cxx", "/usr/bin/clang++"});
+        CHECK(opts1.cxx_compiler == "/usr/bin/clang++");
+
+        auto opts2 = CliDriver::parse_args({"build", "main.keet", "--cxx=g++-12"});
+        CHECK(opts2.cxx_compiler == "g++-12");
+    }
+
+    SECTION("Parse optimization level options") {
+        CHECK(CliDriver::parse_args({"build", "main.keet", "-O0"}).opt_level == OptimizationLevel::O0);
+        CHECK(CliDriver::parse_args({"build", "main.keet", "-O1"}).opt_level == OptimizationLevel::O1);
+        CHECK(CliDriver::parse_args({"build", "main.keet", "-O2"}).opt_level == OptimizationLevel::O2);
+        CHECK(CliDriver::parse_args({"build", "main.keet", "-O3"}).opt_level == OptimizationLevel::O3);
+        CHECK(CliDriver::parse_args({"build", "main.keet", "-Os"}).opt_level == OptimizationLevel::Os);
+        CHECK(CliDriver::parse_args({"build", "main.keet", "-Oz"}).opt_level == OptimizationLevel::Oz);
+
+        CHECK(CliDriver::parse_args({"build", "main.keet", "--opt", "2"}).opt_level == OptimizationLevel::O2);
+        CHECK(CliDriver::parse_args({"build", "main.keet", "--opt=s"}).opt_level == OptimizationLevel::Os);
+        CHECK(CliDriver::parse_args({"build", "main.keet", "-O=1"}).opt_level == OptimizationLevel::O1);
+        CHECK(CliDriver::parse_args({"build", "main.keet", "--opt", "O0"}).opt_level == OptimizationLevel::O0);
+    }
+
+    SECTION("Parse verbose flag") {
+        auto opts1 = CliDriver::parse_args({"check", "main.keet", "-v"});
+        CHECK(opts1.verbose == true);
+
+        auto opts2 = CliDriver::parse_args({"build", "main.keet", "--verbose"});
+        CHECK(opts2.verbose == true);
+    }
+}
+
+TEST_CASE("CLI configuration flags behavior in compilation and execution", "[driver][cli]") {
+    ToolchainDriver driver;
+    if (!driver.has_valid_toolchain()) {
+        return;
+    }
+
+    auto temp_dir = std::filesystem::temp_directory_path() / "keety_cli_flags_test";
+    std::filesystem::create_directories(temp_dir);
+
+    auto src_file = temp_dir / "calc.keet";
+    {
+        std::ofstream out(src_file);
+        out << "fn main(): int {\n"
+            << "    return 7;\n"
+            << "}\n";
+    }
+
+    SECTION("Output directory flag creates destination folder and houses binary") {
+        auto out_dir = temp_dir / "target_out";
+        std::ostringstream out;
+        std::ostringstream err;
+
+        auto opts = CliDriver::parse_args({"build", src_file.string(), "--output-dir", out_dir.string(), "--opt=2"});
+        int code = CliDriver::run(opts, out, err);
+        CHECK(code == 0);
+        REQUIRE(std::filesystem::is_directory(out_dir));
+
+        std::string exec_ext = ToolchainDriver::get_executable_extension();
+        auto expected_bin = out_dir / ("calc" + exec_ext);
+        REQUIRE(std::filesystem::exists(expected_bin));
+
+        std::string run_cmd = "\"" + expected_bin.string() + "\"";
+        int sys_code = std::system(run_cmd.c_str());
+#if !defined(_WIN32)
+        if (WIFEXITED(sys_code)) {
+            sys_code = WEXITSTATUS(sys_code);
+        }
+#endif
+        CHECK(sys_code == 7);
+    }
+
+    SECTION("Specifying an invalid C++ compiler produces diagnostic error") {
+        std::ostringstream out;
+        std::ostringstream err;
+
+        auto opts = CliDriver::parse_args({"build", src_file.string(), "--cxx=nonexistent_compiler_xyz_123"});
+        int code = CliDriver::run(opts, out, err);
+        CHECK(code == 1);
+        CHECK(err.str().find("invalid or not found") != std::string::npos);
+    }
+
+    SECTION("Explicit valid C++ compiler flag compiles successfully") {
+        const auto& tc = driver.get_toolchain();
+        std::ostringstream out;
+        std::ostringstream err;
+
+        auto opts = CliDriver::parse_args({"build", src_file.string(), "--cxx=" + tc.compiler_path.string(), "-O1"});
+        int code = CliDriver::run(opts, out, err);
+        CHECK(code == 0);
+    }
+
+    SECTION("Verbose mode streams phase details during build and execution") {
+        std::ostringstream build_out;
+        std::ostringstream build_err;
+
+        auto build_opts = CliDriver::parse_args({"build", src_file.string(), "--verbose", "-O2"});
+        int b_code = CliDriver::run(build_opts, build_out, build_err);
+        CHECK(b_code == 0);
+
+        std::string b_log = build_out.str();
+        CHECK(b_log.find("[verbose] Building project from entry:") != std::string::npos);
+        CHECK(b_log.find("[verbose] Target binary:") != std::string::npos);
+        CHECK(b_log.find("[verbose] Optimization level: O2") != std::string::npos);
+        CHECK(b_log.find("[verbose] Compiling:") != std::string::npos);
+        CHECK(b_log.find("[verbose] Linking") != std::string::npos);
+
+        std::ostringstream run_out;
+        std::ostringstream run_err;
+        auto run_opts = CliDriver::parse_args({"run", src_file.string(), "--verbose", "--", "alpha", "beta"});
+        int r_code = CliDriver::run(run_opts, run_out, run_err);
+        CHECK(r_code == 7);
+
+        std::string r_log = run_out.str();
+        CHECK(r_log.find("[verbose] Executing:") != std::string::npos);
+        CHECK(r_log.find("[verbose] Process exited with status code: 7") != std::string::npos);
+    }
+
+    std::error_code ec;
+    std::filesystem::remove_all(temp_dir, ec);
+}
