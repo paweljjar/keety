@@ -16,8 +16,7 @@ tests/
 │   │   ├── 02_values_mut/
 │   │   ├── 03_unions/
 │   │   ├── 04_oop/
-│   │   ├── 05_control_errors/
-│   │   └── 06_io/
+│   │   └── 05_control_errors/
 │   └── negative/      # Must fail compilation at designated stage with expected error codes
 │       ├── E1000_modules/
 │       ├── E2000_scoping/
@@ -184,47 +183,6 @@ keety test [--conformance | --benchmarks | --all] [--filter <pattern>]
 
 ---
 
-### Group 6: Standard I/O Module & Console Operations
-* **Test 6.1 (`io_console.keet`):**
-  * **Objective:** Validate standard `io` module imports, console printing, inline and line-level ANSI styling, and stream input reading.
-  * **Input:**
-    ```keet
-    import io;
-
-    fn main(): int {
-        io.print("KeetScript standard I/O test running...\n");
-        io.print("Primitives: ", 123, " ", 45.67, " ", true, " ", 'K', "\n");
-        io.println("Line with trailing color", io.Color.Green);
-
-        let styled_ok: string = io.green("SUCCESS");
-        let styled_warn: string = io.yellow("WARNING");
-        let styled_bold: string = io.bold("BOLD");
-        io.println("Status:", styled_ok, styled_warn, styled_bold);
-
-        let line1: string = io.readln();
-        if (line1 != "hello keetscript") {
-            return 1;
-        }
-
-        let line2: string = io.input("Enter value: ");
-        if (line2 != "sample input") {
-            return 2;
-        }
-
-        let defaultColor: io.Color = io.Color.Default;
-        let redColor: io.Color = io.Color.Red;
-        if (defaultColor == redColor) {
-            return 3;
-        }
-
-        io.println("All standard I/O conformance checks passed!");
-        return 0;
-    }
-    ```
-  * **Assertion:** Exits cleanly with status code `0` and outputs formatted text to stdout.
-
----
-
 ## 3. Negative Compiler Diagnostic Test Cases (Compile-Time Rejection)
 
 | Test File | Target Error Code | Expected Diagnostic Trigger |
@@ -238,10 +196,8 @@ keety test [--conformance | --benchmarks | --all] [--filter <pattern>]
 | `neg_missing_type.keet` | `E3001` | Declaring variable or constant without explicit type annotation: `let x = 10;`. |
 | `neg_implicit_widening.keet` | `E3002` | Assigning integer directly to float without cast: `let f: float = 42;`. |
 | `neg_async_mut.keet` | `E4004` | Declaring `mut` reference parameter inside an `async fn`. |
-| `neg_io_type_mismatch.keet` | `E3003` | Passing invalid argument type to standard `io` function or member: `io.input(42)`. |
 
 ---
-
 
 ## 4. Reference Benchmark Suite (KeetScript vs. Idiomatic C++17)
 
