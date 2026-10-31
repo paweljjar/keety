@@ -39,8 +39,16 @@ HeaderEmitter::HeaderEmitter(const parser::ModuleAST& ast, const ir::Module& ir_
         module_name_ = ir_module.get_name();
     }
     collect_imports(ast);
-    collect_declarations(ast);
-    collect_ir_declarations(ir_module);
+    if (!ast.declarations.empty()) {
+        collect_declarations(ast);
+        for (const auto& global : ir_module.get_globals()) {
+            if (global.is_export) {
+                add_const_view(global.name, to_cpp_type(global.type));
+            }
+        }
+    } else {
+        collect_ir_declarations(ir_module);
+    }
 }
 
 void HeaderEmitter::add_standard_header(std::string header) {

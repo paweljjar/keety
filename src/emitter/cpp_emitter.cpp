@@ -166,7 +166,7 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                     }
                 }
             }
-            if (!fn->isGeneric() && fn->getBody()) {
+            if (fn->getBody()) {
                 add_function_definition(translate_function(*fn));
             }
         } else if (const auto* cls = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
@@ -658,6 +658,14 @@ std::string CppEmitter::translate_function(const ast::FnDecl& fn) const {
 
     std::string fn_name = (fn.getName() == "main") ? "_keet_main" : fn.getName();
     std::ostringstream ss;
+    if (!fn.getTypeParams().empty()) {
+        ss << "    template <";
+        for (size_t i = 0; i < fn.getTypeParams().size(); ++i) {
+            if (i > 0) ss << ", ";
+            ss << "typename " << fn.getTypeParams()[i];
+        }
+        ss << ">\n";
+    }
     ss << "    " << ret_type << " " << fn_name << "(" << params_str << ") {\n";
     if (fn.getBody()) {
         if (const auto* block = dynamic_cast<const ast::BlockStmt*>(fn.getBody())) {

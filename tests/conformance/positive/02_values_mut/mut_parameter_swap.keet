@@ -1,0 +1,19 @@
+fn swap<T>(mut x: T, mut y: T): void {
+    let temp: T = x;
+    x = y;
+    y = temp;
+}
+
+fn main(): int {
+    let u: int = 10;
+    let v: int = 20;
+    swap(mut u, mut v);
+
+    if (u != 20) {
+        return 1;
+    }
+    if (v != 10) {
+        return 2;
+    }
+    return 0;
+}

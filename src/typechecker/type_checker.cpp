@@ -1,7 +1,136 @@
 #include <keety/typechecker/type_checker.hpp>
 #include <keety/sema/universe.hpp>
 
+#include <algorithm>
+#include <unordered_map>
+#include <unordered_set>
+
 namespace keety::typechecker {
+
+namespace {
+
+TypePtr substituteTypeParams(const TypePtr& type, const std::unordered_map<std::string, TypePtr>& subst) {
+    if (!type || subst.empty()) {
+        return type;
+    }
+    if (type->isCustom()) {
+        const auto* custom = dynamic_cast<const CustomType*>(type.get());
+        if (custom) {
+            auto it = subst.find(custom->getName());
+            if (it != subst.end()) {
+                return it->second;
+            }
+        }
+        return type;
+    }
+    if (type->isArray()) {
+        const auto* arr = dynamic_cast<const ArrayType*>(type.get());
+        if (arr) {
+            auto newElem = substituteTypeParams(arr->getElementType(), subst);
+            if (newElem != arr->getElementType()) {
+                return Type::array(newElem);
+            }
+        }
+        return type;
+    }
+    if (type->isMap()) {
+        const auto* map = dynamic_cast<const MapType*>(type.get());
+        if (map) {
+            auto newKey = substituteTypeParams(map->getKeyType(), subst);
+            auto newVal = substituteTypeParams(map->getValueType(), subst);
+            if (newKey != map->getKeyType() || newVal != map->getValueType()) {
+                return Type::map(newKey, newVal);
+            }
+        }
+        return type;
+    }
+    if (type->isUnion()) {
+        const auto* u = dynamic_cast<const UnionType*>(type.get());
+        if (u) {
+            std::vector<TypePtr> newVariants;
+            newVariants.reserve(u->getVariants().size());
+            bool changed = false;
+            for (const auto& v : u->getVariants()) {
+                auto sub = substituteTypeParams(v, subst);
+                if (sub != v) changed = true;
+                newVariants.push_back(sub);
+            }
+            if (changed) {
+                return Type::normalizeUnion(newVariants);
+            }
+        }
+        return type;
+    }
+    if (type->isFunction()) {
+        const auto* fn = dynamic_cast<const FunctionType*>(type.get());
+        if (fn) {
+            std::vector<TypePtr> newParams;
+            newParams.reserve(fn->getParamTypes().size());
+            bool changed = false;
+            for (const auto& p : fn->getParamTypes()) {
+                auto sub = substituteTypeParams(p, subst);
+                if (sub != p) changed = true;
+                newParams.push_back(sub);
+            }
+            auto newRet = substituteTypeParams(fn->getReturnType(), subst);
+            if (newRet != fn->getReturnType()) changed = true;
+            if (changed) {
+                return Type::function(std::move(newParams), newRet, fn->isAsync());
+            }
+        }
+        return type;
+    }
+    return type;
+}
+
+void deduceTypeParams(
+    const TypePtr& paramType,
+    const TypePtr& argType,
+    const std::unordered_set<std::string>& typeParamNames,
+    std::unordered_map<std::string, TypePtr>& subst) {
+    if (!paramType || !argType) return;
+
+    if (paramType->isCustom()) {
+        const auto* custom = dynamic_cast<const CustomType*>(paramType.get());
+        if (custom && typeParamNames.count(custom->getName())) {
+            if (subst.find(custom->getName()) == subst.end()) {
+                subst[custom->getName()] = argType->getBaseType();
+            }
+            return;
+        }
+    }
+    if (paramType->isArray() && argType->isArray()) {
+        const auto* pArr = dynamic_cast<const ArrayType*>(paramType.get());
+        const auto* aArr = dynamic_cast<const ArrayType*>(argType.get());
+        if (pArr && aArr) {
+            deduceTypeParams(pArr->getElementType(), aArr->getElementType(), typeParamNames, subst);
+        }
+        return;
+    }
+    if (paramType->isMap() && argType->isMap()) {
+        const auto* pMap = dynamic_cast<const MapType*>(paramType.get());
+        const auto* aMap = dynamic_cast<const MapType*>(argType.get());
+        if (pMap && aMap) {
+            deduceTypeParams(pMap->getKeyType(), aMap->getKeyType(), typeParamNames, subst);
+            deduceTypeParams(pMap->getValueType(), aMap->getValueType(), typeParamNames, subst);
+        }
+        return;
+    }
+    if (paramType->isFunction() && argType->isFunction()) {
+        const auto* pFn = dynamic_cast<const FunctionType*>(paramType.get());
+        const auto* aFn = dynamic_cast<const FunctionType*>(argType.get());
+        if (pFn && aFn) {
+            size_t count = std::min(pFn->getParamTypes().size(), aFn->getParamTypes().size());
+            for (size_t i = 0; i < count; ++i) {
+                deduceTypeParams(pFn->getParamTypes()[i], aFn->getParamTypes()[i], typeParamNames, subst);
+            }
+            deduceTypeParams(pFn->getReturnType(), aFn->getReturnType(), typeParamNames, subst);
+        }
+        return;
+    }
+}
+
+} // anonymous namespace
 
 TypeChecker::TypeChecker(diag::DiagnosticEmitter* emitter)
     : emitter_(emitter), hasErrors_(false) {}
@@ -2131,15 +2260,31 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 }
             }
 
+            std::unordered_map<std::string, TypePtr> methodSubst;
+            std::unordered_set<std::string> methodParamSet;
+            if (methodDecl) {
+                methodParamSet.insert(methodDecl->getTypeParams().begin(), methodDecl->getTypeParams().end());
+                for (size_t k = 0; k < call->getTypeArgs().size() && k < methodDecl->getTypeParams().size(); ++k) {
+                    if (call->getTypeArgs()[k]) {
+                        methodSubst[methodDecl->getTypeParams()[k]] = Type::fromAnnotation(call->getTypeArgs()[k].get());
+                    }
+                }
+            }
+
             for (size_t i = 0; i < call->getArgs().size(); ++i) {
                 const auto& arg = call->getArgs()[i];
                 if (arg.value) {
                     TypePtr pType = (methodDecl && i < methodDecl->getParams().size())
                         ? Type::fromAnnotation(methodDecl->getParams()[i].type.get())
                         : nullptr;
-                    auto argType = inferType(*arg.value, scope, pType);
-                    if (pType) {
-                        checkAssignment(pType, argType, arg.value->getSpan(), "method argument");
+                    TypePtr expectedPType = substituteTypeParams(pType, methodSubst);
+                    auto argType = inferType(*arg.value, scope, expectedPType);
+                    if (pType && !methodParamSet.empty()) {
+                        deduceTypeParams(pType, argType, methodParamSet, methodSubst);
+                        expectedPType = substituteTypeParams(pType, methodSubst);
+                    }
+                    if (expectedPType) {
+                        checkAssignment(expectedPType, argType, arg.value->getSpan(), "method argument");
                     }
                     bool isMut = arg.isMut || (methodDecl && i < methodDecl->getParams().size() && methodDecl->getParams()[i].isMut);
                     checkCallArg(arg, isMut);
@@ -2149,7 +2294,8 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 scope.resetNarrowedType(v);
             }
             if (methodDecl) {
-                return Type::fromAnnotation(methodDecl->getReturnType());
+                auto retType = Type::fromAnnotation(methodDecl->getReturnType());
+                return substituteTypeParams(retType, methodSubst);
             }
             return Type::unknownType();
         }
@@ -2182,15 +2328,30 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             }
 
             if (fnDecl) {
+                std::unordered_map<std::string, TypePtr> typeSubst;
+                std::unordered_set<std::string> typeParamSet(
+                    fnDecl->getTypeParams().begin(), fnDecl->getTypeParams().end()
+                );
+                for (size_t k = 0; k < call->getTypeArgs().size() && k < fnDecl->getTypeParams().size(); ++k) {
+                    if (call->getTypeArgs()[k]) {
+                        typeSubst[fnDecl->getTypeParams()[k]] = Type::fromAnnotation(call->getTypeArgs()[k].get());
+                    }
+                }
+
                 for (size_t i = 0; i < call->getArgs().size(); ++i) {
                     const auto& arg = call->getArgs()[i];
                     if (arg.value) {
                         TypePtr pType = (i < fnDecl->getParams().size())
                             ? Type::fromAnnotation(fnDecl->getParams()[i].type.get())
                             : nullptr;
-                        auto argType = inferType(*arg.value, scope, pType);
-                        if (pType) {
-                            checkAssignment(pType, argType, arg.value->getSpan(), "function argument");
+                        TypePtr expectedPType = substituteTypeParams(pType, typeSubst);
+                        auto argType = inferType(*arg.value, scope, expectedPType);
+                        if (pType && !typeParamSet.empty()) {
+                            deduceTypeParams(pType, argType, typeParamSet, typeSubst);
+                            expectedPType = substituteTypeParams(pType, typeSubst);
+                        }
+                        if (expectedPType) {
+                            checkAssignment(expectedPType, argType, arg.value->getSpan(), "function argument");
                         }
                         bool isMut = arg.isMut || (i < fnDecl->getParams().size() && fnDecl->getParams()[i].isMut);
                         checkCallArg(arg, isMut);
@@ -2199,7 +2360,8 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 for (const auto& v : mutatedVars) {
                     scope.resetNarrowedType(v);
                 }
-                return Type::fromAnnotation(fnDecl->getReturnType());
+                auto retType = Type::fromAnnotation(fnDecl->getReturnType());
+                return substituteTypeParams(retType, typeSubst);
             } else if (funcTypeAnnotation) {
                 for (size_t i = 0; i < call->getArgs().size(); ++i) {
                     const auto& arg = call->getArgs()[i];
