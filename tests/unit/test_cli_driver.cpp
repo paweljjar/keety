@@ -211,3 +211,143 @@ TEST_CASE("CLI check detects circular dependency cycles", "[driver][cli]") {
     std::error_code ec;
     std::filesystem::remove_all(temp_dir, ec);
 }
+
+TEST_CASE("CLI emit rejects invalid arguments or missing targets", "[driver][cli]") {
+    std::ostringstream out;
+    std::ostringstream err;
+
+    SECTION("Emit without target specified") {
+        CliOptions opts;
+        opts.command = CliCommand::Emit;
+        opts.input_file = "valid.keet";
+        opts.emit_target = EmitTarget::None;
+
+        int res = CliDriver::run(opts, out, err);
+        CHECK(res == 1);
+        CHECK(err.str().find("requires an emission target") != std::string::npos);
+    }
+
+    SECTION("Emit without input file") {
+        CliOptions opts;
+        opts.command = CliCommand::Emit;
+        opts.emit_target = EmitTarget::Cpp;
+
+        int res = CliDriver::run(opts, out, err);
+        CHECK(res == 1);
+        CHECK(err.str().find("requires a target input file") != std::string::npos);
+    }
+
+    SECTION("Emit with non-existent input file") {
+        CliOptions opts;
+        opts.command = CliCommand::Emit;
+        opts.input_file = "not_found.keet";
+        opts.emit_target = EmitTarget::Cpp;
+
+        int res = CliDriver::run(opts, out, err);
+        CHECK(res == 1);
+        CHECK(err.str().find("input file not found") != std::string::npos);
+    }
+}
+
+TEST_CASE("CLI emit generates AST, IR, HPP and CPP to stream and directory", "[driver][cli]") {
+    auto temp_dir = std::filesystem::temp_directory_path() / "keety_cli_emit_test";
+    std::filesystem::create_directories(temp_dir);
+
+    auto src_file = temp_dir / "calculator.keet";
+    {
+        std::ofstream out(src_file);
+        out << "let globalOffset: int = 100;\n"
+            << "fn calculate(x: int, y: int): int {\n"
+            << "    let result: int = x + y + globalOffset;\n"
+            << "    return result;\n"
+            << "}\n";
+    }
+
+    SECTION("Emit AST to stream") {
+        std::ostringstream out;
+        std::ostringstream err;
+        CliOptions opts;
+        opts.command = CliCommand::Emit;
+        opts.input_file = src_file;
+        opts.emit_target = EmitTarget::Ast;
+
+        int res = CliDriver::run(opts, out, err);
+        CHECK(res == 0);
+        std::string ast_str = out.str();
+        CHECK(ast_str.find("ModuleAST \"calculator\"") != std::string::npos);
+        CHECK(ast_str.find("VarDecl globalOffset") != std::string::npos);
+        CHECK(ast_str.find("FnDecl calculate") != std::string::npos);
+    }
+
+    SECTION("Emit IR to stream") {
+        std::ostringstream out;
+        std::ostringstream err;
+        CliOptions opts;
+        opts.command = CliCommand::Emit;
+        opts.input_file = src_file;
+        opts.emit_target = EmitTarget::Ir;
+
+        int res = CliDriver::run(opts, out, err);
+        CHECK(res == 0);
+        std::string ir_str = out.str();
+        CHECK(ir_str.find("calculate") != std::string::npos);
+        CHECK(ir_str.find("alloca") != std::string::npos);
+    }
+
+    SECTION("Emit HPP to designated directory") {
+        auto out_dir = temp_dir / "output_hpp/";
+        std::ostringstream out;
+        std::ostringstream err;
+        CliOptions opts;
+        opts.command = CliCommand::Emit;
+        opts.input_file = src_file;
+        opts.emit_target = EmitTarget::Hpp;
+        opts.output_dir = out_dir;
+        opts.verbose = true;
+
+        int res = CliDriver::run(opts, out, err);
+        CHECK(res == 0);
+
+        auto expected_hpp = out_dir / "calculator.hpp";
+        REQUIRE(std::filesystem::exists(expected_hpp));
+
+        std::ifstream hpp_in(expected_hpp);
+        std::stringstream ss;
+        ss << hpp_in.rdbuf();
+        std::string hpp_str = ss.str();
+
+        CHECK(hpp_str.find("#pragma once") != std::string::npos);
+        CHECK(hpp_str.find("namespace keet_module_calculator") != std::string::npos);
+        CHECK(hpp_str.find("calculate") != std::string::npos);
+    }
+
+    SECTION("Emit CPP to designated directory") {
+        auto out_dir = temp_dir / "output_cpp/";
+        std::ostringstream out;
+        std::ostringstream err;
+        CliOptions opts;
+        opts.command = CliCommand::Emit;
+        opts.input_file = src_file;
+        opts.emit_target = EmitTarget::Cpp;
+        opts.output_dir = out_dir;
+        opts.verbose = true;
+
+        int res = CliDriver::run(opts, out, err);
+        CHECK(res == 0);
+
+        auto expected_cpp = out_dir / "calculator.cpp";
+        REQUIRE(std::filesystem::exists(expected_cpp));
+
+        std::ifstream cpp_in(expected_cpp);
+        std::stringstream ss;
+        ss << cpp_in.rdbuf();
+        std::string cpp_str = ss.str();
+
+        CHECK(cpp_str.find("namespace keet_module_calculator") != std::string::npos);
+        CHECK(cpp_str.find("_internal_globalOffset") != std::string::npos);
+        CHECK(cpp_str.find("calculate") != std::string::npos);
+    }
+
+    std::error_code ec;
+    std::filesystem::remove_all(temp_dir, ec);
+}

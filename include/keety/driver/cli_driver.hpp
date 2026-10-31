@@ -68,6 +68,9 @@ public:
     /// Executes `keety check <file>` validation pipeline
     static int execute_check(const CliOptions& options, std::ostream& out = std::cout, std::ostream& err = std::cerr);
 
+    /// Executes `keety emit <file> (--cpp | --hpp | --ast | --ir)` emission pipeline
+    static int execute_emit(const CliOptions& options, std::ostream& out = std::cout, std::ostream& err = std::cerr);
+
     /// Prints CLI help documentation
     static void print_help(std::ostream& out);
 

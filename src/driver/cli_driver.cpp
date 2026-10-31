@@ -1,5 +1,7 @@
 #include <keety/driver/cli_driver.hpp>
 
+#include <keety/emitter/cpp_emitter.hpp>
+#include <keety/emitter/header_emitter.hpp>
 #include <keety/ir/ast_lowerer.hpp>
 #include <keety/lexer/lexer.hpp>
 #include <keety/parser/parser.hpp>
@@ -11,9 +13,212 @@
 #include <keety/typechecker/type_checker.hpp>
 #include <keety/version.hpp>
 
+#include <fstream>
 #include <iostream>
+#include <sstream>
 
 namespace keety::driver {
+
+namespace {
+
+void dump_indent(std::ostream& os, int indent) {
+    for (int i = 0; i < indent; ++i) {
+        os << "  ";
+    }
+}
+
+void dump_type(const ast::TypeAnnotation* type, std::ostream& os) {
+    if (!type) {
+        os << "<inferred>";
+        return;
+    }
+    os << emitter::HeaderEmitter::to_cpp_type(type);
+}
+
+void dump_expr(const ast::Expr* expr, std::ostream& os, int indent);
+void dump_stmt(const ast::Stmt* stmt, std::ostream& os, int indent);
+void dump_decl(const ast::Decl* decl, std::ostream& os, int indent);
+
+void dump_decl(const ast::Decl* decl, std::ostream& os, int indent) {
+    if (!decl) return;
+    dump_indent(os, indent);
+
+    if (const auto* v = dynamic_cast<const ast::VarDecl*>(decl)) {
+        os << (v->isExported() ? "ExportVarDecl " : "VarDecl ") << v->getName() << ": ";
+        dump_type(v->getType(), os);
+        os << "\n";
+        if (v->getInitializer()) {
+            dump_expr(v->getInitializer(), os, indent + 1);
+        }
+    } else if (const auto* c = dynamic_cast<const ast::ConstDecl*>(decl)) {
+        os << (c->isExported() ? "ExportConstDecl " : "ConstDecl ") << c->getName() << ": ";
+        dump_type(c->getType(), os);
+        os << "\n";
+        if (c->getInitializer()) {
+            dump_expr(c->getInitializer(), os, indent + 1);
+        }
+    } else if (const auto* def = dynamic_cast<const ast::DefineDecl*>(decl)) {
+        os << (def->isExported() ? "ExportDefineDecl " : "DefineDecl ") << def->getName() << ": ";
+        dump_type(def->getType(), os);
+        os << "\n";
+        if (def->getValue()) {
+            dump_expr(def->getValue(), os, indent + 1);
+        }
+    } else if (const auto* f = dynamic_cast<const ast::FnDecl*>(decl)) {
+        os << (f->isExported() ? "ExportFnDecl " : "FnDecl ") << f->getName() << "(";
+        for (size_t i = 0; i < f->getParams().size(); ++i) {
+            if (i > 0) os << ", ";
+            if (f->getParams()[i].isMut) os << "mut ";
+            os << f->getParams()[i].name << ": ";
+            dump_type(f->getParams()[i].type.get(), os);
+        }
+        os << "): ";
+        dump_type(f->getReturnType(), os);
+        os << "\n";
+        if (f->getBody()) {
+            dump_stmt(f->getBody(), os, indent + 1);
+        }
+    } else if (const auto* cls = dynamic_cast<const ast::ClassDecl*>(decl)) {
+        os << (cls->isExported() ? "ExportClassDecl " : "ClassDecl ") << cls->getName() << "\n";
+        for (const auto& field : cls->getFields()) {
+            dump_indent(os, indent + 1);
+            os << "Field " << field.name << ": ";
+            dump_type(field.type.get(), os);
+            os << "\n";
+        }
+        for (const auto& method : cls->getMethods()) {
+            dump_decl(method.get(), os, indent + 1);
+        }
+    } else if (const auto* enm = dynamic_cast<const ast::EnumDecl*>(decl)) {
+        os << (enm->isExported() ? "ExportEnumDecl " : "EnumDecl ") << enm->getName() << "\n";
+        for (const auto& member : enm->getMembers()) {
+            dump_indent(os, indent + 1);
+            os << "EnumMember " << member.name << "\n";
+        }
+    } else if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl)) {
+        os << "ImportDecl \"" << imp->getModulePath() << "\"\n";
+    } else if (const auto* err = dynamic_cast<const ast::ErrTypeDecl*>(decl)) {
+        os << (err->isExported() ? "ExportErrTypeDecl " : "ErrTypeDecl ") << err->getName() << "\n";
+    } else {
+        os << "Decl\n";
+    }
+}
+
+void dump_stmt(const ast::Stmt* stmt, std::ostream& os, int indent) {
+    if (!stmt) return;
+    dump_indent(os, indent);
+
+    if (const auto* b = dynamic_cast<const ast::BlockStmt*>(stmt)) {
+        os << "BlockStmt\n";
+        for (const auto& s : b->getStatements()) {
+            dump_stmt(s.get(), os, indent + 1);
+        }
+    } else if (const auto* d = dynamic_cast<const ast::DeclStmt*>(stmt)) {
+        os << "DeclStmt\n";
+        dump_decl(d->getDeclaration(), os, indent + 1);
+    } else if (const auto* e = dynamic_cast<const ast::ExprStmt*>(stmt)) {
+        os << "ExprStmt\n";
+        dump_expr(e->getExpression(), os, indent + 1);
+    } else if (const auto* r = dynamic_cast<const ast::ReturnStmt*>(stmt)) {
+        os << "ReturnStmt\n";
+        if (r->hasValue()) {
+            dump_expr(r->getValue(), os, indent + 1);
+        }
+    } else if (const auto* i = dynamic_cast<const ast::IfStmt*>(stmt)) {
+        os << "IfStmt\n";
+        if (i->getCondition()) {
+            dump_indent(os, indent + 1);
+            os << "Condition:\n";
+            dump_expr(i->getCondition(), os, indent + 2);
+        }
+        if (i->getThenBranch()) {
+            dump_indent(os, indent + 1);
+            os << "Then:\n";
+            dump_stmt(i->getThenBranch(), os, indent + 2);
+        }
+        if (i->getElseBranch()) {
+            dump_indent(os, indent + 1);
+            os << "Else:\n";
+            dump_stmt(i->getElseBranch(), os, indent + 2);
+        }
+    } else if (const auto* w = dynamic_cast<const ast::WhileStmt*>(stmt)) {
+        os << "WhileStmt\n";
+        if (w->getCondition()) {
+            dump_expr(w->getCondition(), os, indent + 1);
+        }
+        if (w->getBody()) {
+            dump_stmt(w->getBody(), os, indent + 1);
+        }
+    } else if (const auto* f = dynamic_cast<const ast::ForInStmt*>(stmt)) {
+        os << "ForInStmt " << f->getValueName() << "\n";
+        if (f->getCollection()) {
+            dump_expr(f->getCollection(), os, indent + 1);
+        }
+        if (f->getBody()) {
+            dump_stmt(f->getBody(), os, indent + 1);
+        }
+    } else if (dynamic_cast<const ast::BreakStmt*>(stmt)) {
+        os << "BreakStmt\n";
+    } else if (dynamic_cast<const ast::ContinueStmt*>(stmt)) {
+        os << "ContinueStmt\n";
+    } else {
+        os << "Stmt\n";
+    }
+}
+
+void dump_expr(const ast::Expr* expr, std::ostream& os, int indent) {
+    if (!expr) return;
+    dump_indent(os, indent);
+
+    if (const auto* l = dynamic_cast<const ast::LiteralExpr*>(expr)) {
+        os << "LiteralExpr(" << l->getRawText() << ")\n";
+    } else if (const auto* id = dynamic_cast<const ast::IdentExpr*>(expr)) {
+        os << "IdentExpr(" << id->getName() << ")\n";
+    } else if (const auto* b = dynamic_cast<const ast::BinaryExpr*>(expr)) {
+        os << "BinaryExpr(" << lexer::getTokenKindName(b->getOp()) << ")\n";
+        dump_expr(b->getLeft(), os, indent + 1);
+        dump_expr(b->getRight(), os, indent + 1);
+    } else if (const auto* u = dynamic_cast<const ast::UnaryExpr*>(expr)) {
+        os << "UnaryExpr(" << lexer::getTokenKindName(u->getOp()) << ")\n";
+        dump_expr(u->getOperand(), os, indent + 1);
+    } else if (const auto* c = dynamic_cast<const ast::CallExpr*>(expr)) {
+        os << "CallExpr\n";
+        dump_expr(c->getCallee(), os, indent + 1);
+        for (const auto& arg : c->getArgs()) {
+            dump_expr(arg.value.get(), os, indent + 1);
+        }
+    } else if (const auto* m = dynamic_cast<const ast::MemberExpr*>(expr)) {
+        os << "MemberExpr(." << m->getMemberName() << ")\n";
+        dump_expr(m->getObject(), os, indent + 1);
+    } else if (const auto* idx = dynamic_cast<const ast::IndexExpr*>(expr)) {
+        os << "IndexExpr\n";
+        dump_expr(idx->getContainer(), os, indent + 1);
+        dump_expr(idx->getIndex(), os, indent + 1);
+    } else if (const auto* arr = dynamic_cast<const ast::ArrayLitExpr*>(expr)) {
+        os << "ArrayLitExpr\n";
+        for (const auto& elem : arr->getElements()) {
+            dump_expr(elem.get(), os, indent + 1);
+        }
+    } else if (const auto* t = dynamic_cast<const ast::TernaryExpr*>(expr)) {
+        os << "TernaryExpr\n";
+        dump_expr(t->getCondition(), os, indent + 1);
+        dump_expr(t->getThenExpr(), os, indent + 1);
+        dump_expr(t->getElseExpr(), os, indent + 1);
+    } else {
+        os << "Expr\n";
+    }
+}
+
+std::string dump_ast(const parser::ModuleAST& ast) {
+    std::ostringstream ss;
+    ss << "ModuleAST \"" << ast.moduleName << "\"\n";
+    for (const auto& decl : ast.declarations) {
+        dump_decl(decl.get(), ss, 1);
+    }
+    return ss.str();
+}
+
+} // namespace
 
 std::string_view to_string(CliCommand cmd) noexcept {
     switch (cmd) {
@@ -157,7 +362,6 @@ CliOptions CliDriver::parse_args(const std::vector<std::string>& args) {
     }
 
     if (options.command == CliCommand::Unknown && !options.input_file.empty()) {
-        // Default to check if file given without explicit command
         options.command = CliCommand::Check;
     }
 
@@ -279,6 +483,177 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
     return 0;
 }
 
+int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::ostream& err) {
+    if (options.emit_target == EmitTarget::None) {
+        err << "error: 'keety emit' requires an emission target (--cpp, --hpp, --ast, or --ir).\n"
+            << "usage: keety emit <file.keet> (--cpp | --hpp | --ast | --ir)\n";
+        return 1;
+    }
+
+    if (options.input_file.empty()) {
+        err << "error: 'keety emit' requires a target input file.\n"
+            << "usage: keety emit <file.keet> (--cpp | --hpp | --ast | --ir)\n";
+        return 1;
+    }
+
+    if (!std::filesystem::exists(options.input_file)) {
+        err << "error: input file not found: " << options.input_file.string() << "\n";
+        return 1;
+    }
+
+    diag::SourceManager sm;
+    diag::DiagnosticEmitter emitter(sm, options.color_mode);
+
+    std::filesystem::path project_root = options.input_file.has_parent_path()
+        ? options.input_file.parent_path()
+        : std::filesystem::current_path();
+
+    resolver::ModulePathResolver path_resolver(project_root, &emitter);
+    resolver::ModuleGraph graph;
+
+    bool graph_ok = graph.buildGraph(options.input_file, sm, path_resolver, &emitter);
+    if (!graph_ok || emitter.hasErrors()) {
+        for (const auto& d : emitter.getDiagnostics()) {
+            err << emitter.format(d);
+        }
+        return 1;
+    }
+
+    // Check for circular dependency cycles
+    resolver::CycleDetector cycle_detector(graph, &emitter);
+    if (!cycle_detector.detectCycles() || emitter.hasErrors()) {
+        for (const auto& d : emitter.getDiagnostics()) {
+            err << emitter.format(d);
+        }
+        return 1;
+    }
+
+    // Topologically sort module dependency graph
+    resolver::TopologicalSorter sorter(graph);
+    std::filesystem::path canonical_entry = std::filesystem::weakly_canonical(options.input_file);
+    auto ordered_nodes = sorter.sortNodes(canonical_entry.string());
+
+    auto universe = std::make_shared<sema::Scope>(sema::ScopeKind::Universe);
+    sema::registerUniverseSymbols(*universe);
+
+    const resolver::ModuleNode* target_node = nullptr;
+
+    for (const auto* node : ordered_nodes) {
+        if (!node || !node->ast) {
+            continue;
+        }
+
+        if (node->canonicalPath == canonical_entry.string()) {
+            target_node = node;
+        }
+
+        auto module_scope = std::make_shared<sema::Scope>(sema::ScopeKind::Module, universe);
+        typechecker::TypeChecker checker(&emitter);
+        checker.checkTypes(*node->ast, module_scope.get());
+
+        if (emitter.hasErrors()) {
+            for (const auto& d : emitter.getDiagnostics()) {
+                err << emitter.format(d);
+            }
+            return 1;
+        }
+    }
+
+    if (!target_node || !target_node->ast) {
+        err << "error: failed to resolve target compilation unit.\n";
+        return 1;
+    }
+
+    // Generate output content based on requested emit_target
+    std::string content;
+    switch (options.emit_target) {
+    case EmitTarget::Ast: {
+        content = dump_ast(*target_node->ast);
+        break;
+    }
+    case EmitTarget::Ir: {
+        ir::AstLowerer lowerer(&emitter);
+        auto ir_mod = lowerer.lower_module(*target_node->ast);
+        if (emitter.hasErrors() || !ir_mod) {
+            for (const auto& d : emitter.getDiagnostics()) {
+                err << emitter.format(d);
+            }
+            return 1;
+        }
+        content = ir_mod->to_string();
+        break;
+    }
+    case EmitTarget::Hpp: {
+        ir::AstLowerer lowerer(&emitter);
+        auto ir_mod = lowerer.lower_module(*target_node->ast);
+        if (emitter.hasErrors() || !ir_mod) {
+            for (const auto& d : emitter.getDiagnostics()) {
+                err << emitter.format(d);
+            }
+            return 1;
+        }
+        emitter::HeaderEmitter header_emitter(*target_node->ast, *ir_mod);
+        content = header_emitter.emit();
+        break;
+    }
+    case EmitTarget::Cpp: {
+        ir::AstLowerer lowerer(&emitter);
+        auto ir_mod = lowerer.lower_module(*target_node->ast);
+        if (emitter.hasErrors() || !ir_mod) {
+            for (const auto& d : emitter.getDiagnostics()) {
+                err << emitter.format(d);
+            }
+            return 1;
+        }
+        emitter::CppEmitter cpp_emitter(*target_node->ast, *ir_mod);
+        content = cpp_emitter.emit();
+        break;
+    }
+    case EmitTarget::None:
+        break;
+    }
+
+    // Write to output directory or stdout
+    if (options.output_dir.empty()) {
+        out << content;
+    } else {
+        std::filesystem::path dest;
+        if (std::filesystem::is_directory(options.output_dir) ||
+            options.output_dir.string().back() == '/' ||
+            options.output_dir.string().back() == '\\') {
+            std::string ext;
+            switch (options.emit_target) {
+            case EmitTarget::Cpp: ext = ".cpp"; break;
+            case EmitTarget::Hpp: ext = ".hpp"; break;
+            case EmitTarget::Ast: ext = ".ast"; break;
+            case EmitTarget::Ir:  ext = ".ir";  break;
+            default: ext = ".txt"; break;
+            }
+            dest = options.output_dir / (options.input_file.stem().string() + ext);
+        } else {
+            dest = options.output_dir;
+        }
+
+        if (dest.has_parent_path()) {
+            std::error_code ec;
+            std::filesystem::create_directories(dest.parent_path(), ec);
+        }
+
+        std::ofstream dest_file(dest);
+        if (!dest_file.is_open()) {
+            err << "error: failed to open output file for writing: " << dest.string() << "\n";
+            return 1;
+        }
+        dest_file << content;
+
+        if (options.verbose) {
+            out << "Emitted " << to_string(options.emit_target) << " to " << dest.string() << "\n";
+        }
+    }
+
+    return 0;
+}
+
 int CliDriver::run(const CliOptions& options, std::ostream& out, std::ostream& err) {
     switch (options.command) {
     case CliCommand::Help:
@@ -290,8 +665,7 @@ int CliDriver::run(const CliOptions& options, std::ostream& out, std::ostream& e
     case CliCommand::Check:
         return execute_check(options, out, err);
     case CliCommand::Emit:
-        err << "error: 'keety emit' is not yet implemented.\n";
-        return 1;
+        return execute_emit(options, out, err);
     case CliCommand::Build:
         err << "error: 'keety build' is not yet implemented.\n";
         return 1;
