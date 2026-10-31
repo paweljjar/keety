@@ -1,0 +1,8 @@
+fn modify(mut val: int): void {
+    val = val + 1;
+}
+
+fn testMapMut(): void {
+    let m: map<string, int> = {"count": 10};
+    modify(mut m["count"]);
+}

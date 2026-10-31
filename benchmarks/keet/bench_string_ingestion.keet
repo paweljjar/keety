@@ -1,0 +1,9 @@
+fn run_string_ingestion_bench(lines: array<string>): int {
+    let total: int = 0;
+    for (const raw: string in lines) {
+        if (let parsed: int | null = raw.tryInt(); parsed != null) {
+            total += parsed;
+        }
+    }
+    return total;
+}

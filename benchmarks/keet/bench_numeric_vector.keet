@@ -1,0 +1,12 @@
+fn run_numeric_vector_bench(n: int): int {
+    let data: array<int>;
+    data.reserve(n);
+    for (let i: int = 0; i < n; i++) {
+        data.push(i);
+    }
+    let sum: int = data
+        .filter(fn (x: int): bool { return x % 2 == 0; })
+        .map<int>(fn (x: int): int { return x * x; })
+        .reduce<int>(0, fn (acc: int, x: int): int { return acc + x; });
+    return sum;
+}

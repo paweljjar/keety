@@ -1,0 +1,2 @@
+async fn process(mut x: int): void {
+}

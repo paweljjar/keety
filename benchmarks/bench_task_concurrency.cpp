@@ -17,13 +17,22 @@ namespace {
 // Native C++17 Reference Implementation according to specification
 int64_t run_native_cpp(size_t n) {
     auto& pool = keet::default_thread_pool();
+    std::vector<std::function<std::future<int64_t>()>> tasks;
+    tasks.reserve(n);
+    for (size_t i = 0; i < n; ++i) {
+        tasks.push_back([&pool, i]() {
+            return pool.enqueue([i]() -> int64_t {
+                return static_cast<int64_t>((static_cast<uint64_t>(i) * 2654435761ULL) % 1000000ULL);
+            });
+        });
+    }
+
     std::vector<std::future<int64_t>> futures;
     futures.reserve(n);
-    for (size_t i = 0; i < n; ++i) {
-        futures.push_back(pool.enqueue([i]() -> int64_t {
-            return static_cast<int64_t>((static_cast<uint64_t>(i) * 2654435761ULL) % 1000000ULL);
-        }));
+    for (auto& t : tasks) {
+        futures.push_back(t());
     }
+
     int64_t total = 0;
     for (auto& fut : futures) {
         total += fut.get();

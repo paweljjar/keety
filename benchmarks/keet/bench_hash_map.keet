@@ -1,0 +1,17 @@
+fn run_hash_map_bench(n: int): int {
+    let lookup: map<string, int | string>;
+    lookup.reserve(n);
+    for (let i: int = 0; i < n; i++) {
+        let key: string = i.toString();
+        lookup[key] = i % 2 == 0 ? i : `val_${i}`;
+    }
+    let totalLen: int = 0;
+    for (const k: string, v: int | string in lookup) {
+        if (typeof(v) == "int") {
+            totalLen += v;
+        } else {
+            totalLen += (v as string).length();
+        }
+    }
+    return totalLen;
+}

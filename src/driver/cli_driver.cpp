@@ -9,6 +9,7 @@
 #include <keety/resolver/module_graph.hpp>
 #include <keety/resolver/module_path_resolver.hpp>
 #include <keety/resolver/topological_sorter.hpp>
+#include <keety/sema/const_view_checker.hpp>
 #include <keety/sema/universe.hpp>
 #include <keety/typechecker/type_checker.hpp>
 #include <keety/version.hpp>
@@ -545,6 +546,8 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
     auto universe = std::make_shared<sema::Scope>(sema::ScopeKind::Universe);
     sema::registerUniverseSymbols(*universe);
 
+    std::unordered_map<std::string, std::shared_ptr<sema::Scope>> module_scopes;
+
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
             continue;
@@ -555,8 +558,25 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
         }
 
         auto module_scope = std::make_shared<sema::Scope>(sema::ScopeKind::Module, universe);
+        for (const auto& edge : node->outgoingEdges) {
+            auto it = module_scopes.find(edge.toCanonicalPath);
+            if (it != module_scopes.end() && it->second) {
+                for (const auto& [name, sym] : it->second->getSymbols()) {
+                    if (sym && sym->isExported()) {
+                        if (sym->isVariable()) {
+                            auto constView = sema::ConstViewChecker::importExportedSymbol(sym, edge.importSpan);
+                            module_scope->define(constView, false);
+                        } else {
+                            module_scope->define(sym, false);
+                        }
+                    }
+                }
+            }
+        }
+
         typechecker::TypeChecker checker(&emitter);
         checker.checkTypes(*node->ast, module_scope.get());
+        module_scopes[node->canonicalPath] = module_scope;
 
         if (emitter.hasErrors()) {
             for (const auto& d : emitter.getDiagnostics()) {
@@ -648,6 +668,8 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
 
     const resolver::ModuleNode* target_node = nullptr;
 
+    std::unordered_map<std::string, std::shared_ptr<sema::Scope>> module_scopes;
+
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
             continue;
@@ -658,8 +680,25 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
         }
 
         auto module_scope = std::make_shared<sema::Scope>(sema::ScopeKind::Module, universe);
+        for (const auto& edge : node->outgoingEdges) {
+            auto it = module_scopes.find(edge.toCanonicalPath);
+            if (it != module_scopes.end() && it->second) {
+                for (const auto& [name, sym] : it->second->getSymbols()) {
+                    if (sym && sym->isExported()) {
+                        if (sym->isVariable()) {
+                            auto constView = sema::ConstViewChecker::importExportedSymbol(sym, edge.importSpan);
+                            module_scope->define(constView, false);
+                        } else {
+                            module_scope->define(sym, false);
+                        }
+                    }
+                }
+            }
+        }
+
         typechecker::TypeChecker checker(&emitter);
         checker.checkTypes(*node->ast, module_scope.get());
+        module_scopes[node->canonicalPath] = module_scope;
 
         if (emitter.hasErrors()) {
             for (const auto& d : emitter.getDiagnostics()) {
@@ -829,6 +868,8 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     auto universe = std::make_shared<sema::Scope>(sema::ScopeKind::Universe);
     sema::registerUniverseSymbols(*universe);
 
+    std::unordered_map<std::string, std::shared_ptr<sema::Scope>> module_scopes;
+
     // 1. Semantic and type checking across all modules
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
@@ -836,8 +877,25 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
         }
 
         auto module_scope = std::make_shared<sema::Scope>(sema::ScopeKind::Module, universe);
+        for (const auto& edge : node->outgoingEdges) {
+            auto it = module_scopes.find(edge.toCanonicalPath);
+            if (it != module_scopes.end() && it->second) {
+                for (const auto& [name, sym] : it->second->getSymbols()) {
+                    if (sym && sym->isExported()) {
+                        if (sym->isVariable()) {
+                            auto constView = sema::ConstViewChecker::importExportedSymbol(sym, edge.importSpan);
+                            module_scope->define(constView, false);
+                        } else {
+                            module_scope->define(sym, false);
+                        }
+                    }
+                }
+            }
+        }
+
         typechecker::TypeChecker checker(&emitter);
         checker.checkTypes(*node->ast, module_scope.get());
+        module_scopes[node->canonicalPath] = module_scope;
 
         if (emitter.hasErrors()) {
             for (const auto& d : emitter.getDiagnostics()) {

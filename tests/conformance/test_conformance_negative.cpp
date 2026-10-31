@@ -137,4 +137,79 @@ TEST_CASE("Negative compiler rejection conformance: Diagnostic error codes", "[c
         CHECK(err.str().find("E2005") != std::string::npos);
         CHECK(err.str().find("error[E2005]") != std::string::npos);
     }
+
+    SECTION("Reject map element mutable reference borrow with E4003 in neg_map_mut") {
+        auto test_file = locate_conformance_test("negative/neg_map_mut.keet");
+        REQUIRE(!test_file.empty());
+        REQUIRE(std::filesystem::exists(test_file));
+
+        std::ostringstream out;
+        std::ostringstream err;
+        auto opts = CliDriver::parse_args({"check", test_file.string()});
+
+        int exit_code = CliDriver::run(opts, out, err);
+        CHECK(exit_code == 1);
+        CHECK(err.str().find("E4003") != std::string::npos);
+        CHECK(err.str().find("error[E4003]") != std::string::npos);
+    }
+
+    SECTION("Reject mutable reference parameter in async function with E4004 in neg_async_mut") {
+        auto test_file = locate_conformance_test("negative/neg_async_mut.keet");
+        REQUIRE(!test_file.empty());
+        REQUIRE(std::filesystem::exists(test_file));
+
+        std::ostringstream out;
+        std::ostringstream err;
+        auto opts = CliDriver::parse_args({"check", test_file.string()});
+
+        int exit_code = CliDriver::run(opts, out, err);
+        CHECK(exit_code == 1);
+        CHECK(err.str().find("E4004") != std::string::npos);
+        CHECK(err.str().find("error[E4004]") != std::string::npos);
+    }
+
+    SECTION("Reject variable declaration without explicit type annotation with E3001 in neg_missing_type") {
+        auto test_file = locate_conformance_test("negative/neg_missing_type.keet");
+        REQUIRE(!test_file.empty());
+        REQUIRE(std::filesystem::exists(test_file));
+
+        std::ostringstream out;
+        std::ostringstream err;
+        auto opts = CliDriver::parse_args({"check", test_file.string()});
+
+        int exit_code = CliDriver::run(opts, out, err);
+        CHECK(exit_code == 1);
+        CHECK(err.str().find("E3001") != std::string::npos);
+        CHECK(err.str().find("error[E3001]") != std::string::npos);
+    }
+
+    SECTION("Reject writing to imported export let const-view with E2002 in neg_export_const_write") {
+        auto test_file = locate_conformance_test("negative/neg_export_const_write.keet");
+        REQUIRE(!test_file.empty());
+        REQUIRE(std::filesystem::exists(test_file));
+
+        std::ostringstream out;
+        std::ostringstream err;
+        auto opts = CliDriver::parse_args({"check", test_file.string()});
+
+        int exit_code = CliDriver::run(opts, out, err);
+        CHECK(exit_code == 1);
+        CHECK(err.str().find("E2002") != std::string::npos);
+        CHECK(err.str().find("error[E2002]") != std::string::npos);
+    }
+
+    SECTION("Reject simultaneous container and element mutable borrow with E4002 in neg_container_elem") {
+        auto test_file = locate_conformance_test("negative/neg_container_elem.keet");
+        REQUIRE(!test_file.empty());
+        REQUIRE(std::filesystem::exists(test_file));
+
+        std::ostringstream out;
+        std::ostringstream err;
+        auto opts = CliDriver::parse_args({"check", test_file.string()});
+
+        int exit_code = CliDriver::run(opts, out, err);
+        CHECK(exit_code == 1);
+        CHECK(err.str().find("E4002") != std::string::npos);
+        CHECK(err.str().find("error[E4002]") != std::string::npos);
+    }
 }

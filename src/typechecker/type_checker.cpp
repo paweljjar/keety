@@ -1,4 +1,5 @@
 #include <keety/typechecker/type_checker.hpp>
+#include <keety/sema/const_view_checker.hpp>
 #include <keety/sema/shadow_checker.hpp>
 #include <keety/sema/universe.hpp>
 
@@ -1433,6 +1434,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
             sym->setTypeAnnotation(varDecl->getType());
             sym->setAstNode(varDecl);
             sym->setMutable(true);
+            sym->setExported(varDecl->isExported());
             auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, sym, emitter_);
             if (!res.success) hasErrors_ = true;
         } else if (const auto* constDecl = dynamic_cast<const ast::ConstDecl*>(decl.get())) {
@@ -1440,6 +1442,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
             sym->setTypeAnnotation(constDecl->getType());
             sym->setAstNode(constDecl);
             sym->setConst(true);
+            sym->setExported(constDecl->isExported());
             auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, sym, emitter_);
             if (!res.success) hasErrors_ = true;
         } else if (const auto* defDecl = dynamic_cast<const ast::DefineDecl*>(decl.get())) {
@@ -1447,17 +1450,20 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
             sym->setTypeAnnotation(defDecl->getType());
             sym->setAstNode(defDecl);
             sym->setConst(true);
+            sym->setExported(defDecl->isExported());
             auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, sym, emitter_);
             if (!res.success) hasErrors_ = true;
         } else if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
             auto sym = std::make_shared<sema::Symbol>(fnDecl->getName(), sema::SymbolKind::Function, fnDecl->getSpan());
             sym->setTypeAnnotation(fnDecl->getReturnType());
             sym->setAstNode(fnDecl);
+            sym->setExported(fnDecl->isExported());
             auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, sym, emitter_);
             if (!res.success) hasErrors_ = true;
         } else if (const auto* clsDecl = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
             auto sym = std::make_shared<sema::Symbol>(clsDecl->getName(), sema::SymbolKind::Class, clsDecl->getSpan());
             sym->setAstNode(clsDecl);
+            sym->setExported(clsDecl->isExported());
             auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, sym, emitter_);
             if (!res.success) hasErrors_ = true;
         }
@@ -2170,6 +2176,17 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             }
             if (unary->getOperand()) {
                 if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(unary->getOperand())) {
+                    if (auto sym = scope.lookup(ident->getName())) {
+                        if (sym->isConstView()) {
+                            if (emitter_) {
+                                emitter_->report(sema::ConstViewChecker::createConstViewWriteDiagnostic(
+                                    *sym, unary->getSpan(), sema::MutationKind::IncrementDecrement));
+                            }
+                            hasErrors_ = true;
+                        } else if (sym->isConstant() || sym->isConst() || !sym->isMutable()) {
+                            reportCannotAssignToConstant(ident->getName(), unary->getSpan());
+                        }
+                    }
                     scope.resetNarrowedType(ident->getName());
                 }
             }
@@ -2201,8 +2218,17 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(binary->getLeft())) {
                 varName = ident->getName();
                 auto sym = scope.lookup(varName);
-                if (sym && (sym->isConstant() || sym->isConst())) {
-                    reportCannotAssignToConstant(varName, binary->getLeft()->getSpan());
+                if (sym) {
+                    if (sym->isConstView()) {
+                        if (emitter_) {
+                            emitter_->report(sema::ConstViewChecker::createConstViewWriteDiagnostic(
+                                *sym, binary->getLeft()->getSpan(),
+                                op == lexer::TokenKind::Equal ? sema::MutationKind::Assignment : sema::MutationKind::CompoundAssignment));
+                        }
+                        hasErrors_ = true;
+                    } else if (sym->isConstant() || sym->isConst() || !sym->isMutable()) {
+                        reportCannotAssignToConstant(varName, binary->getLeft()->getSpan());
+                    }
                 }
             }
 

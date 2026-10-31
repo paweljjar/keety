@@ -1,0 +1,5 @@
+import "./neg_export_const_write_helper";
+
+fn testExportConstWrite(): void {
+    requestCount = 20;
+}

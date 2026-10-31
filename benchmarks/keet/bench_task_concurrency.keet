@@ -1,0 +1,16 @@
+async fn computeHash(val: int): int {
+    return (val * 2654435761) % 1000000;
+}
+
+fn run_task_concurrency_bench(n: int): int {
+    let tasks: array<async () => int>;
+    tasks.reserve(n);
+    for (let i: int = 0; i < n; i++) {
+        tasks.push(async fn (): int { return await computeHash(i); });
+    }
+    let total: int = 0;
+    for (const t: async () => int in tasks) {
+        total += await t();
+    }
+    return total;
+}

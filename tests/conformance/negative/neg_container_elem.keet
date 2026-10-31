@@ -1,0 +1,9 @@
+fn touch(mut arr: array<int>, mut elem: int): void {
+    elem += 1;
+}
+
+fn main(): int {
+    let list: array<int> = [1, 2, 3];
+    touch(mut list, mut list[0]);
+    return 0;
+}
