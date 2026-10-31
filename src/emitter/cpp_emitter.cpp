@@ -140,6 +140,15 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
     for (const auto& decl : decls) {
         if (!decl) continue;
         if (const auto* fn = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+            if (fn->getName() == "main") {
+                has_main_function_ = true;
+                main_has_args_ = !fn->getParams().empty();
+                if (fn->getReturnType()) {
+                    if (const auto* prim = dynamic_cast<const ast::PrimitiveType*>(fn->getReturnType())) {
+                        main_returns_int_ = (prim->getKind() == ast::PrimitiveTypeKind::Int);
+                    }
+                }
+            }
             if (!fn->isGeneric() && fn->getBody()) {
                 add_function_definition(translate_function(*fn));
             }
@@ -169,6 +178,13 @@ void CppEmitter::collect_ir_declarations(const ir::Module& ir_module) {
 
     for (const auto& fn : ir_module.get_functions()) {
         if (fn) {
+            if (fn->get_name() == "main" || fn->get_name() == "_keet_main") {
+                has_main_function_ = true;
+                main_has_args_ = !fn->get_parameters().empty();
+                if (fn->get_return_type()) {
+                    main_returns_int_ = fn->get_return_type()->isInt();
+                }
+            }
             add_function_definition(translate_ir_function(*fn));
         }
     }
@@ -253,6 +269,9 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
     if (const auto* id = dynamic_cast<const ast::IdentExpr*>(expr)) {
         if (id->getName() == "this") {
             return "this";
+        }
+        if (id->getName() == "main") {
+            return "_keet_main";
         }
         if (is_module_var(id->getName())) {
             return make_internal_var_name(id->getName());
@@ -591,8 +610,9 @@ std::string CppEmitter::translate_function(const ast::FnDecl& fn) const {
         params_str += HeaderEmitter::format_param(fn.getParams()[i], fn.getTypeParams());
     }
 
+    std::string fn_name = (fn.getName() == "main") ? "_keet_main" : fn.getName();
     std::ostringstream ss;
-    ss << "    " << ret_type << " " << fn.getName() << "(" << params_str << ") {\n";
+    ss << "    " << ret_type << " " << fn_name << "(" << params_str << ") {\n";
     if (fn.getBody()) {
         if (const auto* block = dynamic_cast<const ast::BlockStmt*>(fn.getBody())) {
             ss << translate_block(block, 2);
@@ -645,8 +665,9 @@ std::string CppEmitter::translate_ir_function(const ir::Function& fn) const {
         }
     }
 
+    std::string fn_name = (fn.get_name() == "main") ? "_keet_main" : fn.get_name();
     std::ostringstream ss;
-    ss << "    " << ret_type << " " << fn.get_name() << "(" << params_str << ") {\n";
+    ss << "    " << ret_type << " " << fn_name << "(" << params_str << ") {\n";
 
     for (size_t b_idx = 0; b_idx < fn.get_blocks().size(); ++b_idx) {
         const auto& bb = fn.get_blocks()[b_idx];
@@ -830,9 +851,54 @@ std::string CppEmitter::emit_function_definitions() const {
     return ss.str();
 }
 
+bool CppEmitter::is_root_module() const noexcept {
+    if (manual_root_override_) {
+        return options_.is_root_module;
+    }
+    return options_.is_root_module || has_main_function_;
+}
+
 std::string CppEmitter::emit_main_wrapper() const {
-    // Stub for root entry point
-    return "";
+    std::ostringstream ss;
+    ss << "int main(int argc, char* argv[]) {\n";
+    ss << "    try {\n";
+
+    std::string ns = get_namespace_name();
+    if (main_has_args_ || !has_main_function_) {
+        ss << "        std::vector<std::string> args;\n";
+        ss << "        args.reserve(argc);\n";
+        ss << "        for (int i = 0; i < argc; ++i) {\n";
+        ss << "            args.emplace_back(argv[i]);\n";
+        ss << "        }\n";
+    }
+
+    if (has_main_function_) {
+        std::string call_str = ns + "::_keet_main(";
+        if (main_has_args_) {
+            call_str += "std::move(args)";
+        }
+        call_str += ");";
+
+        if (main_returns_int_) {
+            ss << "        return static_cast<int>(" << call_str.substr(0, call_str.size() - 1) << ");\n";
+        } else {
+            ss << "        " << call_str << "\n";
+            ss << "        return 0;\n";
+        }
+    } else {
+        ss << "        return 0;\n";
+    }
+
+    ss << "    } catch (const keet::error& err) {\n";
+    ss << "        std::cerr << \"Uncaught error: \" << err.toString() << \"\\n\";\n";
+    ss << "        return 1;\n";
+    ss << "    } catch (const std::exception& ex) {\n";
+    ss << "        std::cerr << \"Uncaught native C++ exception: \" << ex.what() << \"\\n\";\n";
+    ss << "        return 1;\n";
+    ss << "    }\n";
+    ss << "}\n";
+
+    return ss.str();
 }
 
 std::string CppEmitter::emit_namespace_body() const {
@@ -879,7 +945,7 @@ std::string CppEmitter::emit() const {
         }
     }
 
-    if (options_.is_root_module) {
+    if (is_root_module()) {
         std::string main_wrap = emit_main_wrapper();
         if (!main_wrap.empty()) {
             ss << "\n" << main_wrap;

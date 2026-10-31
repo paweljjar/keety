@@ -337,3 +337,132 @@ TEST_CASE("C++ Implementation Emitter translates IR functions and instructions",
     }
 }
 
+TEST_CASE("C++ Implementation Emitter emits root main process wrapper with exception handlers", "[emitter][main]") {
+    SECTION("Emits wrapper for fn main(args: array<string>): int") {
+        const std::string source = R"(
+            fn main(args: array<string>): int {
+                return 0;
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "cli_app");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+
+        REQUIRE(cpp.find("int64_t _keet_main(const std::vector<std::string>& args) {") != std::string::npos);
+        REQUIRE(cpp.find("int main(int argc, char* argv[]) {") != std::string::npos);
+        REQUIRE(cpp.find("std::vector<std::string> args;") != std::string::npos);
+        REQUIRE(cpp.find("args.reserve(argc);") != std::string::npos);
+        REQUIRE(cpp.find("args.emplace_back(argv[i]);") != std::string::npos);
+        REQUIRE(cpp.find("return static_cast<int>(keet_module_cli_app::_keet_main(std::move(args)));") != std::string::npos);
+        REQUIRE(cpp.find("catch (const keet::error& err) {") != std::string::npos);
+        REQUIRE(cpp.find("std::cerr << \"Uncaught error: \" << err.toString() << \"\\n\";") != std::string::npos);
+        REQUIRE(cpp.find("catch (const std::exception& ex) {") != std::string::npos);
+        REQUIRE(cpp.find("std::cerr << \"Uncaught native C++ exception: \" << ex.what() << \"\\n\";") != std::string::npos);
+    }
+
+    SECTION("Emits wrapper for fn main(): void") {
+        const std::string source = R"(
+            fn main(): void {
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "service");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+
+        REQUIRE(cpp.find("void _keet_main() {") != std::string::npos);
+        REQUIRE(cpp.find("int main(int argc, char* argv[]) {") != std::string::npos);
+        REQUIRE(cpp.find("keet_module_service::_keet_main();") != std::string::npos);
+        REQUIRE(cpp.find("return 0;") != std::string::npos);
+    }
+
+    SECTION("Emits wrapper for fn main(): int") {
+        const std::string source = R"(
+            fn main(): int {
+                return 42;
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "calculator");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+
+        REQUIRE(cpp.find("int64_t _keet_main() {") != std::string::npos);
+        REQUIRE(cpp.find("return static_cast<int>(keet_module_calculator::_keet_main());") != std::string::npos);
+    }
+
+    SECTION("Emits wrapper for fn main(args: array<string>): void") {
+        const std::string source = R"(
+            fn main(args: array<string>): void {
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "reporter");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+
+        REQUIRE(cpp.find("void _keet_main(const std::vector<std::string>& args) {") != std::string::npos);
+        REQUIRE(cpp.find("keet_module_reporter::_keet_main(std::move(args));") != std::string::npos);
+        REQUIRE(cpp.find("return 0;") != std::string::npos);
+    }
+
+    SECTION("Does not emit main wrapper for non-root library modules") {
+        const std::string source = R"(
+            fn calculate(x: int): int {
+                return x * 2;
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "math_lib");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+
+        REQUIRE(cpp.find("int main(int argc, char* argv[])") == std::string::npos);
+        REQUIRE(cpp.find("int64_t calculate(int64_t x) {") != std::string::npos);
+    }
+
+    SECTION("Allows explicit suppression or enablement via set_root_module") {
+        const std::string source = R"(
+            fn main(): void {
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "worker");
+        keety::emitter::CppEmitter emitter(ast);
+        emitter.set_root_module(false);
+
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("int main(int argc, char* argv[])") == std::string::npos);
+
+        emitter.set_root_module(true);
+        cpp = emitter.emit();
+        REQUIRE(cpp.find("int main(int argc, char* argv[])") != std::string::npos);
+    }
+
+    SECTION("Emits main wrapper for IR Module declaring main function") {
+        using namespace keety::typechecker;
+        keety::ir::Module irModule("ir_root");
+
+        auto fn = std::make_unique<keety::ir::Function>("main", std::make_shared<Type>(TypeKind::Int));
+        fn->add_parameter(keety::ir::FunctionParameter{"args", std::make_shared<ArrayType>(std::make_shared<Type>(TypeKind::String)), false, true, false});
+        auto* entry = fn->create_basic_block("entry");
+        entry->append_instruction(std::make_unique<keety::ir::ReturnInst>(keety::ir::Operand::create_int(0)));
+        irModule.add_function(std::move(fn));
+
+        keety::emitter::CppEmitter emitter(irModule);
+        std::string cpp = emitter.emit();
+
+        REQUIRE(cpp.find("int64_t _keet_main(const std::vector<std::string>& args) {") != std::string::npos);
+        REQUIRE(cpp.find("int main(int argc, char* argv[]) {") != std::string::npos);
+        REQUIRE(cpp.find("return static_cast<int>(keet_module_ir_root::_keet_main(std::move(args)));") != std::string::npos);
+        REQUIRE(cpp.find("catch (const keet::error& err) {") != std::string::npos);
+    }
+}
+
+

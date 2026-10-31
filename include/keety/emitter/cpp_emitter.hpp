@@ -93,6 +93,13 @@ public:
     [[nodiscard]] std::string emit_namespace_end() const;
     [[nodiscard]] std::string emit_main_wrapper() const;
 
+    [[nodiscard]] bool is_root_module() const noexcept;
+    void set_root_module(bool is_root) noexcept {
+        options_.is_root_module = is_root;
+        manual_root_override_ = true;
+    }
+    [[nodiscard]] bool has_main_function() const noexcept { return has_main_function_; }
+
     [[nodiscard]] std::string emit() const;
     void emit(std::ostream& os) const;
 
@@ -109,6 +116,11 @@ private:
     std::vector<std::string> storage_allocations_;
     std::vector<std::string> function_definitions_;
     std::vector<std::string> module_vars_;
+
+    bool has_main_function_{false};
+    bool main_has_args_{false};
+    bool main_returns_int_{false};
+    bool manual_root_override_{false};
 };
 
 } // namespace keety::emitter

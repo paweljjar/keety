@@ -123,7 +123,7 @@ This document specifies the operational development plan for the `keety` compile
 #### **Phase 5.2: C++ Implementation Emitter (`<module>.cpp`)**
 - [x] **Task 5.2.1:** Emit storage allocations for module-level variables (`_internal_<name>`).
 - [x] **Task 5.2.2:** Translate function bodies to C++17 using `std::variant`, `std::vector`, `std::unordered_map`.
-- [ ] **Task 5.2.3:** Emit root `main(int argc, char* argv[])` with uncaught `keet::error` and `std::exception` handlers.
+- [x] **Task 5.2.3:** Emit root `main(int argc, char* argv[])` with uncaught `keet::error` and `std::exception` handlers.
 
 #### **Phase 5.3: Native Toolchain Driver**
 - [ ] **Task 5.3.1:** Detect platform C++ toolchain (`clang++`, `g++`, `cl.exe`).
