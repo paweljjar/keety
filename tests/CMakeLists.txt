@@ -59,6 +59,7 @@ add_executable(keety_unit_tests
     conformance/test_conformance_scalars.cpp
     conformance/test_conformance_values_mut.cpp
     conformance/test_conformance_unions.cpp
+    conformance/test_conformance_classes.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE

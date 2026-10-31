@@ -1,0 +1,75 @@
+class Entity {
+    pub let id: int = 1;
+    pub let active: bool = true;
+
+    fn isAlive(): bool {
+        return this.active;
+    }
+
+    fn deactivate(): void {
+        this.active = false;
+    }
+}
+
+class Player inherits Entity {
+    pub let name: string;
+    pub let score: int = 0;
+
+    fn addScore(pts: int): void {
+        this.score += pts;
+    }
+}
+
+class Boss inherits Player {
+    pub let multiplier: int = 2;
+
+    fn specialScore(basePts: int): void {
+        this.addScore(basePts * this.multiplier);
+    }
+}
+
+fn main(): int {
+    let p1: Player = Player();
+    if (p1.id != 1) {
+        return 1;
+    }
+    if (!p1.isAlive()) {
+        return 2;
+    }
+    p1.deactivate();
+    if (p1.isAlive()) {
+        return 3;
+    }
+
+    let p2: Player = Player("Hero", 150);
+    if (p2.name != "Hero") {
+        return 4;
+    }
+    if (p2.score != 150) {
+        return 5;
+    }
+    if (!p2.isAlive()) {
+        return 6;
+    }
+    p2.addScore(50);
+    if (p2.score != 200) {
+        return 7;
+    }
+
+    let b: Boss = Boss(3);
+    if (b.multiplier != 3) {
+        return 8;
+    }
+    if (b.id != 1) {
+        return 9;
+    }
+    if (!b.isAlive()) {
+        return 10;
+    }
+    b.specialScore(25);
+    if (b.score != 75) {
+        return 11;
+    }
+
+    return 0;
+}

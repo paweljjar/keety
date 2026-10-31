@@ -547,8 +547,23 @@ std::string HeaderEmitter::generate_class_def(const ast::ClassDecl& cls) {
 
     if (!cls.getFields().empty()) {
         ss << "\n";
+        std::string ctor_params;
+        std::string ctor_inits;
+        for (const auto& field : cls.getFields()) {
+            std::string fld_type = field.type ? to_cpp_type(field.type.get()) : "auto";
+            if (!ctor_params.empty()) ctor_params += ", ";
+            ctor_params += fld_type + " " + field.name;
+            if (ctor_inits.empty()) {
+                ctor_inits = " : " + field.name + "(std::move(" + field.name + "))";
+            } else {
+                ctor_inits += ", " + field.name + "(std::move(" + field.name + "))";
+            }
+        }
+        ss << "        " << cls.getName() << "() = default;\n";
+        ss << "        " << cls.getName() << "(" << ctor_params << ")" << ctor_inits << " {}\n";
+    } else {
+        ss << "        " << cls.getName() << "() = default;\n";
     }
-    ss << "        " << cls.getName() << "() = default;\n";
 
     for (const auto& method : cls.getMethods()) {
         std::string ret_type = method->getReturnType() ? to_cpp_type(method->getReturnType()) : "void";

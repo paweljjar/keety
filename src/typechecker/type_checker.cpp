@@ -847,7 +847,8 @@ bool TypeChecker::isMutableLValue(const ast::Expr* expr, sema::Scope& scope, std
             auto clsName = static_cast<const CustomType*>(objType.get())->getName();
             auto clsSym = scope.lookup(clsName);
             if (clsSym && clsSym->getAstNode()) {
-                if (const auto* clsDecl = dynamic_cast<const ast::ClassDecl*>(clsSym->getAstNode())) {
+                const auto* clsDecl = dynamic_cast<const ast::ClassDecl*>(clsSym->getAstNode());
+                while (clsDecl) {
                     for (const auto& f : clsDecl->getFields()) {
                         if (f.name == member->getMemberName()) {
                             if (f.isConst) {
@@ -856,6 +857,12 @@ bool TypeChecker::isMutableLValue(const ast::Expr* expr, sema::Scope& scope, std
                             }
                             return true;
                         }
+                    }
+                    if (clsDecl->hasBaseClass()) {
+                        auto baseSym = scope.lookup(clsDecl->getBaseClass());
+                        clsDecl = (baseSym && baseSym->getAstNode()) ? dynamic_cast<const ast::ClassDecl*>(baseSym->getAstNode()) : nullptr;
+                    } else {
+                        clsDecl = nullptr;
                     }
                 }
             }
@@ -1339,8 +1346,25 @@ bool TypeChecker::checkAssignment(
 
     // Check assignability using union subtyping & canonical algebra
     if (!actualType->isAssignableTo(*expectedType)) {
-        reportTypeMismatch(expectedType, actualType, span, contextDesc);
-        return false;
+        bool isSubclass = false;
+        if (actualType->isCustom() && expectedType->isCustom() && currentScope_) {
+            auto curName = static_cast<const CustomType*>(actualType.get())->getName();
+            auto targetName = static_cast<const CustomType*>(expectedType.get())->getName();
+            auto sym = currentScope_->lookup(curName);
+            const auto* cls = (sym && sym->getAstNode()) ? dynamic_cast<const ast::ClassDecl*>(sym->getAstNode()) : nullptr;
+            while (cls && cls->hasBaseClass()) {
+                if (cls->getBaseClass() == targetName) {
+                    isSubclass = true;
+                    break;
+                }
+                auto baseSym = currentScope_->lookup(cls->getBaseClass());
+                cls = (baseSym && baseSym->getAstNode()) ? dynamic_cast<const ast::ClassDecl*>(baseSym->getAstNode()) : nullptr;
+            }
+        }
+        if (!isSubclass) {
+            reportTypeMismatch(expectedType, actualType, span, contextDesc);
+            return false;
+        }
     }
 
     return true;
@@ -1360,6 +1384,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
         ownedModule = ownedUniverse->createChild(sema::ScopeKind::Module);
         targetScope = ownedModule.get();
     }
+    currentScope_ = targetScope;
 
     // Pass 1: Register top-level module declarations in scope so forward calls can resolve
     for (const auto& decl : module.declarations) {
@@ -1481,6 +1506,26 @@ bool TypeChecker::checkZeroCoercion(const ast::Decl& decl, sema::Scope& scope) {
         currentFunctionReturnType_ = prevRet;
     } else if (const auto* classDecl = dynamic_cast<const ast::ClassDecl*>(&decl)) {
         auto classScope = scope.createChild(sema::ScopeKind::Class);
+
+        if (classDecl->hasBaseClass()) {
+            auto baseSym = scope.lookup(classDecl->getBaseClass());
+            const auto* baseDecl = (baseSym && baseSym->getAstNode()) ? dynamic_cast<const ast::ClassDecl*>(baseSym->getAstNode()) : nullptr;
+            while (baseDecl) {
+                for (const auto& bf : baseDecl->getFields()) {
+                    auto bfSym = std::make_shared<sema::Symbol>(bf.name, sema::SymbolKind::Field, bf.span);
+                    bfSym->setTypeAnnotation(bf.type.get());
+                    bfSym->setMutable(!bf.isConst);
+                    bfSym->setConst(bf.isConst);
+                    classScope->define(bfSym);
+                }
+                if (baseDecl->hasBaseClass()) {
+                    auto nextSym = scope.lookup(baseDecl->getBaseClass());
+                    baseDecl = (nextSym && nextSym->getAstNode()) ? dynamic_cast<const ast::ClassDecl*>(nextSym->getAstNode()) : nullptr;
+                } else {
+                    baseDecl = nullptr;
+                }
+            }
+        }
 
         for (const auto& field : classDecl->getFields()) {
             checkTypeAnnotationValidity(field.type.get());
@@ -2249,12 +2294,20 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 auto clsName = static_cast<const CustomType*>(objType.get())->getName();
                 auto clsSym = scope.lookup(clsName);
                 if (clsSym && clsSym->getAstNode()) {
-                    if (const auto* clsDecl = dynamic_cast<const ast::ClassDecl*>(clsSym->getAstNode())) {
+                    const auto* clsDecl = dynamic_cast<const ast::ClassDecl*>(clsSym->getAstNode());
+                    while (clsDecl) {
                         for (const auto& m : clsDecl->getMethods()) {
                             if (m && m->getName() == member->getMemberName()) {
                                 methodDecl = m.get();
                                 break;
                             }
+                        }
+                        if (methodDecl) break;
+                        if (clsDecl->hasBaseClass()) {
+                            auto baseSym = scope.lookup(clsDecl->getBaseClass());
+                            clsDecl = (baseSym && baseSym->getAstNode()) ? dynamic_cast<const ast::ClassDecl*>(baseSym->getAstNode()) : nullptr;
+                        } else {
+                            clsDecl = nullptr;
                         }
                     }
                 }
@@ -2304,8 +2357,10 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
         if (const auto* calleeIdent = dynamic_cast<const ast::IdentExpr*>(call->getCallee())) {
             auto sym = scope.lookup(calleeIdent->getName());
             const ast::FnDecl* fnDecl = nullptr;
+            const ast::ClassDecl* clsDecl = nullptr;
             if (sym && sym->getAstNode()) {
                 fnDecl = dynamic_cast<const ast::FnDecl*>(sym->getAstNode());
+                clsDecl = dynamic_cast<const ast::ClassDecl*>(sym->getAstNode());
             }
 
             // Check overloads if sym itself is not a matching FnDecl
@@ -2381,6 +2436,24 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     scope.resetNarrowedType(v);
                 }
                 return Type::fromAnnotation(funcTypeAnnotation->getReturnType());
+            } else if (clsDecl) {
+                for (size_t i = 0; i < call->getArgs().size(); ++i) {
+                    const auto& arg = call->getArgs()[i];
+                    if (arg.value) {
+                        TypePtr pType = (i < clsDecl->getFields().size())
+                            ? Type::fromAnnotation(clsDecl->getFields()[i].type.get())
+                            : nullptr;
+                        auto argType = inferType(*arg.value, scope, pType);
+                        if (pType) {
+                            checkAssignment(pType, argType, arg.value->getSpan(), "constructor argument");
+                        }
+                        checkCallArg(arg, arg.isMut);
+                    }
+                }
+                for (const auto& v : mutatedVars) {
+                    scope.resetNarrowedType(v);
+                }
+                return Type::custom(clsDecl->getName());
             }
         }
 
@@ -2562,11 +2635,18 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             auto clsName = static_cast<const CustomType*>(objType.get())->getName();
             auto clsSym = scope.lookup(clsName);
             if (clsSym && clsSym->getAstNode()) {
-                if (const auto* clsDecl = dynamic_cast<const ast::ClassDecl*>(clsSym->getAstNode())) {
+                const auto* clsDecl = dynamic_cast<const ast::ClassDecl*>(clsSym->getAstNode());
+                while (clsDecl) {
                     for (const auto& f : clsDecl->getFields()) {
                         if (f.name == member->getMemberName()) {
                             return Type::fromAnnotation(f.type.get());
                         }
+                    }
+                    if (clsDecl->hasBaseClass()) {
+                        auto baseSym = scope.lookup(clsDecl->getBaseClass());
+                        clsDecl = (baseSym && baseSym->getAstNode()) ? dynamic_cast<const ast::ClassDecl*>(baseSym->getAstNode()) : nullptr;
+                    } else {
+                        clsDecl = nullptr;
                     }
                 }
             }

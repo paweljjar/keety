@@ -199,6 +199,7 @@ private:
     diag::DiagnosticEmitter* emitter_{nullptr};
     bool hasErrors_{false};
     TypePtr currentFunctionReturnType_{nullptr};
+    sema::Scope* currentScope_{nullptr};
 
     void reportMissingType(std::string_view entityKind, std::string_view entityName, diag::SourceSpan span);
     void reportImplicitWidening(TypePtr fromType, TypePtr toType, diag::SourceSpan span, std::string_view contextDesc);
