@@ -779,7 +779,8 @@ Operand AstLowerer::lower_call_expr(const ast::CallExpr& expr) {
     } else if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(expr.getCallee())) {
         const std::string& name = ident->getName();
         if (has_io_import_ && (imported_io_symbols_.count(name) ||
-            name == "print" || name == "println" || name == "readln" || name == "readLine" ||
+            name == "print" || name == "println" || name == "eprint" || name == "eprintln" ||
+            name == "readln" || name == "readLine" || name == "read_line" || name == "eof" ||
             name == "input" || name == "flush" || name == "red" || name == "green" ||
             name == "yellow" || name == "blue" || name == "magenta" || name == "cyan" ||
             name == "white" || name == "gray" || name == "bold")) {

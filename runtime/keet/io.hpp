@@ -1,17 +1,22 @@
 #pragma once
 
 #include <keet/bool_byte.hpp>
+#include <keet/error.hpp>
 
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
+#include <variant>
+#include <vector>
 
 #if defined(_WIN32)
 #include <io.h>
@@ -63,16 +68,94 @@ inline std::optional<bool>& color_override_ref() noexcept {
     return override_val;
 }
 
-[[nodiscard]] inline bool detect_terminal() noexcept {
-    return KEET_ISATTY(KEET_FILENO(stdout)) != 0;
+[[nodiscard]] inline bool detect_terminal_stream(const std::ostream& out) noexcept {
+    if (&out == &std::cout) {
+        return KEET_ISATTY(KEET_FILENO(stdout)) != 0;
+    }
+    if (&out == &std::cerr) {
+        return KEET_ISATTY(KEET_FILENO(stderr)) != 0;
+    }
+    return false;
 }
+
+template <typename T> struct is_vector : std::false_type {};
+template <typename T, typename A> struct is_vector<std::vector<T, A>> : std::true_type {};
+template <typename T> inline constexpr bool is_vector_v = is_vector<T>::value;
+
+template <typename T> struct is_optional : std::false_type {};
+template <typename T> struct is_optional<std::optional<T>> : std::true_type {};
+template <typename T> inline constexpr bool is_optional_v = is_optional<T>::value;
+
+template <typename T> struct is_variant : std::false_type {};
+template <typename... Ts> struct is_variant<std::variant<Ts...>> : std::true_type {};
+template <typename T> inline constexpr bool is_variant_v = is_variant<T>::value;
+
+template <typename T> struct is_map : std::false_type {};
+template <typename K, typename V, typename H, typename E, typename A>
+struct is_map<std::unordered_map<K, V, H, E, A>> : std::true_type {};
+template <typename K, typename V, typename C, typename A>
+struct is_map<std::map<K, V, C, A>> : std::true_type {};
+template <typename T> inline constexpr bool is_map_v = is_map<T>::value;
+
+template <typename T, typename = void>
+struct has_to_string : std::false_type {};
+
+template <typename T>
+struct has_to_string<T, std::void_t<decltype(std::declval<const T&>().toString())>> : std::true_type {};
+
+template <typename T>
+inline constexpr bool has_to_string_v = has_to_string<T>::value;
+
+template <typename T, typename = void>
+struct has_to_string_lower : std::false_type {};
+
+template <typename T>
+struct has_to_string_lower<T, std::void_t<decltype(std::declval<const T&>().to_string())>> : std::true_type {};
+
+template <typename T>
+inline constexpr bool has_to_string_lower_v = has_to_string_lower<T>::value;
 
 template <typename T>
 void print_single_arg(std::ostream& out, const T& arg) {
-    if constexpr (std::is_same_v<std::decay_t<T>, bool>) {
+    using DecayT = std::decay_t<T>;
+    if constexpr (std::is_same_v<DecayT, bool>) {
         out << (arg ? "true" : "false");
-    } else if constexpr (std::is_same_v<std::decay_t<T>, keet::BoolByte>) {
+    } else if constexpr (std::is_same_v<DecayT, keet::BoolByte>) {
         out << (static_cast<bool>(arg) ? "true" : "false");
+    } else if constexpr (std::is_same_v<DecayT, std::monostate> || std::is_same_v<DecayT, std::nullptr_t>) {
+        out << "null";
+    } else if constexpr (is_optional_v<DecayT>) {
+        if (arg.has_value()) {
+            print_single_arg(out, *arg);
+        } else {
+            out << "null";
+        }
+    } else if constexpr (is_variant_v<DecayT>) {
+        std::visit([&out](const auto& val) {
+            print_single_arg(out, val);
+        }, arg);
+    } else if constexpr (is_vector_v<DecayT>) {
+        out << '[';
+        for (size_t i = 0; i < arg.size(); ++i) {
+            if (i > 0) out << ", ";
+            print_single_arg(out, arg[i]);
+        }
+        out << ']';
+    } else if constexpr (is_map_v<DecayT>) {
+        out << '{';
+        size_t idx = 0;
+        for (const auto& [k, v] : arg) {
+            if (idx > 0) out << ", ";
+            print_single_arg(out, k);
+            out << ": ";
+            print_single_arg(out, v);
+            ++idx;
+        }
+        out << '}';
+    } else if constexpr (has_to_string_v<DecayT>) {
+        out << arg.toString();
+    } else if constexpr (has_to_string_lower_v<DecayT>) {
+        out << arg.to_string();
     } else {
         out << arg;
     }
@@ -119,42 +202,75 @@ inline void reset_color_enabled() noexcept {
     detail::color_override_ref() = std::nullopt;
 }
 
-/// Checks whether ANSI color escapes should be generated.
-[[nodiscard]] inline bool is_color_enabled() noexcept {
+/// Checks whether standard output or the specified stream is connected to an interactive terminal.
+[[nodiscard]] inline bool detect_terminal(const std::ostream& out = std::cout) noexcept {
+    return detail::detect_terminal_stream(out);
+}
+
+/// Checks whether ANSI color escapes should be generated for the specified output stream.
+/// Precedence:
+/// 1. Explicit override via set_color_enabled(bool)
+/// 2. NO_COLOR environment variable: if present (even if empty), disables automatic color
+/// 3. Stream-specific TTY detection (isatty)
+[[nodiscard]] inline bool is_color_enabled(const std::ostream& out = std::cout) noexcept {
     if (detail::color_override_ref().has_value()) {
         return *detail::color_override_ref();
     }
     const char* no_color = std::getenv("NO_COLOR");
-    if (no_color != nullptr && no_color[0] != '\0') {
+    if (no_color != nullptr) {
         return false;
     }
-    return detail::detect_terminal();
+    return detail::detect_terminal_stream(out);
 }
 
-/// Wraps text in ANSI escape sequence for the given color if enabled.
-[[nodiscard]] inline std::string colorize(std::string_view text, Color color) {
-    if (!is_color_enabled() || color == Color::Default) {
+/// Wraps text with an ANSI prefix and suffixes with \033[0m if colors are enabled for the stream.
+/// If text is empty or colors are disabled, returns unmodified text.
+/// Restores enclosing style if text contains inner reset sequences (\033[0m).
+[[nodiscard]] inline std::string style_wrap(std::string_view text, std::string_view prefix, const std::ostream& out = std::cout) {
+    if (text.empty() || !is_color_enabled(out) || prefix.empty()) {
         return std::string(text);
     }
-    return std::string(color_code(color)) + std::string(text) + "\033[0m";
-}
-
-/// Wraps text in ANSI bold escape sequence if colors are enabled.
-[[nodiscard]] inline std::string bold(std::string_view s) {
-    if (!is_color_enabled()) {
-        return std::string(s);
+    std::string s(text);
+    static constexpr std::string_view reset_seq = "\033[0m";
+    size_t pos = 0;
+    while ((pos = s.find(reset_seq, pos)) != std::string::npos) {
+        if (pos + reset_seq.size() < s.size()) {
+            pos += reset_seq.size();
+            s.insert(pos, prefix);
+            pos += prefix.size();
+        } else {
+            break;
+        }
     }
-    return std::string("\033[1m") + std::string(s) + "\033[0m";
+    bool ends_with_reset = (s.size() >= reset_seq.size() &&
+                            s.compare(s.size() - reset_seq.size(), reset_seq.size(), reset_seq) == 0);
+    return std::string(prefix) + s + (ends_with_reset ? "" : "\033[0m");
 }
 
-[[nodiscard]] inline std::string red(std::string_view s) { return colorize(s, Color::Red); }
-[[nodiscard]] inline std::string green(std::string_view s) { return colorize(s, Color::Green); }
-[[nodiscard]] inline std::string yellow(std::string_view s) { return colorize(s, Color::Yellow); }
-[[nodiscard]] inline std::string blue(std::string_view s) { return colorize(s, Color::Blue); }
-[[nodiscard]] inline std::string magenta(std::string_view s) { return colorize(s, Color::Magenta); }
-[[nodiscard]] inline std::string cyan(std::string_view s) { return colorize(s, Color::Cyan); }
-[[nodiscard]] inline std::string white(std::string_view s) { return colorize(s, Color::White); }
-[[nodiscard]] inline std::string gray(std::string_view s) { return colorize(s, Color::Gray); }
+/// Wraps text in ANSI escape sequence for the given color if enabled for the stream.
+/// If text is empty or colors are disabled, returns unmodified text.
+/// Restores enclosing color if text contains inner reset sequences (\033[0m).
+[[nodiscard]] inline std::string colorize(std::string_view text, Color color, const std::ostream& out = std::cout) {
+    if (color == Color::Default) {
+        return std::string(text);
+    }
+    return style_wrap(text, color_code(color), out);
+}
+
+/// Wraps text in ANSI bold escape sequence if colors are enabled for the stream.
+/// Restores enclosing bold attribute if text contains inner reset sequences (\033[0m).
+[[nodiscard]] inline std::string bold(std::string_view s, const std::ostream& out = std::cout) {
+    return style_wrap(s, "\033[1m", out);
+}
+
+[[nodiscard]] inline std::string red(std::string_view s, const std::ostream& out = std::cout) { return colorize(s, Color::Red, out); }
+[[nodiscard]] inline std::string green(std::string_view s, const std::ostream& out = std::cout) { return colorize(s, Color::Green, out); }
+[[nodiscard]] inline std::string yellow(std::string_view s, const std::ostream& out = std::cout) { return colorize(s, Color::Yellow, out); }
+[[nodiscard]] inline std::string blue(std::string_view s, const std::ostream& out = std::cout) { return colorize(s, Color::Blue, out); }
+[[nodiscard]] inline std::string magenta(std::string_view s, const std::ostream& out = std::cout) { return colorize(s, Color::Magenta, out); }
+[[nodiscard]] inline std::string cyan(std::string_view s, const std::ostream& out = std::cout) { return colorize(s, Color::Cyan, out); }
+[[nodiscard]] inline std::string white(std::string_view s, const std::ostream& out = std::cout) { return colorize(s, Color::White, out); }
+[[nodiscard]] inline std::string gray(std::string_view s, const std::ostream& out = std::cout) { return colorize(s, Color::Gray, out); }
 
 /// Flushes standard output or specified stream.
 inline void flush(std::ostream& out = std::cout) {
@@ -172,7 +288,7 @@ void print_to(std::ostream& out, Args&&... args) {
             auto t = std::forward_as_tuple(std::forward<Args>(args)...);
             Color color = std::get<sizeof...(Args) - 1>(t);
             auto printable = detail::take_first_n<sizeof...(Args) - 1>(t);
-            if (is_color_enabled() && color != Color::Default) {
+            if (is_color_enabled(out) && color != Color::Default) {
                 out << color_code(color);
                 detail::print_args_tuple(out, printable);
                 out << "\033[0m";
@@ -196,7 +312,7 @@ void println_to(std::ostream& out, Args&&... args) {
 /// Explicitly colored print function sending output to a specific stream.
 template <typename... Args>
 void print_colored_to(std::ostream& out, Color color, Args&&... args) {
-    if (is_color_enabled() && color != Color::Default) {
+    if (is_color_enabled(out) && color != Color::Default) {
         out << color_code(color);
         auto t = std::forward_as_tuple(std::forward<Args>(args)...);
         detail::print_args_tuple(out, t);
@@ -250,13 +366,13 @@ void println(Args&&... args) {
     }
 }
 
-/// Standard error print function.
+/// Standard error print function without trailing newline.
 template <typename... Args>
 void eprint(Args&&... args) {
     print_to(std::cerr, std::forward<Args>(args)...);
 }
 
-/// Standard error println function.
+/// Standard error println function with trailing newline.
 template <typename... Args>
 void eprintln(Args&&... args) {
     println_to(std::cerr, std::forward<Args>(args)...);
@@ -274,15 +390,33 @@ void println_colored(Color color, Args&&... args) {
     println_colored_to(std::cout, color, std::forward<Args>(args)...);
 }
 
-/// Reads a line from stream, stripping any trailing '\r'.
+/// Checks if EOF has been reached on the input stream.
+[[nodiscard]] inline bool eof(std::istream& in = std::cin) noexcept {
+    return in.eof();
+}
+
+/// Reads a line from stream, returning std::string.
+/// Strips trailing '\r' (CRLF support).
+/// Throws keet::error("IOError", ...) on hardware/stream failure (badbit).
+/// Returns "" on EOF or empty line.
 [[nodiscard]] inline std::string readln(std::istream& in = std::cin) {
+    if (in.bad()) {
+        throw error("IOError", "Input stream is in a bad state before read");
+    }
+    if (in.eof()) {
+        return "";
+    }
     std::string line;
     if (std::getline(in, line)) {
         if (!line.empty() && line.back() == '\r') {
             line.pop_back();
         }
+        return line;
     }
-    return line;
+    if (in.bad()) {
+        throw error("IOError", "I/O error occurred while reading from input stream");
+    }
+    return "";
 }
 
 /// Alias for readln matching language specification naming.
@@ -290,7 +424,44 @@ void println_colored(Color color, Args&&... args) {
     return readln(in);
 }
 
-/// Displays prompt, flushes stream, and reads a line of input.
+/// Reads a line from stream, returning std::variant<std::string, std::monostate>.
+/// In KeetScript, this corresponds to `string | null`.
+/// Returns std::string(line) on successful line read (including empty line "").
+/// Returns std::monostate{} (null) on EOF.
+/// Throws keet::error("IOError", ...) on hardware/stream failure (badbit).
+[[nodiscard]] inline std::variant<std::string, std::monostate> read_line(std::istream& in = std::cin) {
+    if (in.bad()) {
+        throw error("IOError", "Input stream is in a bad state before read");
+    }
+    if (in.eof()) {
+        return std::monostate{};
+    }
+    std::string line;
+    if (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        return line;
+    }
+    if (in.bad()) {
+        throw error("IOError", "I/O error occurred while reading from input stream");
+    }
+    return std::monostate{};
+}
+
+/// Reads a line from stream, returning std::optional<std::string>.
+/// Returns std::string on success (including empty line "").
+/// Returns std::nullopt on EOF.
+/// Throws keet::error("IOError", ...) on hardware/stream failure (badbit).
+[[nodiscard]] inline std::optional<std::string> read_line_opt(std::istream& in = std::cin) {
+    auto res = read_line(in);
+    if (std::holds_alternative<std::string>(res)) {
+        return std::get<std::string>(res);
+    }
+    return std::nullopt;
+}
+
+/// Displays prompt, flushes stream immediately, and reads a line of input.
 [[nodiscard]] inline std::string input(std::string_view prompt = "", std::istream& in = std::cin, std::ostream& out = std::cout) {
     if (!prompt.empty()) {
         out << prompt;

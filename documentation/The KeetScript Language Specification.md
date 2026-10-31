@@ -2490,7 +2490,7 @@ While the [universe block](#predeclared-identifiers) remains intentionally minim
 
 | Module | Primary Exports & Capabilities |
 | :--- | :--- |
-| `io` | Console and stream I/O: `print(...args: Any, color?: io.Color): void`, `println(...args: Any, color?: io.Color): void`, `readln(): string`, `input(prompt?: string): string`, `Color` enum, ANSI inline styling helpers (`red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, `gray`, `bold`). |
+| `io` | Console and stream I/O: `print(...args: Any, color?: io.Color): void`, `println(...args: Any, color?: io.Color): void`, `eprint(...args: Any, color?: io.Color): void`, `eprintln(...args: Any, color?: io.Color): void`, `flush(): void`, `read_line(): string | null`, `readln(): string`, `eof(): bool`, `input(prompt?: string): string`, `Color` enum, ANSI inline styling helpers (`red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, `gray`, `bold`). |
 | `fs` | File system and path manipulation (fallible operations integrate with `zonk`): `readAll(path: string): string`, `writeAll(path: string, data: string): void`, `exists(path: string): bool`, `remove(path: string): bool`, `listDir(path: string): array<string>`, `Path` class. |
 | `sys` | Process environment and lifecycle control: `args: array<string>`, `exit(code: int): void`, `getEnv(key: string): string | null`, `setEnv(key: string, val: string): void`, `platform(): string`, `cwd(): string`. |
 | `math` | IEEE 754 floating-point and integer math utilities: `PI: float`, `E: float`, `sin(x: float): float`, `cos(x: float): float`, `tan(x: float): float`, `sqrt(x: float): float`, `pow(base: float, exp: float): float`, `log(x: float): float`, `min<T: int | float>(a: T, b: T): T`, `max<T: int | float>(a: T, b: T): T`. |
@@ -2498,7 +2498,7 @@ While the [universe block](#predeclared-identifiers) remains intentionally minim
 
 ### Standard Library: `io` (Console and Stream I/O)
 
-The built-in `io` standard library module provides high-performance, type-safe console output, interactive standard input reading, and ANSI terminal color formatting. It is brought into scope via `import io;` or selective import statements (`from "io" import println, Color, green;`).
+The built-in `io` standard library module provides high-performance, type-safe console output, interactive standard input reading, stream control, and ANSI terminal color formatting. It is brought into scope via `import io;` or selective import statements (`from "io" import println, Color, green;`).
 
 #### Module Declarations & Signatures
 
@@ -2519,9 +2519,14 @@ enum Color {
 // Console output functions
 fn print(...args: Any, color?: Color): void;
 fn println(...args: Any, color?: Color): void;
+fn eprint(...args: Any, color?: Color): void;
+fn eprintln(...args: Any, color?: Color): void;
+fn flush(): void;
 
 // Console input functions
+fn read_line(): string | null;
 fn readln(): string;
+fn eof(): bool;
 fn input(prompt?: string): string;
 
 // Inline ANSI styling helpers
@@ -2537,17 +2542,23 @@ fn bold(s: string): string;
 ```
 
 #### Behavior & Semantics
-1. **Variadic Output Formatting:**
-   `io.print` and `io.println` accept zero or more printable arguments of any KeetScript primitive or composite type (`int`, `float`, `bool`, `char`, `string`, arrays, or maps). When multiple arguments are passed, values are space-separated. `println` appends a trailing newline (`\n`).
-2. **Whole-Line Color Formatting:**
-   When an `io.Color` enum value is passed as the trailing argument to `print` or `println` (e.g., `io.println("All tests passed", io.Color.Green)`), the output line is wrapped with the corresponding ANSI color escape code and reset code. Passing `io.Color` in any position other than the trailing argument triggers a compile-time type mismatch diagnostic (`E3003`).
-3. **Inline Text Styling:**
-   The styling helpers `io.red(s)`, `io.green(s)`, `io.yellow(s)`, `io.blue(s)`, `io.magenta(s)`, `io.cyan(s)`, `io.white(s)`, `io.gray(s)`, and `io.bold(s)` return a new `string` wrapped with ANSI escape sequences when terminal styling is enabled, or unmodified `s` when styling is disabled.
-4. **TTY Detection & `NO_COLOR` Compliance:**
-   ANSI escape styling is automatically active when stdout is an interactive terminal (`isatty(stdout)`). Colors are automatically disabled when stdout is redirected to a non-TTY pipe or file, or when the `NO_COLOR` environment variable is defined.
-5. **Console Input (`readln` & `input`):**
-   - `io.readln()` reads a single line from standard input up to the newline character (`\n`), stripping any trailing carriage return (`\r`) for cross-platform compatibility. On EOF, it returns an empty string `""`.
-   - `io.input(prompt?: string)` writes `prompt` to standard output without a newline, flushes the stream immediately, and returns `io.readln()`.
+1. **Variadic Output Formatting & Buffering:**
+   `io.print` and `io.println` accept zero or more printable arguments of any KeetScript primitive or composite type (`int`, `float`, `bool`, `char`, `string`, arrays, or maps). When multiple arguments are passed, values are space-separated. `println` appends a trailing newline (`\n`). Neither `print` nor `println` automatically flushes standard output. Callers can explicitly flush output streams via `io.flush()`.
+2. **Standard Error Output:**
+   `io.eprint` and `io.eprintln` format arguments identically to `print` and `println`, directing output to standard error (`stderr`).
+3. **Whole-Line Color Formatting:**
+   When an `io.Color` enum value is passed as the trailing argument to `print`, `println`, `eprint`, or `eprintln` (e.g., `io.println("All tests passed", io.Color.Green)`), the output line is wrapped with the corresponding ANSI color escape code and reset code. Passing `io.Color` in any position other than the trailing argument triggers a compile-time type mismatch diagnostic (`E3003`).
+4. **Inline Text Styling:**
+   The styling helpers `io.red(s)`, `io.green(s)`, `io.yellow(s)`, `io.blue(s)`, `io.magenta(s)`, `io.cyan(s)`, `io.white(s)`, `io.gray(s)`, and `io.bold(s)` return a new `string` wrapped with ANSI escape sequences when terminal styling is enabled, or unmodified `s` when styling is disabled. An empty string argument returns `""` without escape codes. Wrapping an already styled string that terminates with `\033[0m` does not append a duplicate trailing reset code. Nested styled strings preserve outer styling across inner `\033[0m` resets.
+5. **TTY Detection & `NO_COLOR` Compliance:**
+   - Precedence: Explicit programmatic override > `NO_COLOR` environment variable > destination stream interactive terminal detection (`isatty`).
+   - If `NO_COLOR` is present in the environment (even if set to an empty string `""`), automatic terminal styling is disabled.
+   - Standard output (`stdout`) and standard error (`stderr`) have independent TTY detection.
+6. **Console Input (`read_line`, `readln`, `eof`, & `input`):**
+   - `io.read_line()` reads a single line from standard input up to the newline character (`\n`), stripping any trailing carriage return (`\r`) for cross-platform compatibility. It returns `string` (including `""` for an empty line), or `null` when EOF is reached without reading any characters. Unrecoverable stream errors throw `IOError`.
+   - `io.readln()` reads a single line from standard input and returns an empty string `""` on EOF (preserved for backward compatibility).
+   - `io.eof()` returns `true` if a previous read operation on standard input reached the end of the stream (i.e., stream `eofbit` is set), and `false` otherwise.
+   - `io.input(prompt?: string)` writes `prompt` to standard output without a newline, flushes the stream immediately before blocking on input, and returns `io.readln()`.
 
 ## C++ AOT translation and header generation
 

@@ -114,9 +114,13 @@ void populateIoModuleScope(Scope& ioScope) {
 
     makeFn("print");
     makeFn("println");
+    makeFn("eprint");
+    makeFn("eprintln");
     makeFn("readln");
     makeFn("readLine");
+    makeFn("read_line");
     makeFn("input");
+    makeFn("eof");
     makeFn("red");
     makeFn("green");
     makeFn("yellow");

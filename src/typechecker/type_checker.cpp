@@ -1423,7 +1423,7 @@ TypePtr TypeChecker::checkIoMemberCall(const ast::MemberExpr* member, const ast:
     if (!member || !call) return Type::unknownType();
     const std::string& mName = member->getMemberName();
 
-    if (mName == "print" || mName == "println") {
+    if (mName == "print" || mName == "println" || mName == "eprint" || mName == "eprintln") {
         for (size_t i = 0; i < call->getArgs().size(); ++i) {
             const auto& arg = call->getArgs()[i];
             if (arg.value) {
@@ -1462,6 +1462,32 @@ TypePtr TypeChecker::checkIoMemberCall(const ast::MemberExpr* member, const ast:
             hasErrors_ = true;
         }
         return Type::stringType();
+    }
+
+    if (mName == "read_line") {
+        if (!call->getArgs().empty()) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function 'io.read_line' expects 0 arguments, but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "unexpected arguments"));
+            }
+            hasErrors_ = true;
+        }
+        return Type::unionOf({Type::stringType(), Type::nullType()});
+    }
+
+    if (mName == "eof") {
+        if (!call->getArgs().empty()) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function 'io.eof' expects 0 arguments, but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "unexpected arguments"));
+            }
+            hasErrors_ = true;
+        }
+        return Type::boolType();
     }
 
     if (mName == "input") {
@@ -1510,6 +1536,15 @@ TypePtr TypeChecker::checkIoMemberCall(const ast::MemberExpr* member, const ast:
     }
 
     if (mName == "flush") {
+        if (!call->getArgs().empty()) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function 'io.flush' expects 0 arguments, but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "unexpected arguments"));
+            }
+            hasErrors_ = true;
+        }
         return Type::voidType();
     }
 
@@ -1527,7 +1562,7 @@ TypePtr TypeChecker::checkIoDirectCall(const ast::IdentExpr* callee, const ast::
     if (!callee || !call) return Type::unknownType();
     const std::string& name = callee->getName();
 
-    if (name == "print" || name == "println") {
+    if (name == "print" || name == "println" || name == "eprint" || name == "eprintln") {
         for (size_t i = 0; i < call->getArgs().size(); ++i) {
             const auto& arg = call->getArgs()[i];
             if (arg.value) {
@@ -1566,6 +1601,32 @@ TypePtr TypeChecker::checkIoDirectCall(const ast::IdentExpr* callee, const ast::
             hasErrors_ = true;
         }
         return Type::stringType();
+    }
+
+    if (name == "read_line") {
+        if (!call->getArgs().empty()) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function '" + name + "' expects 0 arguments, but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "unexpected arguments"));
+            }
+            hasErrors_ = true;
+        }
+        return Type::unionOf({Type::stringType(), Type::nullType()});
+    }
+
+    if (name == "eof") {
+        if (!call->getArgs().empty()) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function '" + name + "' expects 0 arguments, but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "unexpected arguments"));
+            }
+            hasErrors_ = true;
+        }
+        return Type::boolType();
     }
 
     if (name == "input") {
@@ -1614,6 +1675,15 @@ TypePtr TypeChecker::checkIoDirectCall(const ast::IdentExpr* callee, const ast::
     }
 
     if (name == "flush") {
+        if (!call->getArgs().empty()) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function 'flush' expects 0 arguments, but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "unexpected arguments"));
+            }
+            hasErrors_ = true;
+        }
         return Type::voidType();
     }
 
@@ -2788,7 +2858,8 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             auto sym = scope.lookup(calleeIdent->getName());
             if (sym && sym->isImportedSymbol()) {
                 const std::string& name = calleeIdent->getName();
-                if (name == "print" || name == "println" || name == "readln" || name == "readLine" ||
+                if (name == "print" || name == "println" || name == "eprint" || name == "eprintln" ||
+                    name == "readln" || name == "readLine" || name == "read_line" || name == "eof" ||
                     name == "input" || name == "red" || name == "green" || name == "yellow" ||
                     name == "blue" || name == "magenta" || name == "cyan" || name == "white" ||
                     name == "gray" || name == "bold" || name == "flush") {

@@ -186,7 +186,7 @@ keety test [--conformance | --benchmarks | --all] [--filter <pattern>]
 
 ### Group 6: Standard I/O Module & Console Operations
 * **Test 6.1 (`io_console.keet`):**
-  * **Objective:** Validate standard `io` module imports, console printing, inline and line-level ANSI styling, and stream input reading.
+  * **Objective:** Validate standard `io` module imports, console printing, composite types, stderr output, explicit flush, inline and line-level ANSI styling, empty-line vs EOF distinction, and stream input reading.
   * **Input:**
     ```keet
     import io;
@@ -195,6 +195,12 @@ keety test [--conformance | --benchmarks | --all] [--filter <pattern>]
         io.print("KeetScript standard I/O test running...\n");
         io.print("Primitives: ", 123, " ", 45.67, " ", true, " ", 'K', "\n");
         io.println("Line with trailing color", io.Color.Green);
+        let sample_arr: array<int> = [10, 20, 30];
+        io.println("Array output: ", sample_arr);
+
+        io.eprint("Diagnostic notice: stderr active\n");
+        io.eprintln("Diagnostic warning on stderr", io.Color.Yellow);
+        io.flush();
 
         let styled_ok: string = io.green("SUCCESS");
         let styled_warn: string = io.yellow("WARNING");
@@ -211,17 +217,37 @@ keety test [--conformance | --benchmarks | --all] [--filter <pattern>]
             return 2;
         }
 
+        // Read valid empty line
+        let emptyLineOpt: string | null = io.read_line();
+        if (emptyLineOpt == null) {
+            return 3;
+        }
+        let emptyStr: string = emptyLineOpt as string;
+        if (emptyStr != "") {
+            return 4;
+        }
+
+        // Read at EOF
+        let eofOpt: string | null = io.read_line();
+        if (eofOpt != null) {
+            return 5;
+        }
+
+        if (!io.eof()) {
+            return 6;
+        }
+
         let defaultColor: io.Color = io.Color.Default;
         let redColor: io.Color = io.Color.Red;
         if (defaultColor == redColor) {
-            return 3;
+            return 7;
         }
 
         io.println("All standard I/O conformance checks passed!");
         return 0;
     }
     ```
-  * **Assertion:** Exits cleanly with status code `0` and outputs formatted text to stdout.
+  * **Assertion:** Exits cleanly with status code `0` and outputs formatted text to stdout and stderr.
 
 ---
 

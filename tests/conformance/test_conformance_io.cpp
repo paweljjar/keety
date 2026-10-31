@@ -52,7 +52,7 @@ TEST_CASE("Positive conformance: Standard I/O module and console operations", "[
         auto temp_input = std::filesystem::temp_directory_path() / "keety_io_conformance_in.txt";
         {
             std::ofstream ofs(temp_input);
-            ofs << "hello keetscript\nsample input\n";
+            ofs << "hello keetscript\nsample input\n\n";
         }
 
         int stdin_fd = FILENO_FN(stdin);

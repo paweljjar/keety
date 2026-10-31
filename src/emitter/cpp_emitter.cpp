@@ -407,7 +407,8 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
 
             std::string m_name = mem->getMemberName();
             if (obj_s == "io") {
-                if (m_name == "print" || m_name == "println" || m_name == "readln" ||
+                if (m_name == "print" || m_name == "println" || m_name == "eprint" || m_name == "eprintln" ||
+                    m_name == "readln" || m_name == "read_line" || m_name == "eof" ||
                     m_name == "input" || m_name == "flush" || m_name == "red" ||
                     m_name == "green" || m_name == "yellow" || m_name == "blue" ||
                     m_name == "magenta" || m_name == "cyan" || m_name == "white" ||
@@ -471,7 +472,8 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
         if (const auto* callee_id = dynamic_cast<const ast::IdentExpr*>(call->getCallee())) {
             const std::string& name = callee_id->getName();
             if (has_io_import_ && (imported_io_symbols_.count(name) ||
-                name == "print" || name == "println" || name == "readln" || name == "readLine" ||
+                name == "print" || name == "println" || name == "eprint" || name == "eprintln" ||
+                name == "readln" || name == "readLine" || name == "read_line" || name == "eof" ||
                 name == "input" || name == "flush" || name == "red" || name == "green" ||
                 name == "yellow" || name == "blue" || name == "magenta" || name == "cyan" ||
                 name == "white" || name == "gray" || name == "bold")) {
