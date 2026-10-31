@@ -292,6 +292,9 @@ std::string HeaderEmitter::to_cpp_type(const ast::TypeAnnotation* type, const st
 
     if (const auto* fn = dynamic_cast<const ast::FunctionType*>(type)) {
         std::string ret = to_cpp_type(fn->getReturnType(), current_module);
+        if (fn->isAsync()) {
+            ret = "keet::Task<" + ret + ">";
+        }
         std::string params;
         for (size_t i = 0; i < fn->getParams().size(); ++i) {
             if (i > 0) params += ", ";
@@ -374,6 +377,9 @@ std::string HeaderEmitter::to_cpp_type(const typechecker::TypePtr& type, const s
         const auto* fn = dynamic_cast<const typechecker::FunctionType*>(type.get());
         if (!fn) return "std::function<void()>";
         std::string ret = to_cpp_type(fn->getReturnType(), current_module);
+        if (fn->isAsync()) {
+            ret = "keet::Task<" + ret + ">";
+        }
         std::string params;
         for (size_t i = 0; i < fn->getParamTypes().size(); ++i) {
             if (i > 0) params += ", ";
@@ -469,6 +475,9 @@ std::string HeaderEmitter::format_param(const ast::Param& param, const std::vect
 
 std::string HeaderEmitter::format_function_prototype(const ast::FnDecl& fn) {
     std::string ret_type = fn.getReturnType() ? to_cpp_type(fn.getReturnType()) : "void";
+    if (fn.isAsync()) {
+        ret_type = "keet::Task<" + ret_type + ">";
+    }
     std::string params_str;
     for (size_t i = 0; i < fn.getParams().size(); ++i) {
         if (i > 0) params_str += ", ";

@@ -1,6 +1,7 @@
 #include "bench_numeric_vector.hpp"
 #include "bench_hash_map.hpp"
 #include "bench_string_ingestion.hpp"
+#include "bench_task_concurrency.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -56,6 +57,17 @@ int main(int argc, char* argv[]) {
     if (target_benchmark == 3 || target_benchmark == 0) {
         size_t b3_size = custom_size > 0 ? custom_size : 5000000;
         auto res = keety::benchmarks::run_string_ingestion_benchmark(b3_size, warmup, measure, verbose);
+        if (!res.passed) {
+            all_passed = false;
+        }
+    }
+
+    // Benchmark 4: Asynchronous Task Concurrency
+    if (target_benchmark == 4 || target_benchmark == 0) {
+        size_t b4_size = custom_size > 0 ? custom_size : 50000;
+        size_t b4_warmup = (warmup == 5) ? 3 : warmup;
+        size_t b4_measure = (measure == 10) ? 5 : measure;
+        auto res = keety::benchmarks::run_task_concurrency_benchmark(b4_size, b4_warmup, b4_measure, verbose);
         if (!res.passed) {
             all_passed = false;
         }

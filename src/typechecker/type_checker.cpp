@@ -2828,6 +2828,15 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
         return contextualType ? contextualType : pType;
     }
 
+    if (const auto* aw = dynamic_cast<const ast::AwaitExpr*>(&expr)) {
+        auto targetType = aw->getTarget() ? inferType(*aw->getTarget(), scope) : Type::unknownType();
+        if (targetType && targetType->isFunction()) {
+            const auto& fnType = static_cast<const FunctionType&>(*targetType);
+            return fnType.getReturnType();
+        }
+        return targetType;
+    }
+
     return Type::unknownType();
 }
 

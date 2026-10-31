@@ -435,6 +435,28 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
     }
 
     if (const auto* closure = dynamic_cast<const ast::ClosureExpr*>(expr)) {
+        std::string raw_ret = closure->getReturnType() ? HeaderEmitter::to_cpp_type(closure->getReturnType()) : "void";
+        if (closure->isAsync()) {
+            std::string res = "[=](";
+            for (size_t i = 0; i < closure->getParams().size(); ++i) {
+                if (i > 0) res += ", ";
+                const auto& p = closure->getParams()[i];
+                if (p.type) {
+                    res += HeaderEmitter::to_cpp_type(p.type.get()) + " " + p.name;
+                } else {
+                    res += "auto " + p.name;
+                }
+            }
+            res += ") -> keet::Task<" + raw_ret + "> {\n";
+            res += "            return keet::spawn([=]() -> " + raw_ret + " {\n";
+            if (closure->getBody()) {
+                res += translate_block(closure->getBody(), 4);
+            }
+            res += "            });\n";
+            res += "        }";
+            return res;
+        }
+
         std::string res = "[&](";
         for (size_t i = 0; i < closure->getParams().size(); ++i) {
             if (i > 0) res += ", ";
@@ -456,7 +478,7 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
         }
         res += ") ";
         if (closure->getReturnType()) {
-            res += "-> " + HeaderEmitter::to_cpp_type(closure->getReturnType()) + " ";
+            res += "-> " + raw_ret + " ";
         }
         res += "{\n";
         if (closure->getBody()) {
@@ -550,6 +572,10 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             return "([&]() -> std::decay_t<decltype(" + prim_str + ")> { try { return " + prim_str +
                    "; } catch (...) { return " + translate_expression(znk->getFallback()) + "; } })()";
         }
+    }
+
+    if (const auto* aw = dynamic_cast<const ast::AwaitExpr*>(expr)) {
+        return "(" + translate_expression(aw->getTarget()) + ").get()";
     }
 
     return "";
@@ -846,7 +872,8 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
 }
 
 std::string CppEmitter::translate_function(const ast::FnDecl& fn) const {
-    std::string ret_type = fn.getReturnType() ? HeaderEmitter::to_cpp_type(fn.getReturnType()) : "void";
+    std::string raw_ret = fn.getReturnType() ? HeaderEmitter::to_cpp_type(fn.getReturnType()) : "void";
+    std::string ret_type = fn.isAsync() ? ("keet::Task<" + raw_ret + ">") : raw_ret;
     std::string params_str;
     for (size_t i = 0; i < fn.getParams().size(); ++i) {
         if (i > 0) params_str += ", ";
@@ -864,11 +891,23 @@ std::string CppEmitter::translate_function(const ast::FnDecl& fn) const {
         ss << ">\n";
     }
     ss << "    " << ret_type << " " << fn_name << "(" << params_str << ") {\n";
-    if (fn.getBody()) {
-        if (const auto* block = dynamic_cast<const ast::BlockStmt*>(fn.getBody())) {
-            ss << translate_block(block, 2);
-        } else {
-            ss << translate_statement(fn.getBody(), 2);
+    if (fn.isAsync()) {
+        ss << "        return keet::spawn([=]() -> " + raw_ret + " {\n";
+        if (fn.getBody()) {
+            if (const auto* block = dynamic_cast<const ast::BlockStmt*>(fn.getBody())) {
+                ss << translate_block(block, 3);
+            } else {
+                ss << translate_statement(fn.getBody(), 3);
+            }
+        }
+        ss << "        });\n";
+    } else {
+        if (fn.getBody()) {
+            if (const auto* block = dynamic_cast<const ast::BlockStmt*>(fn.getBody())) {
+                ss << translate_block(block, 2);
+            } else {
+                ss << translate_statement(fn.getBody(), 2);
+            }
         }
     }
     ss << "    }";

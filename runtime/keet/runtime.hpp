@@ -8,3 +8,4 @@
 #include <keet/typeof.hpp>
 #include <keet/functional.hpp>
 #include <keet/strings.hpp>
+#include <keet/async.hpp>
