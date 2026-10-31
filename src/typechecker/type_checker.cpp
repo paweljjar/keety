@@ -359,6 +359,14 @@ bool TypeChecker::checkExplicitTypeAnnotations(const ast::Stmt& stmt) {
                 checkExplicitTypeAnnotations(*c.body);
             }
         }
+    } else if (const auto* yieldStmt = dynamic_cast<const ast::YieldStmt*>(&stmt)) {
+        if (yieldStmt->getValue()) {
+            checkExplicitTypeAnnotations(*yieldStmt->getValue());
+        }
+    } else if (const auto* zonkStmt = dynamic_cast<const ast::ZonkStmt*>(&stmt)) {
+        if (zonkStmt->getErrorExpr()) {
+            checkExplicitTypeAnnotations(*zonkStmt->getErrorExpr());
+        }
     }
 
     return !hasErrors_;
@@ -408,6 +416,10 @@ bool TypeChecker::checkExplicitTypeAnnotations(const ast::Expr& expr) {
             if (entry.key) checkExplicitTypeAnnotations(*entry.key);
             if (entry.value) checkExplicitTypeAnnotations(*entry.value);
         }
+    } else if (const auto* zonk = dynamic_cast<const ast::ZonkExpr*>(&expr)) {
+        if (zonk->getPrimary()) checkExplicitTypeAnnotations(*zonk->getPrimary());
+        if (zonk->getFallback()) checkExplicitTypeAnnotations(*zonk->getFallback());
+        if (zonk->getRecoveryBlock()) checkExplicitTypeAnnotations(*zonk->getRecoveryBlock());
     }
 
     return !hasErrors_;
@@ -2004,6 +2016,14 @@ bool TypeChecker::checkZeroCoercion(const ast::Stmt& stmt, sema::Scope& scope) {
                 checkZeroCoercion(*c.body, scope);
             }
         }
+    } else if (const auto* yieldStmt = dynamic_cast<const ast::YieldStmt*>(&stmt)) {
+        if (yieldStmt->getValue()) {
+            inferType(*yieldStmt->getValue(), scope);
+        }
+    } else if (const auto* zonkStmt = dynamic_cast<const ast::ZonkStmt*>(&stmt)) {
+        if (zonkStmt->getErrorExpr()) {
+            inferType(*zonkStmt->getErrorExpr(), scope);
+        }
     }
 
     return !hasErrors_;
@@ -2631,6 +2651,11 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             }
         }
         auto objType = member->getObject() ? inferType(*member->getObject(), scope) : Type::unknownType();
+        if (objType && (objType->isError() || (objType->isCustom() && static_cast<const CustomType*>(objType.get())->getName() == "error"))) {
+            if (member->getMemberName() == "message" || member->getMemberName() == "name") {
+                return Type::stringType();
+            }
+        }
         if (objType && objType->isCustom()) {
             auto clsName = static_cast<const CustomType*>(objType.get())->getName();
             auto clsSym = scope.lookup(clsName);
@@ -2664,7 +2689,13 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             }
         }
         if (zonk->getRecoveryBlock()) {
-            checkZeroCoercion(*zonk->getRecoveryBlock(), scope);
+            auto blockScope = scope.createChild(sema::ScopeKind::Block);
+            if (!zonk->getErrorVarName().empty() && zonk->getErrorVarName() != "_") {
+                auto errSym = std::make_shared<sema::Symbol>(zonk->getErrorVarName(), sema::SymbolKind::Variable, zonk->getSpan());
+                blockScope->define(errSym);
+                blockScope->setNarrowedType(zonk->getErrorVarName(), Type::errorType());
+            }
+            checkZeroCoercion(*zonk->getRecoveryBlock(), *blockScope);
         }
         return contextualType ? contextualType : pType;
     }

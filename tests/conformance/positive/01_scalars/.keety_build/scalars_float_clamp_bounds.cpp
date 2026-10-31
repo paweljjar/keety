@@ -4,8 +4,8 @@
 
 namespace keet_module_scalars_float_clamp_bounds {
     int64_t _keet_main() {
-        int64_t overflowInt = ([&]() -> decltype(keet::to_int(1e25)) { try { return keet::to_int(1e25); } catch (...) { return -999; } })();
-        int64_t nanInt = ([&]() -> decltype(keet::to_int(keet::div_safe(0.0, 0.0))) { try { return keet::to_int(keet::div_safe(0.0, 0.0)); } catch (...) { return -111; } })();
+        int64_t overflowInt = ([&]() -> std::decay_t<decltype(keet::to_int(1e25))> { try { return keet::to_int(1e25); } catch (...) { return -999; } })();
+        int64_t nanInt = ([&]() -> std::decay_t<decltype(keet::to_int(keet::div_safe(0.0, 0.0)))> { try { return keet::to_int(keet::div_safe(0.0, 0.0)); } catch (...) { return -111; } })();
         double clamped = keet::clamp(15.5, 0.0, 10.0);
         if (overflowInt != -999) {
             return 1;

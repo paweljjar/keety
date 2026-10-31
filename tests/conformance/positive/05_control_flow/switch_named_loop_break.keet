@@ -1,0 +1,87 @@
+fn testSwitchNamedWhileBreak(): int {
+    let count: int = 0;
+    let step: int = 0;
+    while (step < 10) as outerLoop {
+        step += 1;
+        switch (step) {
+            case (1, 2) {
+                count += 10;
+            }
+            case (3) {
+                count += 30;
+                break outerLoop;
+            }
+            default {
+                count += 100;
+            }
+        }
+    }
+    if (step != 3) {
+        return 1;
+    }
+    if (count != 50) {
+        return 2;
+    }
+    return 0;
+}
+
+fn testSwitchNamedForBreak(): int {
+    let accumulated: int = 0;
+    for (let i: int = 0; i < 20; i += 1) as forLoop {
+        switch (i) {
+            case (0, 1, 2) {
+                accumulated += 1;
+            }
+            case (3, 4) {
+                accumulated += 10;
+            }
+            case (5) {
+                break forLoop;
+            }
+            default {
+                accumulated += 1000;
+            }
+        }
+    }
+    if (accumulated != 23) {
+        return 10;
+    }
+    return 0;
+}
+
+fn testSwitchNamedContinue(): int {
+    let sum: int = 0;
+    for (let i: int = 1; i <= 5; i += 1) as loopC {
+        switch (i) {
+            case (2, 4) {
+                continue loopC;
+            }
+            default {
+                sum += i;
+            }
+        }
+    }
+    if (sum != 9) {
+        return 20;
+    }
+    return 0;
+}
+
+fn main(): int {
+    let r1: int = testSwitchNamedWhileBreak();
+    if (r1 != 0) {
+        return r1;
+    }
+
+    let r2: int = testSwitchNamedForBreak();
+    if (r2 != 0) {
+        return r2;
+    }
+
+    let r3: int = testSwitchNamedContinue();
+    if (r3 != 0) {
+        return r3;
+    }
+
+    return 0;
+}

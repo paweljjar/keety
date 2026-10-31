@@ -1,0 +1,74 @@
+fn fallibleCalculation(input: int): int {
+    if (input < 0) {
+        zonk "NegativeInput";
+    }
+    return input * 2;
+}
+
+fn divideNumbers(a: int, b: int): int {
+    return a / b;
+}
+
+fn testCustomErrorRecovery(): int {
+    let recovered: int = fallibleCalculation(-5) zonk (err) {
+        if (err.message == "NegativeInput") {
+            yield 42;
+        }
+        yield -1;
+    };
+    if (recovered != 42) {
+        return 1;
+    }
+
+    let normal: int = fallibleCalculation(10) zonk (err) {
+        yield 999;
+    };
+    if (normal != 20) {
+        return 2;
+    }
+    return 0;
+}
+
+fn testDivZeroRecovery(): int {
+    let divRes: int = divideNumbers(100, 0) zonk (err) {
+        let msg: string = err.message;
+        if (msg == "Integer division by zero") {
+            yield 777;
+        }
+        yield -1;
+    };
+    if (divRes != 777) {
+        return 10;
+    }
+    return 0;
+}
+
+fn testAnonymousRecovery(): int {
+    let res: int = fallibleCalculation(-1) zonk () {
+        let fallbackVal: int = 10 + 20;
+        yield fallbackVal;
+    };
+    if (res != 30) {
+        return 20;
+    }
+    return 0;
+}
+
+fn main(): int {
+    let r1: int = testCustomErrorRecovery();
+    if (r1 != 0) {
+        return r1;
+    }
+
+    let r2: int = testDivZeroRecovery();
+    if (r2 != 0) {
+        return r2;
+    }
+
+    let r3: int = testAnonymousRecovery();
+    if (r3 != 0) {
+        return r3;
+    }
+
+    return 0;
+}

@@ -4,7 +4,7 @@
 
 namespace keet_module_scalars_divzero_recover {
     int64_t safeDiv(int64_t a, int64_t b) {
-        return ([&]() -> decltype(keet::div_safe(a, b)) { try { return keet::div_safe(a, b); } catch (...) { return -1; } })();
+        return ([&]() -> std::decay_t<decltype(keet::div_safe(a, b))> { try { return keet::div_safe(a, b); } catch (...) { return -1; } })();
     }
 
     int64_t _keet_main() {

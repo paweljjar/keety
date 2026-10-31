@@ -440,17 +440,20 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
         in_zonk_expr_ = prev_zonk;
         if (znk->hasRecoveryBlock()) {
             std::string err_v = znk->getErrorVarName().empty() ? "err" : znk->getErrorVarName();
-            std::string res = "([&]() -> decltype(" + prim_str + ") {\n"
+            std::string res = "([&]() -> std::decay_t<decltype(" + prim_str + ")> {\n"
                               "            try {\n"
                               "                return " + prim_str + ";\n"
                               "            } catch (const keet::error& " + err_v + ") {\n";
+            res += translate_block(znk->getRecoveryBlock(), 4);
+            res += "            } catch (const std::exception& e) {\n";
+            res += "                const keet::error " + err_v + "(\"Error\", e.what());\n";
             res += translate_block(znk->getRecoveryBlock(), 4);
             res += "            }\n"
                    "        })()";
             return res;
         }
         if (znk->getFallback()) {
-            return "([&]() -> decltype(" + prim_str + ") { try { return " + prim_str +
+            return "([&]() -> std::decay_t<decltype(" + prim_str + ")> { try { return " + prim_str +
                    "; } catch (...) { return " + translate_expression(znk->getFallback()) + "; } })()";
         }
     }
@@ -512,11 +515,17 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
         return indent_str + "return;\n";
     }
 
-    if (dynamic_cast<const ast::BreakStmt*>(stmt)) {
+    if (const auto* brk = dynamic_cast<const ast::BreakStmt*>(stmt)) {
+        if (brk->hasTargetLabel()) {
+            return indent_str + "goto " + brk->getTargetLabel() + "_break;\n";
+        }
         return indent_str + "break;\n";
     }
 
-    if (dynamic_cast<const ast::ContinueStmt*>(stmt)) {
+    if (const auto* cnt = dynamic_cast<const ast::ContinueStmt*>(stmt)) {
+        if (cnt->hasTargetLabel()) {
+            return indent_str + "goto " + cnt->getTargetLabel() + "_continue;\n";
+        }
         return indent_str + "continue;\n";
     }
 
@@ -569,7 +578,13 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
         }
         res += translate_expression(while_stmt->getCondition()) + ") {\n";
         res += translate_block(while_stmt->getBody(), indent + 1);
+        if (while_stmt->hasLabel()) {
+            res += indent_str + "    " + while_stmt->getLabel() + "_continue:;\n";
+        }
         res += indent_str + "}\n";
+        if (while_stmt->hasLabel()) {
+            res += indent_str + while_stmt->getLabel() + "_break:;\n";
+        }
         return res;
     }
 
@@ -594,7 +609,13 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
         }
         res += ") {\n";
         res += translate_block(for_stmt->getBody(), indent + 1);
+        if (for_stmt->hasLabel()) {
+            res += indent_str + "    " + for_stmt->getLabel() + "_continue:;\n";
+        }
         res += indent_str + "}\n";
+        if (for_stmt->hasLabel()) {
+            res += indent_str + for_stmt->getLabel() + "_break:;\n";
+        }
         return res;
     }
 
@@ -610,7 +631,13 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
         }
         res += binding + " : " + translate_expression(for_in->getCollection()) + ") {\n";
         res += translate_block(for_in->getBody(), indent + 1);
+        if (for_in->hasLabel()) {
+            res += indent_str + "    " + for_in->getLabel() + "_continue:;\n";
+        }
         res += indent_str + "}\n";
+        if (for_in->hasLabel()) {
+            res += indent_str + for_in->getLabel() + "_break:;\n";
+        }
         return res;
     }
 
@@ -639,6 +666,9 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
             }
         }
         res += indent_str + "}\n";
+        if (sw->hasLabel()) {
+            res += indent_str + sw->getLabel() + "_break:;\n";
+        }
         return res;
     }
 
