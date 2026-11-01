@@ -50,4 +50,7 @@ void populateFsModuleScope(Scope& fsScope);
 /// Populates an existing Scope with all exported symbols of the 'sys' standard library module.
 void populateSysModuleScope(Scope& sysScope);
 
+/// Populates an existing Scope with all exported symbols of the 'math' standard library module.
+void populateMathModuleScope(Scope& mathScope);
+
 } // namespace keety::sema

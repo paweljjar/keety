@@ -160,6 +160,12 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                 for (const auto& s : imp->getSymbols()) {
                     imported_sys_symbols_.insert(s.getEffectiveName());
                 }
+            } else if (p == "math" || p == "std.math" || p == "keet.math") {
+                has_math_import_ = true;
+                add_standard_header("<keet/runtime.hpp>");
+                for (const auto& s : imp->getSymbols()) {
+                    imported_math_symbols_.insert(s.getEffectiveName());
+                }
             }
         }
     }
@@ -323,6 +329,11 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
         if (id->getName() == "main") {
             return "_keet_main";
         }
+        if (has_math_import_ && (imported_math_symbols_.count(id->getName()) ||
+            id->getName() == "PI" || id->getName() == "E" || id->getName() == "TAU" ||
+            id->getName() == "INF" || id->getName() == "NAN")) {
+            return "::keet::math::" + id->getName();
+        }
         auto nit = narrowed_vars_.find(id->getName());
         if (nit != narrowed_vars_.end()) {
             return "std::get<" + nit->second + ">(" + id->getName() + ")";
@@ -385,6 +396,9 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             }
             if (obj_id->getName() == "Color") {
                 return "::keet::io::Color::" + mem->getMemberName();
+            }
+            if (obj_id->getName() == "math") {
+                return "::keet::math::" + mem->getMemberName();
             }
         }
         if (const auto* obj_mem = dynamic_cast<const ast::MemberExpr*>(mem->getObject())) {
@@ -468,6 +482,9 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
                     m_name == "execOutput") {
                     return "::keet::sys::" + m_name + "(" + args_str + ")";
                 }
+            }
+            if (obj_s == "math") {
+                return "::keet::math::" + m_name + "(" + args_str + ")";
             }
             // Container member mapping
             if (m_name == "push") {
@@ -567,6 +584,20 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
                 name == "exec" ||
                 name == "execOutput")) {
                 return "::keet::sys::" + name + "(" + args_str + ")";
+            }
+            if (has_math_import_ && (imported_math_symbols_.count(name) ||
+                name == "abs" || name == "absInt" || name == "min" || name == "minInt" ||
+                name == "max" || name == "maxInt" || name == "clamp" || name == "clampInt" ||
+                name == "floor" || name == "ceil" || name == "round" || name == "trunc" ||
+                name == "sign" || name == "signInt" || name == "sqrt" || name == "cbrt" ||
+                name == "pow" || name == "hypot" || name == "exp" || name == "log" ||
+                name == "log2" || name == "log10" || name == "sin" || name == "cos" ||
+                name == "tan" || name == "asin" || name == "acos" || name == "atan" ||
+                name == "atan2" || name == "sinh" || name == "cosh" || name == "tanh" ||
+                name == "toRadians" || name == "toDegrees" || name == "isNan" || name == "isInf" ||
+                name == "isFinite" || name == "lerp" || name == "fmod" || name == "random" ||
+                name == "randomInt" || name == "randomFloat" || name == "seed")) {
+                return "::keet::math::" + name + "(" + args_str + ")";
             }
         }
 
@@ -1216,6 +1247,9 @@ std::string CppEmitter::translate_ir_function(const ir::Function& fn) const {
                 } else if (callee.rfind("keet.sys.", 0) == 0) {
                     std::string func_name = callee.substr(9);
                     call_expr = "::keet::sys::" + func_name + "(";
+                } else if (callee.rfind("keet.math.", 0) == 0) {
+                    std::string func_name = callee.substr(10);
+                    call_expr = "::keet::math::" + func_name + "(";
                 } else {
                     call_expr = callee + "(";
                 }

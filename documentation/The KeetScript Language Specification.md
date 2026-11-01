@@ -2658,6 +2658,103 @@ fn main(): void {
 }
 ```
 
+### Standard Library: `math` (Mathematical Functions and Constants)
+
+The built-in `math` standard library module provides mathematical constants, core arithmetic and rounding operations, exponential and logarithmic functions, trigonometric and hyperbolic functions, angle conversions, floating-point classifications, linear interpolation, and thread-safe pseudo-random number generation (PRNG). It is brought into scope via `import math;`, `import math as alias;`, or selective imports (`from "math" import PI, sin, cos, sqrt, clamp, absInt, randomInt;`).
+
+All operations strictly adhere to KeetScript's **Strict Zero-Coercion Policy (`E3002`)**: functions expecting `float` require explicit float operands, functions expecting `int` require integer operands, and polymorphic functions require matching numeric types across all arguments.
+
+Fallible domain operations (such as `clamp` where `minVal > maxVal` or `randomInt`/`randomFloat` where `minVal > maxVal`) throw runtime `keet::error` instances named `"MathError"`, integrating seamlessly with KeetScript's native `zonk` error recovery operators and blocks.
+
+#### Module Constants & Declarations
+
+```keet
+// Mathematical Constants
+const PI: float;    // 3.141592653589793
+const E: float;     // 2.718281828459045
+const TAU: float;   // 6.283185307179586
+const INF: float;   // +infinity
+const NAN: float;   // quiet NaN
+
+// Basic Arithmetic & Polymorphic Functions
+fn abs(x: float): float;
+fn abs(x: int): int;
+fn absInt(x: int): int;
+fn min(a: float, b: float): float;
+fn min(a: int, b: int): int;
+fn minInt(a: int, b: int): int;
+fn max(a: float, b: float): float;
+fn max(a: int, b: int): int;
+fn maxInt(a: int, b: int): int;
+fn clamp(val: float, minVal: float, maxVal: float): float;
+fn clamp(val: int, minVal: int, maxVal: int): int;
+fn clampInt(val: int, minVal: int, maxVal: int): int;
+fn sign(x: float): float;
+fn sign(x: int): int;
+fn signInt(x: int): int;
+
+// Rounding & Truncation
+fn floor(x: float): float;
+fn ceil(x: float): float;
+fn round(x: float): float;
+fn trunc(x: float): float;
+
+// Exponential, Logarithmic, Power & Roots
+fn sqrt(x: float): float;
+fn cbrt(x: float): float;
+fn pow(base: float, exp: float): float;
+fn hypot(x: float, y: float): float;
+fn exp(x: float): float;
+fn log(x: float): float;
+fn log2(x: float): float;
+fn log10(x: float): float;
+
+// Trigonometric, Hyperbolic & Angle Conversions
+fn sin(rad: float): float;
+fn cos(rad: float): float;
+fn tan(rad: float): float;
+fn asin(x: float): float;
+fn acos(x: float): float;
+fn atan(x: float): float;
+fn atan2(y: float, x: float): float;
+fn sinh(x: float): float;
+fn cosh(x: float): float;
+fn tanh(x: float): float;
+fn toRadians(degrees: float): float;
+fn toDegrees(radians: float): float;
+
+// Floating-Point Classification & Interpolation
+fn isNan(x: float): bool;
+fn isInf(x: float): bool;
+fn isFinite(x: float): bool;
+fn lerp(a: float, b: float, t: float): float;
+fn fmod(x: float, y: float): float;
+
+// Pseudo-Random Number Generation
+fn seed(s: int): void;
+fn random(): float;
+fn randomInt(minVal: int, maxVal: int): int;
+fn randomFloat(minVal: float, maxVal: float): float;
+```
+
+#### Example Usage with Error Recovery (`zonk`)
+
+```keet
+import math;
+import io;
+from "math" import PI, sin, clamp, randomInt;
+
+fn main(): void {
+    let angle: float = math.toRadians(45.0);
+    let s: float = sin(angle);
+    let roll: int = randomInt(1, 6);
+
+    // Fallible clamp domain error recovered with zonk fallback
+    let safeVal: float = clamp(5.0, 10.0, 0.0) zonk 0.0;
+    io.println("sin(45 deg):", s, "die roll:", roll, "clamped:", safeVal);
+}
+```
+
 ## C++ AOT translation and header generation
 
 

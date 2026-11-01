@@ -688,6 +688,67 @@ TEST_CASE("C++ Implementation Emitter translates standard sys module calls and z
     }
 }
 
+TEST_CASE("C++ Implementation Emitter translates math standard library calls and constants", "[emitter][cpp][math]") {
+    SECTION("Translates math member calls and constants from AST") {
+        std::string source = R"(
+            import math;
+
+            fn calculate(): float {
+                let p = math.PI;
+                let s = math.sin(p);
+                let c = math.clamp(5.0, 0.0, 10.0);
+                return s + c;
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "math_app");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("#include <keet/runtime.hpp>") != std::string::npos);
+        REQUIRE(cpp.find("::keet::math::PI") != std::string::npos);
+        REQUIRE(cpp.find("::keet::math::sin(") != std::string::npos);
+        REQUIRE(cpp.find("::keet::math::clamp(") != std::string::npos);
+    }
+
+    SECTION("Translates direct imported math functions and constants") {
+        std::string source = R"(
+            from "math" import PI, sqrt, absInt;
+
+            fn run(): float {
+                let x = PI;
+                let y = sqrt(x);
+                let z = absInt(-42);
+                return y;
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "math_direct");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("::keet::math::PI") != std::string::npos);
+        REQUIRE(cpp.find("::keet::math::sqrt(") != std::string::npos);
+        REQUIRE(cpp.find("::keet::math::absInt(") != std::string::npos);
+    }
+
+    SECTION("Translates IR @keet.math call instructions") {
+        keety::ir::Module irMod("math_ir_test");
+        auto fn = std::make_unique<keety::ir::Function>("test_fn", keety::typechecker::Type::floatType());
+        auto* bb = fn->create_basic_block("entry");
+        std::vector<keety::ir::Operand> args;
+        args.push_back(keety::ir::Operand::create_float(1.0));
+        bb->append_instruction(std::make_unique<keety::ir::CallInst>(std::nullopt, "@keet.math.cos", std::move(args)));
+        bb->append_instruction(std::make_unique<keety::ir::ReturnInst>());
+        irMod.add_function(std::move(fn));
+
+        keety::emitter::CppEmitter emitter(irMod);
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("::keet::math::cos(") != std::string::npos);
+    }
+}
+
+
 
 
 

@@ -224,6 +224,8 @@ private:
     TypePtr checkFsDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope);
     TypePtr checkSysMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope);
     TypePtr checkSysDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope);
+    TypePtr checkMathMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope);
+    TypePtr checkMathDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope);
 };
 
 } // namespace keety::typechecker

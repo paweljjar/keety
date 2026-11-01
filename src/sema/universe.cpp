@@ -100,7 +100,9 @@ void registerUniverseSymbols(Scope& universe) {
 
 bool isStdlibModule(std::string_view name) noexcept {
     return name == "io" || name == "std.io" || name == "keet.io" ||
-           name == "fs" || name == "std.fs" || name == "keet.fs";
+           name == "fs" || name == "std.fs" || name == "keet.fs" ||
+           name == "sys" || name == "std.sys" || name == "keet.sys" ||
+           name == "math" || name == "std.math" || name == "keet.math";
 }
 
 void populateIoModuleScope(Scope& ioScope) {
@@ -211,6 +213,84 @@ void populateSysModuleScope(Scope& sysScope) {
     makeFn("execOutput");
 }
 
+void populateMathModuleScope(Scope& mathScope) {
+    diag::SourceSpan span{};
+
+    auto makeConst = [&](const char* name) {
+        auto sym = std::make_shared<Symbol>(name, SymbolKind::Constant, span);
+        sym->setExported(true);
+        sym->setConst(true);
+        mathScope.define(sym, false);
+    };
+
+    auto makeFn = [&](const char* name) {
+        auto sym = std::make_shared<Symbol>(name, SymbolKind::Function, span);
+        sym->setExported(true);
+        sym->setConst(true);
+        mathScope.define(sym, false);
+    };
+
+    // Constants
+    makeConst("PI");
+    makeConst("E");
+    makeConst("TAU");
+    makeConst("INF");
+    makeConst("NAN");
+
+    // Basic & Rounding Operations
+    makeFn("abs");
+    makeFn("absInt");
+    makeFn("min");
+    makeFn("minInt");
+    makeFn("max");
+    makeFn("maxInt");
+    makeFn("clamp");
+    makeFn("clampInt");
+    makeFn("floor");
+    makeFn("ceil");
+    makeFn("round");
+    makeFn("trunc");
+    makeFn("sign");
+    makeFn("signInt");
+
+    // Powers, Roots, Exponential & Logarithmic Functions
+    makeFn("sqrt");
+    makeFn("cbrt");
+    makeFn("pow");
+    makeFn("hypot");
+    makeFn("exp");
+    makeFn("log");
+    makeFn("log2");
+    makeFn("log10");
+
+    // Trigonometric & Hyperbolic Functions
+    makeFn("sin");
+    makeFn("cos");
+    makeFn("tan");
+    makeFn("asin");
+    makeFn("acos");
+    makeFn("atan");
+    makeFn("atan2");
+    makeFn("sinh");
+    makeFn("cosh");
+    makeFn("tanh");
+    makeFn("toRadians");
+    makeFn("toDegrees");
+
+    // Floating-Point Classification & Utility Functions
+    makeFn("isNan");
+    makeFn("isInf");
+    makeFn("isFinite");
+    makeFn("lerp");
+    makeFn("fmod");
+
+    // Pseudo-Random Number Generation
+    makeFn("random");
+    makeFn("randomInt");
+    makeFn("randomFloat");
+    makeFn("seed");
+}
+
 std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, const std::shared_ptr<Scope>& universe) {
     auto scope = std::make_shared<Scope>(ScopeKind::Module, universe);
     if (moduleName == "io" || moduleName == "std.io" || moduleName == "keet.io") {
@@ -219,6 +299,8 @@ std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, cons
         populateFsModuleScope(*scope);
     } else if (moduleName == "sys" || moduleName == "std.sys" || moduleName == "keet.sys") {
         populateSysModuleScope(*scope);
+    } else if (moduleName == "math" || moduleName == "std.math" || moduleName == "keet.math") {
+        populateMathModuleScope(*scope);
     }
     return scope;
 }

@@ -1,0 +1,6 @@
+import math;
+
+fn main(): void {
+    // math.sin expects float; passing integer without explicit cast triggers E3002
+    let val: float = math.sin(1);
+}

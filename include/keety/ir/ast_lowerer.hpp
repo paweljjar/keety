@@ -120,6 +120,9 @@ private:
     std::unordered_set<std::string> imported_fs_symbols_;
     bool has_sys_import_{false};
     std::unordered_set<std::string> imported_sys_symbols_;
+    bool has_math_import_{false};
+    std::unordered_set<std::string> imported_math_symbols_;
+    std::unordered_set<std::string> imported_math_constants_;
 };
 
 } // namespace keety::ir

@@ -52,6 +52,17 @@ std::unique_ptr<Module> AstLowerer::lower_module(const parser::ModuleAST& module
                 for (const auto& s : imp->getSymbols()) {
                     imported_sys_symbols_.insert(s.getEffectiveName());
                 }
+            } else if (p == "math" || p == "std.math" || p == "keet.math") {
+                has_math_import_ = true;
+                for (const auto& s : imp->getSymbols()) {
+                    const std::string& sym_name = s.getEffectiveName();
+                    if (sym_name == "PI" || sym_name == "E" || sym_name == "TAU" ||
+                        sym_name == "INF" || sym_name == "NAN") {
+                        imported_math_constants_.insert(sym_name);
+                    } else {
+                        imported_math_symbols_.insert(sym_name);
+                    }
+                }
             }
         } else if (const auto* var_decl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
             typechecker::TypePtr type = typechecker::Type::fromAnnotation(var_decl->getType());
@@ -627,6 +638,9 @@ Operand AstLowerer::lower_literal_expr(const ast::LiteralExpr& expr) {
 }
 
 Operand AstLowerer::lower_ident_expr(const ast::IdentExpr& expr) {
+    if (imported_math_constants_.count(expr.getName())) {
+        return Operand::create_var("::keet::math::" + expr.getName(), typechecker::Type::floatType());
+    }
     return Operand::create_var(expr.getName(), nullptr);
 }
 
@@ -799,6 +813,12 @@ Operand AstLowerer::lower_call_expr(const ast::CallExpr& expr) {
                 emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
                 return dest;
             }
+            if (obj_id->getName() == "math") {
+                const std::string& m_name = member->getMemberName();
+                std::string callee_name = "@keet.math." + m_name;
+                emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
+                return dest;
+            }
         }
         Operand receiver = lower_expression(*member->getObject());
         emit(std::make_unique<MethodCallInst>(dest, receiver, member->getMemberName(), std::move(args)));
@@ -857,6 +877,22 @@ Operand AstLowerer::lower_call_expr(const ast::CallExpr& expr) {
             emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
             return dest;
         }
+        if (has_math_import_ && (imported_math_symbols_.count(name) ||
+            name == "abs" || name == "absInt" || name == "min" || name == "minInt" ||
+            name == "max" || name == "maxInt" || name == "clamp" || name == "clampInt" ||
+            name == "floor" || name == "ceil" || name == "round" || name == "trunc" ||
+            name == "sign" || name == "signInt" || name == "sqrt" || name == "cbrt" ||
+            name == "pow" || name == "hypot" || name == "exp" || name == "log" ||
+            name == "log2" || name == "log10" || name == "sin" || name == "cos" ||
+            name == "tan" || name == "asin" || name == "acos" || name == "atan" ||
+            name == "atan2" || name == "sinh" || name == "cosh" || name == "tanh" ||
+            name == "toRadians" || name == "toDegrees" || name == "isNan" || name == "isInf" ||
+            name == "isFinite" || name == "lerp" || name == "fmod" || name == "random" ||
+            name == "randomInt" || name == "randomFloat" || name == "seed")) {
+            std::string callee_name = "@keet.math." + name;
+            emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
+            return dest;
+        }
         emit(std::make_unique<CallInst>(dest, ident->getName(), std::move(args)));
     } else {
         Operand callee_op = lower_expression(*expr.getCallee());
@@ -881,6 +917,15 @@ Operand AstLowerer::lower_member_expr(const ast::MemberExpr& expr) {
     }
     if (is_color_enum) {
         return Operand::create_var("::keet::io::Color::" + expr.getMemberName(), typechecker::Type::custom("io.Color"));
+    }
+
+    if (const auto* obj_id = dynamic_cast<const ast::IdentExpr*>(expr.getObject())) {
+        if (obj_id->getName() == "math") {
+            const std::string& m_name = expr.getMemberName();
+            if (m_name == "PI" || m_name == "E" || m_name == "TAU" || m_name == "INF" || m_name == "NAN") {
+                return Operand::create_var("::keet::math::" + m_name, typechecker::Type::floatType());
+            }
+        }
     }
 
     Operand obj = lower_expression(*expr.getObject());

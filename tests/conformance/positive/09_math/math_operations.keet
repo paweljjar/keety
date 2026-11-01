@@ -1,0 +1,127 @@
+import math;
+import io;
+from "math" import PI, sin, cos, absInt, clampInt;
+
+fn main(): int {
+    io.println("Running KeetScript math conformance tests...");
+
+    // 1. Constants
+    if (math.PI < 3.14 || math.PI > 3.15) {
+        return 1;
+    }
+    if (math.E < 2.71 || math.E > 2.72) {
+        return 2;
+    }
+    if (math.TAU < 6.28 || math.TAU > 6.29) {
+        return 3;
+    }
+    if (!math.isInf(math.INF)) {
+        return 4;
+    }
+    if (!math.isNan(math.NAN)) {
+        return 5;
+    }
+
+    // 2. Direct import of constants & Trigonometry
+    let sin_pi: float = sin(PI);
+    if (math.abs(sin_pi) > 0.0001) {
+        return 6;
+    }
+    if (math.abs(cos(0.0) - 1.0) > 0.0001) {
+        return 7;
+    }
+    if (math.abs(math.toRadians(180.0) - PI) > 0.0001) {
+        return 8;
+    }
+    if (math.abs(math.toDegrees(PI) - 180.0) > 0.0001) {
+        return 9;
+    }
+
+    // 3. Absolute value, min, max, clamp
+    if (absInt(-42) != 42) {
+        return 10;
+    }
+    if (math.minInt(10, 20) != 10) {
+        return 11;
+    }
+    if (math.maxInt(10, 20) != 20) {
+        return 12;
+    }
+    if (clampInt(5, 0, 10) != 5) {
+        return 13;
+    }
+    if (clampInt(-5, 0, 10) != 0) {
+        return 14;
+    }
+    if (clampInt(15, 0, 10) != 10) {
+        return 15;
+    }
+    if (math.clamp(1.5, 0.0, 2.0) != 1.5) {
+        return 16;
+    }
+
+    // 4. Rounding & powers
+    if (math.floor(3.7) != 3.0) {
+        return 17;
+    }
+    if (math.ceil(3.2) != 4.0) {
+        return 18;
+    }
+    if (math.round(3.5) != 4.0) {
+        return 19;
+    }
+    if (math.trunc(-3.9) != -3.0) {
+        return 20;
+    }
+    if (math.sqrt(16.0) != 4.0) {
+        return 21;
+    }
+    if (math.pow(2.0, 3.0) != 8.0) {
+        return 22;
+    }
+    if (math.hypot(3.0, 4.0) != 5.0) {
+        return 23;
+    }
+    if (math.lerp(10.0, 20.0, 0.5) != 15.0) {
+        return 24;
+    }
+
+    // 5. PRNG and Seed Repeatability
+    math.seed(1337);
+    let r1: float = math.random();
+    let i1: int = math.randomInt(1, 100);
+    let f1: float = math.randomFloat(0.0, 10.0);
+
+    if (r1 < 0.0 || r1 >= 1.0) {
+        return 25;
+    }
+    if (i1 < 1 || i1 > 100) {
+        return 26;
+    }
+    if (f1 < 0.0 || f1 >= 10.0) {
+        return 27;
+    }
+
+    math.seed(1337);
+    let r2: float = math.random();
+    let i2: int = math.randomInt(1, 100);
+    let f2: float = math.randomFloat(0.0, 10.0);
+
+    if (r1 != r2 || i1 != i2 || f1 != f2) {
+        return 28;
+    }
+
+    // 6. Zonk recovery on invalid clamp range (minVal > maxVal)
+    let safe_val: float = math.clamp(5.0, 10.0, 0.0) zonk 99.0;
+    if (safe_val != 99.0) {
+        return 29;
+    }
+
+    let safe_int: int = clampInt(5, 10, 0) zonk 99;
+    if (safe_int != 99) {
+        return 30;
+    }
+
+    io.println("KeetScript math conformance tests passed successfully!");
+    return 0;
+}

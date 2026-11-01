@@ -548,6 +548,9 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
 
     std::unordered_map<std::string, std::shared_ptr<sema::Scope>> module_scopes;
     module_scopes["<stdlib>/io"] = sema::createStdlibModuleScope("io", universe);
+    module_scopes["<stdlib>/fs"] = sema::createStdlibModuleScope("fs", universe);
+    module_scopes["<stdlib>/sys"] = sema::createStdlibModuleScope("sys", universe);
+    module_scopes["<stdlib>/math"] = sema::createStdlibModuleScope("math", universe);
 
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
@@ -563,16 +566,27 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
             if (edge.toCanonicalPath == "<stdlib>/io" || edge.rawImportPath == "io") {
                 auto ioModSym = std::make_shared<sema::Symbol>("io", sema::SymbolKind::Module, edge.importSpan);
                 module_scope->define(ioModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/fs" || edge.rawImportPath == "fs") {
+                auto fsModSym = std::make_shared<sema::Symbol>("fs", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(fsModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/sys" || edge.rawImportPath == "sys") {
+                auto sysModSym = std::make_shared<sema::Symbol>("sys", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(sysModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/math" || edge.rawImportPath == "math") {
+                auto mathModSym = std::make_shared<sema::Symbol>("math", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(mathModSym, false);
             }
-            auto it = module_scopes.find(edge.toCanonicalPath);
-            if (it != module_scopes.end() && it->second) {
-                for (const auto& [name, sym] : it->second->getSymbols()) {
-                    if (sym && sym->isExported()) {
-                        if (sym->isVariable()) {
-                            auto constView = sema::ConstViewChecker::importExportedSymbol(sym, edge.importSpan);
-                            module_scope->define(constView, false);
-                        } else {
-                            module_scope->define(sym, false);
+            if (edge.toCanonicalPath.rfind("<stdlib>/", 0) != 0) {
+                auto it = module_scopes.find(edge.toCanonicalPath);
+                if (it != module_scopes.end() && it->second) {
+                    for (const auto& [name, sym] : it->second->getSymbols()) {
+                        if (sym && sym->isExported()) {
+                            if (sym->isVariable()) {
+                                auto constView = sema::ConstViewChecker::importExportedSymbol(sym, edge.importSpan);
+                                module_scope->define(constView, false);
+                            } else {
+                                module_scope->define(sym, false);
+                            }
                         }
                     }
                 }
@@ -675,6 +689,9 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
 
     std::unordered_map<std::string, std::shared_ptr<sema::Scope>> module_scopes;
     module_scopes["<stdlib>/io"] = sema::createStdlibModuleScope("io", universe);
+    module_scopes["<stdlib>/fs"] = sema::createStdlibModuleScope("fs", universe);
+    module_scopes["<stdlib>/sys"] = sema::createStdlibModuleScope("sys", universe);
+    module_scopes["<stdlib>/math"] = sema::createStdlibModuleScope("math", universe);
 
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
@@ -690,16 +707,27 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
             if (edge.toCanonicalPath == "<stdlib>/io" || edge.rawImportPath == "io") {
                 auto ioModSym = std::make_shared<sema::Symbol>("io", sema::SymbolKind::Module, edge.importSpan);
                 module_scope->define(ioModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/fs" || edge.rawImportPath == "fs") {
+                auto fsModSym = std::make_shared<sema::Symbol>("fs", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(fsModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/sys" || edge.rawImportPath == "sys") {
+                auto sysModSym = std::make_shared<sema::Symbol>("sys", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(sysModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/math" || edge.rawImportPath == "math") {
+                auto mathModSym = std::make_shared<sema::Symbol>("math", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(mathModSym, false);
             }
-            auto it = module_scopes.find(edge.toCanonicalPath);
-            if (it != module_scopes.end() && it->second) {
-                for (const auto& [name, sym] : it->second->getSymbols()) {
-                    if (sym && sym->isExported()) {
-                        if (sym->isVariable()) {
-                            auto constView = sema::ConstViewChecker::importExportedSymbol(sym, edge.importSpan);
-                            module_scope->define(constView, false);
-                        } else {
-                            module_scope->define(sym, false);
+            if (edge.toCanonicalPath.rfind("<stdlib>/", 0) != 0) {
+                auto it = module_scopes.find(edge.toCanonicalPath);
+                if (it != module_scopes.end() && it->second) {
+                    for (const auto& [name, sym] : it->second->getSymbols()) {
+                        if (sym && sym->isExported()) {
+                            if (sym->isVariable()) {
+                                auto constView = sema::ConstViewChecker::importExportedSymbol(sym, edge.importSpan);
+                                module_scope->define(constView, false);
+                            } else {
+                                module_scope->define(sym, false);
+                            }
                         }
                     }
                 }
@@ -880,6 +908,9 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
 
     std::unordered_map<std::string, std::shared_ptr<sema::Scope>> module_scopes;
     module_scopes["<stdlib>/io"] = sema::createStdlibModuleScope("io", universe);
+    module_scopes["<stdlib>/fs"] = sema::createStdlibModuleScope("fs", universe);
+    module_scopes["<stdlib>/sys"] = sema::createStdlibModuleScope("sys", universe);
+    module_scopes["<stdlib>/math"] = sema::createStdlibModuleScope("math", universe);
 
     // 1. Semantic and type checking across all modules
     for (const auto* node : ordered_nodes) {
@@ -892,16 +923,27 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
             if (edge.toCanonicalPath == "<stdlib>/io" || edge.rawImportPath == "io") {
                 auto ioModSym = std::make_shared<sema::Symbol>("io", sema::SymbolKind::Module, edge.importSpan);
                 module_scope->define(ioModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/fs" || edge.rawImportPath == "fs") {
+                auto fsModSym = std::make_shared<sema::Symbol>("fs", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(fsModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/sys" || edge.rawImportPath == "sys") {
+                auto sysModSym = std::make_shared<sema::Symbol>("sys", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(sysModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/math" || edge.rawImportPath == "math") {
+                auto mathModSym = std::make_shared<sema::Symbol>("math", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(mathModSym, false);
             }
-            auto it = module_scopes.find(edge.toCanonicalPath);
-            if (it != module_scopes.end() && it->second) {
-                for (const auto& [name, sym] : it->second->getSymbols()) {
-                    if (sym && sym->isExported()) {
-                        if (sym->isVariable()) {
-                            auto constView = sema::ConstViewChecker::importExportedSymbol(sym, edge.importSpan);
-                            module_scope->define(constView, false);
-                        } else {
-                            module_scope->define(sym, false);
+            if (edge.toCanonicalPath.rfind("<stdlib>/", 0) != 0) {
+                auto it = module_scopes.find(edge.toCanonicalPath);
+                if (it != module_scopes.end() && it->second) {
+                    for (const auto& [name, sym] : it->second->getSymbols()) {
+                        if (sym && sym->isExported()) {
+                            if (sym->isVariable()) {
+                                auto constView = sema::ConstViewChecker::importExportedSymbol(sym, edge.importSpan);
+                                module_scope->define(constView, false);
+                            } else {
+                                module_scope->define(sym, false);
+                            }
                         }
                     }
                 }

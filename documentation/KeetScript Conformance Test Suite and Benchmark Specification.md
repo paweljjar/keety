@@ -283,6 +283,11 @@ keety test [--conformance | --benchmarks | --all] [--filter <pattern>]
   * **Objective:** Validate standard `sys` module imports, command-line argument access (`sys.args`), process ID retrieval (`sys.pid`), platform detection (`sys.platform`), CPU hardware concurrency queries (`sys.cpuCount`), working and temporary directory paths (`sys.cwd`, `sys.tempDir`), environment variable manipulation (`sys.setEnv`, `sys.getEnv`, `sys.getEnvOr`, `sys.hasEnv`, `sys.unsetEnv`), and subprocess execution with `zonk` fallback recovery.
   * **Assertion:** Exits cleanly with status code `0`.
 
+### Group 9: Standard Math Module & Numerical Operations
+* **Test 9.1 (`math_operations.keet`):**
+  * **Objective:** Validate standard `math` module imports (`import math;`, `from "math" import ...`), constants (`PI`, `E`, `TAU`, `INF`, `NAN`), basic and rounding operations (`absInt`, `minInt`, `maxInt`, `clampInt`, `floor`, `ceil`, `round`, `trunc`), exponential and power functions (`sqrt`, `pow`, `hypot`, `lerp`), trigonometric and angle conversions (`sin`, `cos`, `toRadians`, `toDegrees`), pseudo-random number generator and deterministic seed reproducibility (`seed`, `random`, `randomInt`, `randomFloat`), and `zonk` fallback recovery on domain bounds errors.
+  * **Assertion:** Exits cleanly with status code `0`.
+
 ---
 
 ## 3. Negative Compiler Diagnostic Test Cases (Compile-Time Rejection)
@@ -301,6 +306,7 @@ keety test [--conformance | --benchmarks | --all] [--filter <pattern>]
 | `neg_io_type_mismatch.keet` | `E3003` | Passing invalid argument type to standard `io` function or member: `io.input(42)`. |
 | `neg_fs_type_mismatch.keet` | `E3003` | Passing invalid argument type to standard `fs` function or member: `fs.readText(42)`. |
 | `neg_sys_type_mismatch.keet` | `E3003` | Passing invalid argument type to standard `sys` function or member: `sys.exit("invalid")`. |
+| `neg_math_type_mismatch.keet`| `E3002` | Passing integer to float-only standard `math` function: `math.sin(1)`. |
 
 ---
 

@@ -3107,4 +3107,124 @@ TEST_CASE("Standard sys module type checking and semantic validation", "[typeche
     }
 }
 
+TEST_CASE("Standard math module type checking and semantic validation", "[typechecker][math]") {
+    SECTION("Valid math module member calls and constants") {
+        ParseResult res(
+            "import math;\n"
+            "fn run(): float {\n"
+            "    let a: float = math.sin(math.PI);\n"
+            "    let b: float = math.abs(-4.5);\n"
+            "    let c: int = math.absInt(-42);\n"
+            "    let d: float = math.sqrt(16.0);\n"
+            "    let e: float = math.clamp(5.0, 0.0, 10.0);\n"
+            "    let f: int = math.clampInt(5, 0, 10);\n"
+            "    let g: int = math.randomInt(1, 100);\n"
+            "    let h: float = math.randomFloat(0.0, 1.0);\n"
+            "    let i: float = math.random();\n"
+            "    math.seed(42);\n"
+            "    let is_nan: bool = math.isNan(math.NAN);\n"
+            "    let is_inf: bool = math.isInf(math.INF);\n"
+            "    let is_fin: bool = math.isFinite(math.E);\n"
+            "    return a + b + d + e + h + i;\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Valid selective import and direct calls") {
+        ParseResult res(
+            "from \"math\" import PI, sin, abs, absInt, clamp, randomInt;\n"
+            "fn run(): float {\n"
+            "    let x: float = PI;\n"
+            "    let y: float = sin(x);\n"
+            "    let z: float = abs(-3.14);\n"
+            "    let w: int = absInt(-10);\n"
+            "    let c: float = clamp(1.0, 0.0, 2.0);\n"
+            "    let r: int = randomInt(1, 10);\n"
+            "    return y + z + c;\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Valid math call with zonk fallback expression") {
+        ParseResult res(
+            "import math;\n"
+            "fn run_safe(): float {\n"
+            "    let val: float = math.clamp(5.0, 10.0, 0.0) zonk 0.0;\n"
+            "    return val;\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Strict Zero-Coercion: reject int passed to float-only function with E3002") {
+        ParseResult res(
+            "import math;\n"
+            "fn test_coercion(): void {\n"
+            "    let val: float = math.sin(1);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ImplicitTypeWidening));
+    }
+
+    SECTION("Strict Zero-Coercion: reject float passed to int-only function with E3002") {
+        ParseResult res(
+            "import math;\n"
+            "fn test_coercion(): void {\n"
+            "    let val: int = math.absInt(1.5);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ImplicitTypeWidening));
+    }
+
+    SECTION("Strict Zero-Coercion: reject mismatched argument types in polymorphic call with E3002") {
+        ParseResult res(
+            "import math;\n"
+            "fn test_coercion(): void {\n"
+            "    let val = math.min(1, 2.5);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ImplicitTypeWidening));
+    }
+
+    SECTION("Reject invalid argument count with E3003") {
+        ParseResult res(
+            "import math;\n"
+            "fn test_invalid(): void {\n"
+            "    math.sin(1.0, 2.0);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Reject unknown member on math with E3011") {
+        ParseResult res(
+            "import math;\n"
+            "fn test_invalid(): void {\n"
+            "    let r = math.nonExistentMathFunc();\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::InvalidMemberAccess));
+    }
+
+    SECTION("Reject importing non-exported symbol from math with E1005") {
+        ParseResult res(
+            "from \"math\" import unknownMathSymbol;\n"
+            "fn test_invalid(): void {}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::SymbolNotExported));
+    }
+}
+
+
 

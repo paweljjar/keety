@@ -2098,6 +2098,542 @@ TypePtr TypeChecker::checkSysDirectCall(const ast::IdentExpr* callee, const ast:
     return Type::unknownType();
 }
 
+TypePtr TypeChecker::checkMathMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!member || !call) return Type::unknownType();
+    const std::string& name = member->getMemberName();
+
+    auto checkArgCount = [&](size_t expected) -> bool {
+        if (call->getArgs().size() != expected) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function 'math." + name + "' expects " + std::to_string(expected) +
+                    (expected == 1 ? " argument" : " arguments") + ", but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "wrong argument count"));
+            }
+            hasErrors_ = true;
+            return false;
+        }
+        return true;
+    };
+
+    auto checkFloatArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::floatType());
+                if (aType && !aType->isFloat()) {
+                    if (aType->isInt()) {
+                        reportImplicitWidening(aType, Type::floatType(), arg.value->getSpan(), "math." + name + " " + argName + " argument");
+                    } else {
+                        reportTypeMismatch(Type::floatType(), aType, arg.value->getSpan(), "math." + name + " " + argName + " argument");
+                    }
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkIntArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::intType());
+                if (aType && !aType->isInt()) {
+                    if (aType->isFloat()) {
+                        reportImplicitWidening(aType, Type::intType(), arg.value->getSpan(), "math." + name + " " + argName + " argument");
+                    } else {
+                        reportTypeMismatch(Type::intType(), aType, arg.value->getSpan(), "math." + name + " " + argName + " argument");
+                    }
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    // Constants called as functions are errors
+    if (name == "PI" || name == "E" || name == "TAU" || name == "INF" || name == "NAN") {
+        if (emitter_) {
+            emitter_->report(diag::Diagnostic::makeError(
+                diag::ErrorCode::TypeMismatch,
+                "cannot call mathematical constant 'math." + name + "' as a function",
+                call->getSpan().start).withLabel(call->getSpan(), "constant called as function"));
+        }
+        hasErrors_ = true;
+        return Type::unknownType();
+    }
+
+    // Polymorphic operations: abs, min, max, clamp, sign
+    if (name == "abs") {
+        if (checkArgCount(1)) {
+            const auto& arg = call->getArgs()[0];
+            auto aType = arg.value ? inferType(*arg.value, scope) : Type::unknownType();
+            if (aType && aType->isInt()) {
+                return Type::intType();
+            }
+            if (aType && aType->isFloat()) {
+                return Type::floatType();
+            }
+            reportTypeMismatch(Type::floatType(), aType, arg.value->getSpan(), "math.abs argument");
+        }
+        return Type::floatType();
+    }
+    if (name == "sign") {
+        if (checkArgCount(1)) {
+            const auto& arg = call->getArgs()[0];
+            auto aType = arg.value ? inferType(*arg.value, scope) : Type::unknownType();
+            if (aType && aType->isInt()) {
+                return Type::intType();
+            }
+            if (aType && aType->isFloat()) {
+                return Type::floatType();
+            }
+            reportTypeMismatch(Type::floatType(), aType, arg.value->getSpan(), "math.sign argument");
+        }
+        return Type::floatType();
+    }
+    if (name == "min" || name == "max") {
+        if (checkArgCount(2)) {
+            const auto& arg0 = call->getArgs()[0];
+            const auto& arg1 = call->getArgs()[1];
+            auto t0 = arg0.value ? inferType(*arg0.value, scope) : Type::unknownType();
+            auto t1 = arg1.value ? inferType(*arg1.value, scope) : Type::unknownType();
+            if (t0 && t1 && t0->isInt() && t1->isInt()) {
+                return Type::intType();
+            }
+            if (t0 && t1 && t0->isFloat() && t1->isFloat()) {
+                return Type::floatType();
+            }
+            if (t0 && t1 && ((t0->isInt() && t1->isFloat()) || (t0->isFloat() && t1->isInt()))) {
+                if (emitter_) {
+                    emitter_->report(diag::Diagnostic::makeError(
+                        diag::ErrorCode::ImplicitTypeWidening,
+                        "function 'math." + name + "' requires both arguments to have the same numeric type (both int or both float)",
+                        call->getSpan().start).withLabel(call->getSpan(), "mixed numeric types without explicit cast"));
+                }
+                hasErrors_ = true;
+                return Type::unknownType();
+            }
+            reportTypeMismatch(Type::floatType(), t0, arg0.value->getSpan(), "math." + name + " argument");
+        }
+        return Type::floatType();
+    }
+    if (name == "clamp") {
+        if (checkArgCount(3)) {
+            const auto& arg0 = call->getArgs()[0];
+            const auto& arg1 = call->getArgs()[1];
+            const auto& arg2 = call->getArgs()[2];
+            auto t0 = arg0.value ? inferType(*arg0.value, scope) : Type::unknownType();
+            auto t1 = arg1.value ? inferType(*arg1.value, scope) : Type::unknownType();
+            auto t2 = arg2.value ? inferType(*arg2.value, scope) : Type::unknownType();
+            if (t0 && t1 && t2 && t0->isInt() && t1->isInt() && t2->isInt()) {
+                return Type::intType();
+            }
+            if (t0 && t1 && t2 && t0->isFloat() && t1->isFloat() && t2->isFloat()) {
+                return Type::floatType();
+            }
+            if (t0 && t1 && t2 && (t0->isInt() || t0->isFloat()) && (t1->isInt() || t1->isFloat()) && (t2->isInt() || t2->isFloat())) {
+                if (emitter_) {
+                    emitter_->report(diag::Diagnostic::makeError(
+                        diag::ErrorCode::ImplicitTypeWidening,
+                        "function 'math.clamp' requires all arguments to have the same numeric type (all int or all float)",
+                        call->getSpan().start).withLabel(call->getSpan(), "mixed numeric types without explicit cast"));
+                }
+                hasErrors_ = true;
+                return Type::unknownType();
+            }
+            reportTypeMismatch(Type::floatType(), t0, arg0.value->getSpan(), "math.clamp argument");
+        }
+        return Type::floatType();
+    }
+
+    // Explicit integer variants
+    if (name == "absInt" || name == "signInt") {
+        if (checkArgCount(1)) {
+            checkIntArg(0, "x");
+        }
+        return Type::intType();
+    }
+    if (name == "minInt" || name == "maxInt") {
+        if (checkArgCount(2)) {
+            checkIntArg(0, "a");
+            checkIntArg(1, "b");
+        }
+        return Type::intType();
+    }
+    if (name == "clampInt") {
+        if (checkArgCount(3)) {
+            checkIntArg(0, "val");
+            checkIntArg(1, "minVal");
+            checkIntArg(2, "maxVal");
+        }
+        return Type::intType();
+    }
+
+    // Single float argument operations
+    if (name == "floor" || name == "ceil" || name == "round" || name == "trunc" ||
+        name == "sqrt" || name == "cbrt" || name == "exp" || name == "log" ||
+        name == "log2" || name == "log10" || name == "sin" || name == "cos" ||
+        name == "tan" || name == "asin" || name == "acos" || name == "atan" ||
+        name == "sinh" || name == "cosh" || name == "tanh" || name == "toRadians" ||
+        name == "toDegrees") {
+        if (checkArgCount(1)) {
+            checkFloatArg(0, "x");
+        }
+        return Type::floatType();
+    }
+
+    // Two float argument operations
+    if (name == "pow") {
+        if (checkArgCount(2)) {
+            checkFloatArg(0, "base");
+            checkFloatArg(1, "exp");
+        }
+        return Type::floatType();
+    }
+    if (name == "hypot") {
+        if (checkArgCount(2)) {
+            checkFloatArg(0, "x");
+            checkFloatArg(1, "y");
+        }
+        return Type::floatType();
+    }
+    if (name == "atan2") {
+        if (checkArgCount(2)) {
+            checkFloatArg(0, "y");
+            checkFloatArg(1, "x");
+        }
+        return Type::floatType();
+    }
+    if (name == "fmod") {
+        if (checkArgCount(2)) {
+            checkFloatArg(0, "x");
+            checkFloatArg(1, "y");
+        }
+        return Type::floatType();
+    }
+
+    // Three float argument operations
+    if (name == "lerp") {
+        if (checkArgCount(3)) {
+            checkFloatArg(0, "a");
+            checkFloatArg(1, "b");
+            checkFloatArg(2, "t");
+        }
+        return Type::floatType();
+    }
+
+    // Floating-point classification
+    if (name == "isNan" || name == "isInf" || name == "isFinite") {
+        if (checkArgCount(1)) {
+            checkFloatArg(0, "x");
+        }
+        return Type::boolType();
+    }
+
+    // PRNG operations
+    if (name == "random") {
+        checkArgCount(0);
+        return Type::floatType();
+    }
+    if (name == "randomInt") {
+        if (checkArgCount(2)) {
+            checkIntArg(0, "minVal");
+            checkIntArg(1, "maxVal");
+        }
+        return Type::intType();
+    }
+    if (name == "randomFloat") {
+        if (checkArgCount(2)) {
+            checkFloatArg(0, "minVal");
+            checkFloatArg(1, "maxVal");
+        }
+        return Type::floatType();
+    }
+    if (name == "seed") {
+        if (checkArgCount(1)) {
+            checkIntArg(0, "s");
+        }
+        return Type::voidType();
+    }
+
+    // Unknown member on math
+    if (emitter_) {
+        emitter_->report(diag::Diagnostic::makeError(
+            diag::ErrorCode::InvalidMemberAccess,
+            "module 'math' has no member '" + name + "'",
+            member->getSpan().start).withLabel(member->getSpan(), "unknown module member"));
+    }
+    hasErrors_ = true;
+    return Type::unknownType();
+}
+
+TypePtr TypeChecker::checkMathDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!callee || !call) return Type::unknownType();
+    const std::string& name = callee->getName();
+
+    auto checkArgCount = [&](size_t expected) -> bool {
+        if (call->getArgs().size() != expected) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function '" + name + "' expects " + std::to_string(expected) +
+                    (expected == 1 ? " argument" : " arguments") + ", but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "wrong argument count"));
+            }
+            hasErrors_ = true;
+            return false;
+        }
+        return true;
+    };
+
+    auto checkFloatArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::floatType());
+                if (aType && !aType->isFloat()) {
+                    if (aType->isInt()) {
+                        reportImplicitWidening(aType, Type::floatType(), arg.value->getSpan(), name + " " + argName + " argument");
+                    } else {
+                        reportTypeMismatch(Type::floatType(), aType, arg.value->getSpan(), name + " " + argName + " argument");
+                    }
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkIntArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::intType());
+                if (aType && !aType->isInt()) {
+                    if (aType->isFloat()) {
+                        reportImplicitWidening(aType, Type::intType(), arg.value->getSpan(), name + " " + argName + " argument");
+                    } else {
+                        reportTypeMismatch(Type::intType(), aType, arg.value->getSpan(), name + " " + argName + " argument");
+                    }
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    // Constants called as functions are errors
+    if (name == "PI" || name == "E" || name == "TAU" || name == "INF" || name == "NAN") {
+        if (emitter_) {
+            emitter_->report(diag::Diagnostic::makeError(
+                diag::ErrorCode::TypeMismatch,
+                "cannot call mathematical constant '" + name + "' as a function",
+                call->getSpan().start).withLabel(call->getSpan(), "constant called as function"));
+        }
+        hasErrors_ = true;
+        return Type::unknownType();
+    }
+
+    // Polymorphic operations: abs, min, max, clamp, sign
+    if (name == "abs") {
+        if (checkArgCount(1)) {
+            const auto& arg = call->getArgs()[0];
+            auto aType = arg.value ? inferType(*arg.value, scope) : Type::unknownType();
+            if (aType && aType->isInt()) {
+                return Type::intType();
+            }
+            if (aType && aType->isFloat()) {
+                return Type::floatType();
+            }
+            reportTypeMismatch(Type::floatType(), aType, arg.value->getSpan(), "abs argument");
+        }
+        return Type::floatType();
+    }
+    if (name == "sign") {
+        if (checkArgCount(1)) {
+            const auto& arg = call->getArgs()[0];
+            auto aType = arg.value ? inferType(*arg.value, scope) : Type::unknownType();
+            if (aType && aType->isInt()) {
+                return Type::intType();
+            }
+            if (aType && aType->isFloat()) {
+                return Type::floatType();
+            }
+            reportTypeMismatch(Type::floatType(), aType, arg.value->getSpan(), "sign argument");
+        }
+        return Type::floatType();
+    }
+    if (name == "min" || name == "max") {
+        if (checkArgCount(2)) {
+            const auto& arg0 = call->getArgs()[0];
+            const auto& arg1 = call->getArgs()[1];
+            auto t0 = arg0.value ? inferType(*arg0.value, scope) : Type::unknownType();
+            auto t1 = arg1.value ? inferType(*arg1.value, scope) : Type::unknownType();
+            if (t0 && t1 && t0->isInt() && t1->isInt()) {
+                return Type::intType();
+            }
+            if (t0 && t1 && t0->isFloat() && t1->isFloat()) {
+                return Type::floatType();
+            }
+            if (t0 && t1 && ((t0->isInt() && t1->isFloat()) || (t0->isFloat() && t1->isInt()))) {
+                if (emitter_) {
+                    emitter_->report(diag::Diagnostic::makeError(
+                        diag::ErrorCode::ImplicitTypeWidening,
+                        "function '" + name + "' requires both arguments to have the same numeric type (both int or both float)",
+                        call->getSpan().start).withLabel(call->getSpan(), "mixed numeric types without explicit cast"));
+                }
+                hasErrors_ = true;
+                return Type::unknownType();
+            }
+            reportTypeMismatch(Type::floatType(), t0, arg0.value->getSpan(), name + " argument");
+        }
+        return Type::floatType();
+    }
+    if (name == "clamp") {
+        if (checkArgCount(3)) {
+            const auto& arg0 = call->getArgs()[0];
+            const auto& arg1 = call->getArgs()[1];
+            const auto& arg2 = call->getArgs()[2];
+            auto t0 = arg0.value ? inferType(*arg0.value, scope) : Type::unknownType();
+            auto t1 = arg1.value ? inferType(*arg1.value, scope) : Type::unknownType();
+            auto t2 = arg2.value ? inferType(*arg2.value, scope) : Type::unknownType();
+            if (t0 && t1 && t2 && t0->isInt() && t1->isInt() && t2->isInt()) {
+                return Type::intType();
+            }
+            if (t0 && t1 && t2 && t0->isFloat() && t1->isFloat() && t2->isFloat()) {
+                return Type::floatType();
+            }
+            if (t0 && t1 && t2 && (t0->isInt() || t0->isFloat()) && (t1->isInt() || t1->isFloat()) && (t2->isInt() || t2->isFloat())) {
+                if (emitter_) {
+                    emitter_->report(diag::Diagnostic::makeError(
+                        diag::ErrorCode::ImplicitTypeWidening,
+                        "function 'clamp' requires all arguments to have the same numeric type (all int or all float)",
+                        call->getSpan().start).withLabel(call->getSpan(), "mixed numeric types without explicit cast"));
+                }
+                hasErrors_ = true;
+                return Type::unknownType();
+            }
+            reportTypeMismatch(Type::floatType(), t0, arg0.value->getSpan(), "clamp argument");
+        }
+        return Type::floatType();
+    }
+
+    // Explicit integer variants
+    if (name == "absInt" || name == "signInt") {
+        if (checkArgCount(1)) {
+            checkIntArg(0, "x");
+        }
+        return Type::intType();
+    }
+    if (name == "minInt" || name == "maxInt") {
+        if (checkArgCount(2)) {
+            checkIntArg(0, "a");
+            checkIntArg(1, "b");
+        }
+        return Type::intType();
+    }
+    if (name == "clampInt") {
+        if (checkArgCount(3)) {
+            checkIntArg(0, "val");
+            checkIntArg(1, "minVal");
+            checkIntArg(2, "maxVal");
+        }
+        return Type::intType();
+    }
+
+    // Single float argument operations
+    if (name == "floor" || name == "ceil" || name == "round" || name == "trunc" ||
+        name == "sqrt" || name == "cbrt" || name == "exp" || name == "log" ||
+        name == "log2" || name == "log10" || name == "sin" || name == "cos" ||
+        name == "tan" || name == "asin" || name == "acos" || name == "atan" ||
+        name == "sinh" || name == "cosh" || name == "tanh" || name == "toRadians" ||
+        name == "toDegrees") {
+        if (checkArgCount(1)) {
+            checkFloatArg(0, "x");
+        }
+        return Type::floatType();
+    }
+
+    // Two float argument operations
+    if (name == "pow") {
+        if (checkArgCount(2)) {
+            checkFloatArg(0, "base");
+            checkFloatArg(1, "exp");
+        }
+        return Type::floatType();
+    }
+    if (name == "hypot") {
+        if (checkArgCount(2)) {
+            checkFloatArg(0, "x");
+            checkFloatArg(1, "y");
+        }
+        return Type::floatType();
+    }
+    if (name == "atan2") {
+        if (checkArgCount(2)) {
+            checkFloatArg(0, "y");
+            checkFloatArg(1, "x");
+        }
+        return Type::floatType();
+    }
+    if (name == "fmod") {
+        if (checkArgCount(2)) {
+            checkFloatArg(0, "x");
+            checkFloatArg(1, "y");
+        }
+        return Type::floatType();
+    }
+
+    // Three float argument operations
+    if (name == "lerp") {
+        if (checkArgCount(3)) {
+            checkFloatArg(0, "a");
+            checkFloatArg(1, "b");
+            checkFloatArg(2, "t");
+        }
+        return Type::floatType();
+    }
+
+    // Floating-point classification
+    if (name == "isNan" || name == "isInf" || name == "isFinite") {
+        if (checkArgCount(1)) {
+            checkFloatArg(0, "x");
+        }
+        return Type::boolType();
+    }
+
+    // PRNG operations
+    if (name == "random") {
+        checkArgCount(0);
+        return Type::floatType();
+    }
+    if (name == "randomInt") {
+        if (checkArgCount(2)) {
+            checkIntArg(0, "minVal");
+            checkIntArg(1, "maxVal");
+        }
+        return Type::intType();
+    }
+    if (name == "randomFloat") {
+        if (checkArgCount(2)) {
+            checkFloatArg(0, "minVal");
+            checkFloatArg(1, "maxVal");
+        }
+        return Type::floatType();
+    }
+    if (name == "seed") {
+        if (checkArgCount(1)) {
+            checkIntArg(0, "s");
+        }
+        return Type::voidType();
+    }
+
+    return Type::unknownType();
+}
+
 bool TypeChecker::checkZeroCoercion(const parser::ModuleAST& module, sema::Scope* rootScope) {
     return checkTypes(module, rootScope);
 }
@@ -2218,6 +2754,44 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                                 emitter_->report(diag::Diagnostic::makeError(
                                     diag::ErrorCode::SymbolNotExported,
                                     "symbol '" + symItem.originalName + "' is not exported by module 'sys'",
+                                    symItem.span.start).withLabel(symItem.span, "symbol not exported"));
+                            }
+                            hasErrors_ = true;
+                        }
+                    }
+                }
+            } else if (modPath == "math" || modPath == "std.math" || modPath == "keet.math") {
+                if (importDecl->getSymbols().empty()) {
+                    std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "math";
+                    if (!targetScope->lookupCurrent(boundName)) {
+                        auto modSym = std::make_shared<sema::Symbol>(boundName, sema::SymbolKind::Module, importDecl->getSpan());
+                        modSym->setExported(importDecl->isReExported());
+                        auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, modSym, emitter_);
+                        if (!res.success) hasErrors_ = true;
+                    }
+                } else {
+                    auto mathScope = sema::createStdlibModuleScope("math");
+                    for (const auto& symItem : importDecl->getSymbols()) {
+                        auto exportedSym = mathScope->lookupCurrent(symItem.originalName);
+                        if (exportedSym) {
+                            std::string importAsName = symItem.getEffectiveName();
+                            if (!targetScope->lookupCurrent(importAsName)) {
+                                auto importedSym = std::make_shared<sema::Symbol>(
+                                    importAsName, exportedSym->getKind(), symItem.span
+                                );
+                                importedSym->setExported(importDecl->isReExported());
+                                importedSym->setIsType(exportedSym->isType());
+                                if (exportedSym->isConstant()) {
+                                    importedSym->setConst(true);
+                                }
+                                auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, importedSym, emitter_);
+                                if (!res.success) hasErrors_ = true;
+                            }
+                        } else {
+                            if (emitter_) {
+                                emitter_->report(diag::Diagnostic::makeError(
+                                    diag::ErrorCode::SymbolNotExported,
+                                    "symbol '" + symItem.originalName + "' is not exported by module 'math'",
                                     symItem.span.start).withLabel(symItem.span, "symbol not exported"));
                             }
                             hasErrors_ = true;
@@ -2944,6 +3518,12 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             if (sym->isBuiltinType()) {
                 return Type::custom(ident->getName());
             }
+            if (sym->isConstant()) {
+                const std::string& cName = sym->getName();
+                if (cName == "PI" || cName == "E" || cName == "TAU" || cName == "INF" || cName == "NAN") {
+                    return Type::floatType();
+                }
+            }
         }
         return Type::unknownType();
     }
@@ -3202,6 +3782,19 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     }
                     return checkSysMemberCall(member, call, scope);
                 }
+                if (objIdent->getName() == "math" || (sym && sym->isModule() && sym->getName() == "math")) {
+                    if (!sym) {
+                        if (emitter_) {
+                            emitter_->report(diag::Diagnostic::makeError(
+                                diag::ErrorCode::UndeclaredIdentifier,
+                                "undeclared identifier '" + objIdent->getName() + "'",
+                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                        }
+                        hasErrors_ = true;
+                        return Type::unknownType();
+                    }
+                    return checkMathMemberCall(member, call, scope);
+                }
             }
 
             auto objType = member->getObject() ? inferType(*member->getObject(), scope) : Type::unknownType();
@@ -3360,7 +3953,7 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
         // Function call: lookup in scope and check arguments
         if (const auto* calleeIdent = dynamic_cast<const ast::IdentExpr*>(call->getCallee())) {
             auto sym = scope.lookup(calleeIdent->getName());
-            if (sym && sym->isImportedSymbol()) {
+            if (sym && (sym->isImportedSymbol() || sym->isFunction())) {
                 const std::string& name = calleeIdent->getName();
                 if (name == "print" || name == "println" || name == "eprint" || name == "eprintln" ||
                     name == "readln" || name == "readLine" || name == "eof" ||
@@ -3405,6 +3998,19 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     name == "exec" ||
                     name == "execOutput") {
                     return checkSysDirectCall(calleeIdent, call, scope);
+                }
+                if (name == "abs" || name == "absInt" || name == "min" || name == "minInt" ||
+                    name == "max" || name == "maxInt" || name == "clamp" || name == "clampInt" ||
+                    name == "floor" || name == "ceil" || name == "round" || name == "trunc" ||
+                    name == "sign" || name == "signInt" || name == "sqrt" || name == "cbrt" ||
+                    name == "pow" || name == "hypot" || name == "exp" || name == "log" ||
+                    name == "log2" || name == "log10" || name == "sin" || name == "cos" ||
+                    name == "tan" || name == "asin" || name == "acos" || name == "atan" ||
+                    name == "atan2" || name == "sinh" || name == "cosh" || name == "tanh" ||
+                    name == "toRadians" || name == "toDegrees" || name == "isNan" || name == "isInf" ||
+                    name == "isFinite" || name == "lerp" || name == "fmod" || name == "random" ||
+                    name == "randomInt" || name == "randomFloat" || name == "seed") {
+                    return checkMathDirectCall(calleeIdent, call, scope);
                 }
             }
             const ast::FnDecl* fnDecl = nullptr;
@@ -3817,6 +4423,65 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     emitter_->report(diag::Diagnostic::makeError(
                         diag::ErrorCode::InvalidMemberAccess,
                         "module 'sys' has no member '" + member->getMemberName() + "'",
+                        member->getSpan().start).withLabel(member->getSpan(), "unknown module member"));
+                }
+                hasErrors_ = true;
+                return Type::unknownType();
+            }
+            if (objIdent->getName() == "math" || (sym && sym->isModule() && sym->getName() == "math")) {
+                if (!sym) {
+                    if (emitter_) {
+                        emitter_->report(diag::Diagnostic::makeError(
+                            diag::ErrorCode::UndeclaredIdentifier,
+                            "undeclared identifier '" + objIdent->getName() + "'",
+                            objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                    }
+                    hasErrors_ = true;
+                    return Type::unknownType();
+                }
+                const std::string& mName = member->getMemberName();
+                if (mName == "PI" || mName == "E" || mName == "TAU" || mName == "INF" || mName == "NAN") {
+                    return Type::floatType();
+                }
+                if (mName == "random") {
+                    return Type::function({}, Type::floatType(), false);
+                }
+                if (mName == "seed") {
+                    return Type::function({Type::intType()}, Type::voidType(), false);
+                }
+                if (mName == "abs" || mName == "absInt" || mName == "sign" || mName == "signInt") {
+                    return Type::function({Type::floatType()}, Type::floatType(), false);
+                }
+                if (mName == "min" || mName == "minInt" || mName == "max" || mName == "maxInt") {
+                    return Type::function({Type::floatType(), Type::floatType()}, Type::floatType(), false);
+                }
+                if (mName == "clamp" || mName == "clampInt") {
+                    return Type::function({Type::floatType(), Type::floatType(), Type::floatType()}, Type::floatType(), false);
+                }
+                if (mName == "isNan" || mName == "isInf" || mName == "isFinite") {
+                    return Type::function({Type::floatType()}, Type::boolType(), false);
+                }
+                if (mName == "pow" || mName == "hypot" || mName == "atan2" || mName == "fmod" || mName == "randomFloat") {
+                    return Type::function({Type::floatType(), Type::floatType()}, Type::floatType(), false);
+                }
+                if (mName == "randomInt") {
+                    return Type::function({Type::intType(), Type::intType()}, Type::intType(), false);
+                }
+                if (mName == "lerp") {
+                    return Type::function({Type::floatType(), Type::floatType(), Type::floatType()}, Type::floatType(), false);
+                }
+                if (mName == "floor" || mName == "ceil" || mName == "round" || mName == "trunc" ||
+                    mName == "sqrt" || mName == "cbrt" || mName == "exp" || mName == "log" ||
+                    mName == "log2" || mName == "log10" || mName == "sin" || mName == "cos" ||
+                    mName == "tan" || mName == "asin" || mName == "acos" || mName == "atan" ||
+                    mName == "sinh" || mName == "cosh" || mName == "tanh" || mName == "toRadians" ||
+                    mName == "toDegrees") {
+                    return Type::function({Type::floatType()}, Type::floatType(), false);
+                }
+                if (emitter_) {
+                    emitter_->report(diag::Diagnostic::makeError(
+                        diag::ErrorCode::InvalidMemberAccess,
+                        "module 'math' has no member '" + member->getMemberName() + "'",
                         member->getSpan().start).withLabel(member->getSpan(), "unknown module member"));
                 }
                 hasErrors_ = true;
