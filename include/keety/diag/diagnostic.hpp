@@ -81,6 +81,10 @@ struct Diagnostic {
         return *this;
     }
 
+    Diagnostic& withSecondaryLabel(SourceSpan span, std::string labelMsg) {
+        return withLabel(span, std::move(labelMsg), false);
+    }
+
     Diagnostic& withNote(std::string noteMsg) {
         footers.push_back(DiagnosticFooter{DiagnosticFooter::Kind::Note, std::move(noteMsg)});
         return *this;

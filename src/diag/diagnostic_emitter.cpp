@@ -1,8 +1,15 @@
 #include <keety/diag/diagnostic_emitter.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <iomanip>
 #include <sstream>
+
+#if defined(_WIN32)
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace keety::diag {
 
@@ -36,6 +43,40 @@ std::string_view severityToString(DiagnosticSeverity sev) noexcept {
 DiagnosticEmitter::DiagnosticEmitter(const SourceManager& sourceManager, ColorMode colorMode)
     : sourceManager_(sourceManager), colorMode_(colorMode) {}
 
+bool DiagnosticEmitter::shouldUseColor() const noexcept {
+    const char* noColor = std::getenv("NO_COLOR");
+    if (noColor && *noColor != '\0') {
+        const char* clicolorForce = std::getenv("CLICOLOR_FORCE");
+        if (!clicolorForce || std::string_view(clicolorForce) == "0") {
+            return false;
+        }
+    }
+
+    if (colorMode_ == ColorMode::Always) {
+        return true;
+    }
+    if (colorMode_ == ColorMode::Never) {
+        return false;
+    }
+
+    // ColorMode::Auto
+    const char* clicolorForce = std::getenv("CLICOLOR_FORCE");
+    if (clicolorForce && std::string_view(clicolorForce) != "0") {
+        return true;
+    }
+
+    const char* clicolor = std::getenv("CLICOLOR");
+    if (clicolor && std::string_view(clicolor) == "0") {
+        return false;
+    }
+
+#if defined(_WIN32)
+    return _isatty(_fileno(stderr)) != 0;
+#else
+    return isatty(fileno(stderr)) != 0;
+#endif
+}
+
 void DiagnosticEmitter::report(Diagnostic diag) {
     if (diag.severity == DiagnosticSeverity::Error) {
         ++errorCount_;
@@ -50,7 +91,7 @@ void DiagnosticEmitter::emit(const Diagnostic& diag, std::ostream& os) const {
 }
 
 std::string DiagnosticEmitter::format(const Diagnostic& diag) const {
-    const bool useColor = (colorMode_ == ColorMode::Always);
+    const bool useColor = shouldUseColor();
 
     std::ostringstream ss;
 
@@ -125,19 +166,28 @@ std::string DiagnosticEmitter::format(const Diagnostic& diag) const {
         std::vector<DiagnosticLabel> fileLabels;
         for (const auto& lbl : diag.labels) {
             if (lbl.span.isValid() && lbl.span.getFileId() == fid) {
-                fileLabels.push_back(lbl);
+                DiagnosticLabel resolved = lbl;
+                if (resolved.span.start.line == 0 || resolved.span.start.column == 0) {
+                    resolved.span.start = buffer->getLocationAtOffset(lbl.span.start.offset);
+                }
+                if (resolved.span.end.line == 0 || resolved.span.end.column == 0) {
+                    resolved.span.end = buffer->getLocationAtOffset(lbl.span.end.offset);
+                }
+                fileLabels.push_back(resolved);
             }
         }
 
         if (fileLabels.empty() && fid == loc.fileId && loc.isValid()) {
-            SourceSpan dummySpan{loc, SourceLocation{loc.fileId, loc.offset + 1, loc.line, loc.column + 1}};
+            SourceLocation resolvedLoc = (loc.line > 0 && loc.column > 0) ? loc : buffer->getLocationAtOffset(loc.offset);
+            SourceSpan dummySpan{resolvedLoc, SourceLocation{resolvedLoc.fileId, resolvedLoc.offset + 1, resolvedLoc.line, resolvedLoc.column + 1}};
             fileLabels.push_back(DiagnosticLabel{dummySpan, "", true});
         }
 
         if (fileLabels.empty()) continue;
 
         // Determine gutter width based on maximum line number we will print for this file
-        uint32_t maxLine = (fid == loc.fileId) ? loc.line : fileLabels.front().span.start.line;
+        uint32_t primaryLine = (loc.line > 0) ? loc.line : buffer->getLocationAtOffset(loc.offset).line;
+        uint32_t maxLine = (fid == loc.fileId) ? primaryLine : fileLabels.front().span.start.line;
         for (const auto& lbl : fileLabels) {
             maxLine = std::max(maxLine, lbl.span.start.line);
             maxLine = std::max(maxLine, lbl.span.end.line);
@@ -145,7 +195,12 @@ std::string DiagnosticEmitter::format(const Diagnostic& diag) const {
         const size_t gutterWidth = std::max<size_t>(2, std::to_string(maxLine).length());
         globalGutterWidth = std::max(globalGutterWidth, gutterWidth);
 
-        SourceLocation headerLoc = (fid == loc.fileId) ? loc : fileLabels.front().span.start;
+        SourceLocation headerLoc;
+        if (fid == loc.fileId && loc.isValid()) {
+            headerLoc = (loc.line > 0 && loc.column > 0) ? loc : buffer->getLocationAtOffset(loc.offset);
+        } else if (!fileLabels.empty()) {
+            headerLoc = fileLabels.front().span.start;
+        }
 
         // Header: --> for primary, ::: for secondary files
         if (useColor) ss << ANSI_BLUE;
@@ -200,20 +255,32 @@ std::string DiagnosticEmitter::format(const Diagnostic& diag) const {
                 }
 
                 std::string squiggles(maxCol, ' ');
+                // Draw secondary labels first
                 for (const auto* lbl : lineLabels) {
+                    if (lbl->isPrimary) continue;
                     uint32_t startCol = (lbl->span.start.line == lineNum) ? lbl->span.start.column : 1;
                     uint32_t endCol = (lbl->span.end.line == lineNum) ? lbl->span.end.column : static_cast<uint32_t>(lineContent.length() + 1);
-
                     if (endCol <= startCol) {
                         endCol = startCol + 1;
                     }
-
-                    char squiggleChar = lbl->isPrimary ? '^' : '-';
                     size_t startIndex = (startCol > 0) ? (startCol - 1) : 0;
                     size_t endIndex = (endCol > 0) ? (endCol - 1) : 0;
-
                     for (size_t c = startIndex; c < endIndex && c < squiggles.size(); ++c) {
-                        squiggles[c] = squiggleChar;
+                        squiggles[c] = '-';
+                    }
+                }
+                // Draw primary labels second (so they take precedence)
+                for (const auto* lbl : lineLabels) {
+                    if (!lbl->isPrimary) continue;
+                    uint32_t startCol = (lbl->span.start.line == lineNum) ? lbl->span.start.column : 1;
+                    uint32_t endCol = (lbl->span.end.line == lineNum) ? lbl->span.end.column : static_cast<uint32_t>(lineContent.length() + 1);
+                    if (endCol <= startCol) {
+                        endCol = startCol + 1;
+                    }
+                    size_t startIndex = (startCol > 0) ? (startCol - 1) : 0;
+                    size_t endIndex = (endCol > 0) ? (endCol - 1) : 0;
+                    for (size_t c = startIndex; c < endIndex && c < squiggles.size(); ++c) {
+                        squiggles[c] = '^';
                     }
                 }
 
@@ -263,7 +330,18 @@ std::string DiagnosticEmitter::format(const Diagnostic& diag) const {
             ss << "help: ";
         }
         if (useColor) ss << ANSI_RESET;
-        ss << footer.message << "\n";
+
+        const size_t prefixWidth = globalGutterWidth + 3 + (footer.kind == DiagnosticFooter::Kind::Note ? 6 : 6);
+        std::istringstream msgStream(footer.message);
+        std::string line;
+        bool isFirst = true;
+        while (std::getline(msgStream, line)) {
+            if (!isFirst) {
+                ss << std::string(prefixWidth, ' ');
+            }
+            ss << line << "\n";
+            isFirst = false;
+        }
     }
 
     return ss.str();

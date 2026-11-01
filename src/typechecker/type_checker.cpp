@@ -1,15 +1,85 @@
 #include <keety/typechecker/type_checker.hpp>
+#include <keety/diag/levenshtein.hpp>
 #include <keety/sema/const_view_checker.hpp>
 #include <keety/sema/shadow_checker.hpp>
 #include <keety/sema/universe.hpp>
 
 #include <algorithm>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 
 namespace keety::typechecker {
 
 namespace {
+
+const std::vector<std::string> kIoCandidates = {
+    "print", "println", "eprint", "eprintln", "readln", "readLine", "input", "flush", "Color", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "gray", "bold"
+};
+
+const std::vector<std::string> kFsCandidates = {
+    "readText", "readLines", "writeText", "appendText", "exists", "isFile", "isDir",
+    "fileSize", "mkdir", "remove", "removeAll", "copy", "rename", "listDir", "cwd",
+    "join", "fileName", "extension", "parentDir"
+};
+
+const std::vector<std::string> kSysCandidates = {
+    "args", "exit", "pid", "getEnv", "getEnvOr", "setEnv", "unsetEnv", "hasEnv",
+    "platform", "arch", "cwd", "homeDir", "tempDir", "cpuCount", "chdir", "exec", "execOutput"
+};
+
+const std::vector<std::string> kMathCandidates = {
+    "abs", "min", "max", "clamp", "sign", "absInt", "minInt", "maxInt", "clampInt", "signInt",
+    "floor", "ceil", "round", "trunc", "sqrt", "cbrt", "exp", "log", "log2", "log10",
+    "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh", "toRadians", "toDegrees",
+    "pow", "hypot", "atan2", "fmod", "lerp", "isNan", "isInf", "isFinite", "random",
+    "randomInt", "randomFloat", "seed", "PI", "E", "TAU", "INF", "NAN"
+};
+
+const std::vector<std::string> kTimeCandidates = {
+    "now", "nowSec", "nowMs", "nowUs", "nowNs", "monotonicMs", "monotonicUs", "monotonicNs",
+    "monotonicSec", "elapsedMs", "elapsedSec", "sleep", "sleepMs", "sleepUs", "sleepSec",
+    "formatIso8601", "formatUtc", "formatLocal", "yearUtc", "monthUtc", "dayUtc",
+    "hourUtc", "minuteUtc", "secondUtc", "NS_PER_US", "NS_PER_MS", "NS_PER_SEC",
+    "US_PER_MS", "US_PER_SEC", "MS_PER_SEC", "SEC_PER_MIN", "SEC_PER_HOUR", "SEC_PER_DAY"
+};
+
+const std::vector<std::string> kColorCandidates = {
+    "Default", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White", "Gray"
+};
+
+bool typeContainsNull(const TypePtr& t) {
+    if (!t) return false;
+    if (t->isNull()) return true;
+    if (t->isUnion()) {
+        const auto* u = dynamic_cast<const UnionType*>(t.get());
+        if (u) {
+            for (const auto& v : u->getVariants()) {
+                if (v && v->isNull()) return true;
+            }
+        }
+    }
+    return false;
+}
+
+void attachMemberSuggestions(
+    diag::Diagnostic& d,
+    std::string_view memberName,
+    const std::vector<std::string>& candidates) {
+    if (diag::is_snake_case(memberName)) {
+        std::string camel = diag::to_camel_case(memberName);
+        for (const auto& c : candidates) {
+            if (c == camel) {
+                d.withNote("KeetScript standard library methods follow 'camelCase' convention");
+                d.withHelp("did you mean '" + camel + "'?");
+                return;
+            }
+        }
+    }
+    if (auto match = diag::find_closest_match(memberName, candidates)) {
+        d.withHelp("did you mean '" + std::string(*match) + "'?");
+    }
+}
 
 TypePtr substituteTypeParams(const TypePtr& type, const std::unordered_map<std::string, TypePtr>& subst) {
     if (!type || subst.empty()) {
@@ -610,6 +680,37 @@ diag::Diagnostic TypeChecker::createTypeMismatchDiagnostic(
         diag::DiagnosticFooter::Kind::Note,
         "KeetScript requires expression types to match expected static types exactly."
     });
+
+    if (actualType && actualType->isUnion() && typeContainsNull(actualType) && (!expectedType || !typeContainsNull(expectedType))) {
+        d.footers.push_back(diag::DiagnosticFooter{
+            diag::DiagnosticFooter::Kind::Note,
+            "value has nullable union type '" + actStr + "'; KeetScript requires explicit flow-sensitive null checks"
+        });
+        d.footers.push_back(diag::DiagnosticFooter{
+            diag::DiagnosticFooter::Kind::Help,
+            "narrow the type first with 'if (x != null)' or provide a fallback default with 'x != null ? x : <default>'"
+        });
+    } else if (expectedType && actualType) {
+        if (expectedType->isFloat() && actualType->isInt()) {
+            d.footers.push_back(diag::DiagnosticFooter{
+                diag::DiagnosticFooter::Kind::Note,
+                "KeetScript enforces strict zero implicit coercion between numeric types"
+            });
+            d.footers.push_back(diag::DiagnosticFooter{
+                diag::DiagnosticFooter::Kind::Help,
+                "write a floating-point literal (e.g., '42.0') or use explicit conversion with '.toFloat()'"
+            });
+        } else if (expectedType->isInt() && actualType->isFloat()) {
+            d.footers.push_back(diag::DiagnosticFooter{
+                diag::DiagnosticFooter::Kind::Note,
+                "KeetScript enforces strict zero implicit coercion between numeric types"
+            });
+            d.footers.push_back(diag::DiagnosticFooter{
+                diag::DiagnosticFooter::Kind::Help,
+                "use explicit conversion with '.toInt()'"
+            });
+        }
+    }
 
     return d;
 }
@@ -1334,6 +1435,13 @@ void TypeChecker::reportCannotAssignToConstant(std::string_view name, diag::Sour
                 true
             });
         }
+        if (currentScope_) {
+            if (auto sym = currentScope_->lookup(name)) {
+                if (sym->getSpan().isValid()) {
+                    d.withSecondaryLabel(sym->getSpan(), "constant '" + std::string(name) + "' declared here");
+                }
+            }
+        }
         d.footers.push_back(diag::DiagnosticFooter{
             diag::DiagnosticFooter::Kind::Help,
             "constants declared with 'const' or 'define' are immutable; consider declaring with 'let' instead"
@@ -1549,10 +1657,12 @@ TypePtr TypeChecker::checkIoMemberCall(const ast::MemberExpr* member, const ast:
     }
 
     if (emitter_) {
-        emitter_->report(diag::Diagnostic::makeError(
+        auto d = diag::Diagnostic::makeError(
             diag::ErrorCode::InvalidMemberAccess,
             "module 'io' has no member function '" + mName + "'",
-            member->getSpan().start).withLabel(member->getSpan(), "unknown member function"));
+            member->getSpan().start).withLabel(member->getSpan(), "unknown member function");
+        attachMemberSuggestions(d, mName, kIoCandidates);
+        emitter_->report(d);
     }
     hasErrors_ = true;
     return Type::unknownType();
@@ -1772,10 +1882,12 @@ TypePtr TypeChecker::checkFsMemberCall(const ast::MemberExpr* member, const ast:
     }
 
     if (emitter_) {
-        emitter_->report(diag::Diagnostic::makeError(
+        auto d = diag::Diagnostic::makeError(
             diag::ErrorCode::InvalidMemberAccess,
             "module 'fs' has no member function '" + name + "'",
-            member->getSpan().start).withLabel(member->getSpan(), "unknown member function"));
+            member->getSpan().start).withLabel(member->getSpan(), "unknown member function");
+        attachMemberSuggestions(d, name, kFsCandidates);
+        emitter_->report(d);
     }
     hasErrors_ = true;
     return Type::unknownType();
@@ -1976,10 +2088,12 @@ TypePtr TypeChecker::checkSysMemberCall(const ast::MemberExpr* member, const ast
     }
 
     if (emitter_) {
-        emitter_->report(diag::Diagnostic::makeError(
+        auto d = diag::Diagnostic::makeError(
             diag::ErrorCode::InvalidMemberAccess,
             "module 'sys' has no member function '" + name + "'",
-            member->getSpan().start).withLabel(member->getSpan(), "unknown member function"));
+            member->getSpan().start).withLabel(member->getSpan(), "unknown member function");
+        attachMemberSuggestions(d, name, kSysCandidates);
+        emitter_->report(d);
     }
     hasErrors_ = true;
     return Type::unknownType();
@@ -2361,10 +2475,12 @@ TypePtr TypeChecker::checkMathMemberCall(const ast::MemberExpr* member, const as
 
     // Unknown member on math
     if (emitter_) {
-        emitter_->report(diag::Diagnostic::makeError(
+        auto d = diag::Diagnostic::makeError(
             diag::ErrorCode::InvalidMemberAccess,
             "module 'math' has no member '" + name + "'",
-            member->getSpan().start).withLabel(member->getSpan(), "unknown module member"));
+            member->getSpan().start).withLabel(member->getSpan(), "unknown module member");
+        attachMemberSuggestions(d, name, kMathCandidates);
+        emitter_->report(d);
     }
     hasErrors_ = true;
     return Type::unknownType();
@@ -2793,10 +2909,12 @@ TypePtr TypeChecker::checkTimeMemberCall(const ast::MemberExpr* member, const as
     }
 
     if (emitter_) {
-        emitter_->report(diag::Diagnostic::makeError(
+        auto d = diag::Diagnostic::makeError(
             diag::ErrorCode::InvalidMemberAccess,
             "module 'time' has no member named '" + name + "'",
-            member->getSpan().start).withLabel(member->getSpan(), "unknown member"));
+            member->getSpan().start).withLabel(member->getSpan(), "unknown member");
+        attachMemberSuggestions(d, name, kTimeCandidates);
+        emitter_->report(d);
     }
     hasErrors_ = true;
     return Type::unknownType();
@@ -3010,10 +3128,12 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                             }
                         } else {
                             if (emitter_) {
-                                emitter_->report(diag::Diagnostic::makeError(
+                                auto d = diag::Diagnostic::makeError(
                                     diag::ErrorCode::SymbolNotExported,
                                     "symbol '" + symItem.originalName + "' is not exported by module 'io'",
-                                    symItem.span.start).withLabel(symItem.span, "symbol not exported"));
+                                    symItem.span.start).withLabel(symItem.span, "symbol not exported");
+                                attachMemberSuggestions(d, symItem.originalName, kIoCandidates);
+                                emitter_->report(d);
                             }
                             hasErrors_ = true;
                         }
@@ -3045,10 +3165,12 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                             }
                         } else {
                             if (emitter_) {
-                                emitter_->report(diag::Diagnostic::makeError(
+                                auto d = diag::Diagnostic::makeError(
                                     diag::ErrorCode::SymbolNotExported,
                                     "symbol '" + symItem.originalName + "' is not exported by module 'fs'",
-                                    symItem.span.start).withLabel(symItem.span, "symbol not exported"));
+                                    symItem.span.start).withLabel(symItem.span, "symbol not exported");
+                                attachMemberSuggestions(d, symItem.originalName, kFsCandidates);
+                                emitter_->report(d);
                             }
                             hasErrors_ = true;
                         }
@@ -3080,10 +3202,12 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                             }
                         } else {
                             if (emitter_) {
-                                emitter_->report(diag::Diagnostic::makeError(
+                                auto d = diag::Diagnostic::makeError(
                                     diag::ErrorCode::SymbolNotExported,
                                     "symbol '" + symItem.originalName + "' is not exported by module 'sys'",
-                                    symItem.span.start).withLabel(symItem.span, "symbol not exported"));
+                                    symItem.span.start).withLabel(symItem.span, "symbol not exported");
+                                attachMemberSuggestions(d, symItem.originalName, kSysCandidates);
+                                emitter_->report(d);
                             }
                             hasErrors_ = true;
                         }
@@ -3118,10 +3242,12 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                             }
                         } else {
                             if (emitter_) {
-                                emitter_->report(diag::Diagnostic::makeError(
+                                auto d = diag::Diagnostic::makeError(
                                     diag::ErrorCode::SymbolNotExported,
                                     "symbol '" + symItem.originalName + "' is not exported by module 'math'",
-                                    symItem.span.start).withLabel(symItem.span, "symbol not exported"));
+                                    symItem.span.start).withLabel(symItem.span, "symbol not exported");
+                                attachMemberSuggestions(d, symItem.originalName, kMathCandidates);
+                                emitter_->report(d);
                             }
                             hasErrors_ = true;
                         }
@@ -3156,10 +3282,12 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                             }
                         } else {
                             if (emitter_) {
-                                emitter_->report(diag::Diagnostic::makeError(
+                                auto d = diag::Diagnostic::makeError(
                                     diag::ErrorCode::SymbolNotExported,
                                     "symbol '" + symItem.originalName + "' is not exported by module 'time'",
-                                    symItem.span.start).withLabel(symItem.span, "symbol not exported"));
+                                    symItem.span.start).withLabel(symItem.span, "symbol not exported");
+                                attachMemberSuggestions(d, symItem.originalName, kTimeCandidates);
+                                emitter_->report(d);
                             }
                             hasErrors_ = true;
                         }
@@ -4118,10 +4246,12 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 if (objIdent->getName() == "io" || (sym && sym->isModule() && sym->getName() == "io")) {
                     if (!sym) {
                         if (emitter_) {
-                            emitter_->report(diag::Diagnostic::makeError(
+                            auto d = diag::Diagnostic::makeError(
                                 diag::ErrorCode::UndeclaredIdentifier,
                                 "undeclared identifier '" + objIdent->getName() + "'",
-                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                            d.withHelp("add 'import io;' at the top of the file");
+                            emitter_->report(d);
                         }
                         hasErrors_ = true;
                         return Type::unknownType();
@@ -4131,10 +4261,12 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 if (objIdent->getName() == "fs" || (sym && sym->isModule() && sym->getName() == "fs")) {
                     if (!sym) {
                         if (emitter_) {
-                            emitter_->report(diag::Diagnostic::makeError(
+                            auto d = diag::Diagnostic::makeError(
                                 diag::ErrorCode::UndeclaredIdentifier,
                                 "undeclared identifier '" + objIdent->getName() + "'",
-                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                            d.withHelp("add 'import fs;' at the top of the file");
+                            emitter_->report(d);
                         }
                         hasErrors_ = true;
                         return Type::unknownType();
@@ -4144,10 +4276,12 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 if (objIdent->getName() == "sys" || (sym && sym->isModule() && sym->getName() == "sys")) {
                     if (!sym) {
                         if (emitter_) {
-                            emitter_->report(diag::Diagnostic::makeError(
+                            auto d = diag::Diagnostic::makeError(
                                 diag::ErrorCode::UndeclaredIdentifier,
                                 "undeclared identifier '" + objIdent->getName() + "'",
-                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                            d.withHelp("add 'import sys;' at the top of the file");
+                            emitter_->report(d);
                         }
                         hasErrors_ = true;
                         return Type::unknownType();
@@ -4157,10 +4291,12 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 if (objIdent->getName() == "math" || (sym && sym->isModule() && sym->getName() == "math")) {
                     if (!sym) {
                         if (emitter_) {
-                            emitter_->report(diag::Diagnostic::makeError(
+                            auto d = diag::Diagnostic::makeError(
                                 diag::ErrorCode::UndeclaredIdentifier,
                                 "undeclared identifier '" + objIdent->getName() + "'",
-                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                            d.withHelp("add 'import math;' at the top of the file");
+                            emitter_->report(d);
                         }
                         hasErrors_ = true;
                         return Type::unknownType();
@@ -4170,10 +4306,12 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 if (objIdent->getName() == "time" || (sym && sym->isModule() && sym->getName() == "time")) {
                     if (!sym) {
                         if (emitter_) {
-                            emitter_->report(diag::Diagnostic::makeError(
+                            auto d = diag::Diagnostic::makeError(
                                 diag::ErrorCode::UndeclaredIdentifier,
                                 "undeclared identifier '" + objIdent->getName() + "'",
-                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                            d.withHelp("add 'import time;' at the top of the file");
+                            emitter_->report(d);
                         }
                         hasErrors_ = true;
                         return Type::unknownType();
@@ -4694,10 +4832,12 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             if (objIdent->getName() == "io" || (sym && sym->isModule() && sym->getName() == "io")) {
                 if (!sym) {
                     if (emitter_) {
-                        emitter_->report(diag::Diagnostic::makeError(
+                        auto d = diag::Diagnostic::makeError(
                             diag::ErrorCode::UndeclaredIdentifier,
                             "undeclared identifier '" + objIdent->getName() + "'",
-                            objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                            objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                        d.withHelp("add 'import io;' at the top of the file");
+                        emitter_->report(d);
                     }
                     hasErrors_ = true;
                     return Type::unknownType();
@@ -4722,10 +4862,12 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     return Type::function({}, Type::voidType(), false);
                 }
                 if (emitter_) {
-                    emitter_->report(diag::Diagnostic::makeError(
+                    auto d = diag::Diagnostic::makeError(
                         diag::ErrorCode::InvalidMemberAccess,
                         "module 'io' has no member '" + member->getMemberName() + "'",
-                        member->getSpan().start).withLabel(member->getSpan(), "unknown module member"));
+                        member->getSpan().start).withLabel(member->getSpan(), "unknown module member");
+                    attachMemberSuggestions(d, member->getMemberName(), kIoCandidates);
+                    emitter_->report(d);
                 }
                 hasErrors_ = true;
                 return Type::unknownType();
@@ -4733,10 +4875,12 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             if (objIdent->getName() == "fs" || (sym && sym->isModule() && sym->getName() == "fs")) {
                 if (!sym) {
                     if (emitter_) {
-                        emitter_->report(diag::Diagnostic::makeError(
+                        auto d = diag::Diagnostic::makeError(
                             diag::ErrorCode::UndeclaredIdentifier,
                             "undeclared identifier '" + objIdent->getName() + "'",
-                            objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                            objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                        d.withHelp("add 'import fs;' at the top of the file");
+                        emitter_->report(d);
                     }
                     hasErrors_ = true;
                     return Type::unknownType();
@@ -4764,10 +4908,12 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     return Type::function({Type::stringType(), Type::stringType()}, Type::stringType(), false);
                 }
                 if (emitter_) {
-                    emitter_->report(diag::Diagnostic::makeError(
+                    auto d = diag::Diagnostic::makeError(
                         diag::ErrorCode::InvalidMemberAccess,
                         "module 'fs' has no member '" + member->getMemberName() + "'",
-                        member->getSpan().start).withLabel(member->getSpan(), "unknown module member"));
+                        member->getSpan().start).withLabel(member->getSpan(), "unknown module member");
+                    attachMemberSuggestions(d, member->getMemberName(), kFsCandidates);
+                    emitter_->report(d);
                 }
                 hasErrors_ = true;
                 return Type::unknownType();
@@ -4775,10 +4921,12 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             if (objIdent->getName() == "sys" || (sym && sym->isModule() && sym->getName() == "sys")) {
                 if (!sym) {
                     if (emitter_) {
-                        emitter_->report(diag::Diagnostic::makeError(
+                        auto d = diag::Diagnostic::makeError(
                             diag::ErrorCode::UndeclaredIdentifier,
                             "undeclared identifier '" + objIdent->getName() + "'",
-                            objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                            objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                        d.withHelp("add 'import sys;' at the top of the file");
+                        emitter_->report(d);
                     }
                     hasErrors_ = true;
                     return Type::unknownType();
@@ -4815,10 +4963,12 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     return Type::function({Type::stringType()}, Type::stringType(), false);
                 }
                 if (emitter_) {
-                    emitter_->report(diag::Diagnostic::makeError(
+                    auto d = diag::Diagnostic::makeError(
                         diag::ErrorCode::InvalidMemberAccess,
                         "module 'sys' has no member '" + member->getMemberName() + "'",
-                        member->getSpan().start).withLabel(member->getSpan(), "unknown module member"));
+                        member->getSpan().start).withLabel(member->getSpan(), "unknown module member");
+                    attachMemberSuggestions(d, member->getMemberName(), kSysCandidates);
+                    emitter_->report(d);
                 }
                 hasErrors_ = true;
                 return Type::unknownType();
@@ -4826,10 +4976,12 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             if (objIdent->getName() == "math" || (sym && sym->isModule() && sym->getName() == "math")) {
                 if (!sym) {
                     if (emitter_) {
-                        emitter_->report(diag::Diagnostic::makeError(
+                        auto d = diag::Diagnostic::makeError(
                             diag::ErrorCode::UndeclaredIdentifier,
                             "undeclared identifier '" + objIdent->getName() + "'",
-                            objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                            objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                        d.withHelp("add 'import math;' at the top of the file");
+                        emitter_->report(d);
                     }
                     hasErrors_ = true;
                     return Type::unknownType();
@@ -4874,10 +5026,12 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     return Type::function({Type::floatType()}, Type::floatType(), false);
                 }
                 if (emitter_) {
-                    emitter_->report(diag::Diagnostic::makeError(
+                    auto d = diag::Diagnostic::makeError(
                         diag::ErrorCode::InvalidMemberAccess,
                         "module 'math' has no member '" + member->getMemberName() + "'",
-                        member->getSpan().start).withLabel(member->getSpan(), "unknown module member"));
+                        member->getSpan().start).withLabel(member->getSpan(), "unknown module member");
+                    attachMemberSuggestions(d, member->getMemberName(), kMathCandidates);
+                    emitter_->report(d);
                 }
                 hasErrors_ = true;
                 return Type::unknownType();
@@ -4885,10 +5039,12 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             if (objIdent->getName() == "time" || (sym && sym->isModule() && sym->getName() == "time")) {
                 if (!sym) {
                     if (emitter_) {
-                        emitter_->report(diag::Diagnostic::makeError(
+                        auto d = diag::Diagnostic::makeError(
                             diag::ErrorCode::UndeclaredIdentifier,
                             "undeclared identifier '" + objIdent->getName() + "'",
-                            objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                            objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                        d.withHelp("add 'import time;' at the top of the file");
+                        emitter_->report(d);
                     }
                     hasErrors_ = true;
                     return Type::unknownType();
@@ -4929,10 +5085,12 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     return Type::function({Type::intType()}, Type::intType(), false);
                 }
                 if (emitter_) {
-                    emitter_->report(diag::Diagnostic::makeError(
+                    auto d = diag::Diagnostic::makeError(
                         diag::ErrorCode::InvalidMemberAccess,
                         "module 'time' has no member '" + member->getMemberName() + "'",
-                        member->getSpan().start).withLabel(member->getSpan(), "unknown module member"));
+                        member->getSpan().start).withLabel(member->getSpan(), "unknown module member");
+                    attachMemberSuggestions(d, member->getMemberName(), kTimeCandidates);
+                    emitter_->report(d);
                 }
                 hasErrors_ = true;
                 return Type::unknownType();
@@ -4948,10 +5106,12 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     }
                 }
                 if (emitter_) {
-                    emitter_->report(diag::Diagnostic::makeError(
+                    auto d = diag::Diagnostic::makeError(
                         diag::ErrorCode::InvalidMemberAccess,
                         "enum 'Color' has no member '" + memberName + "'",
-                        member->getSpan().start).withLabel(member->getSpan(), "unknown enum member"));
+                        member->getSpan().start).withLabel(member->getSpan(), "unknown enum member");
+                    attachMemberSuggestions(d, memberName, kColorCandidates);
+                    emitter_->report(d);
                 }
                 hasErrors_ = true;
                 return Type::unknownType();
@@ -4974,10 +5134,12 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 return Type::custom("io.Color");
             }
             if (emitter_) {
-                emitter_->report(diag::Diagnostic::makeError(
+                auto d = diag::Diagnostic::makeError(
                     diag::ErrorCode::InvalidMemberAccess,
                     "enum 'io.Color' has no member '" + memberName + "'",
-                    member->getSpan().start).withLabel(member->getSpan(), "unknown enum member"));
+                    member->getSpan().start).withLabel(member->getSpan(), "unknown enum member");
+                attachMemberSuggestions(d, memberName, kColorCandidates);
+                emitter_->report(d);
             }
             hasErrors_ = true;
             return Type::unknownType();

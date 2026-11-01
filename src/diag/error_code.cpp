@@ -22,6 +22,7 @@ ErrorCodeInfo getErrorCodeInfo(ErrorCode code) noexcept {
     KEETY_ERROR_ENTRY(ExpectedColon, 12, "E0012", "expected ':'", "Expected a colon ':' at this position.")
     KEETY_ERROR_ENTRY(InvalidEscapeSequence, 13, "E0013", "invalid escape sequence", "The escape sequence inside the string or character literal is invalid.")
     KEETY_ERROR_ENTRY(UnbalancedTemplateBrace, 14, "E0014", "unbalanced template brace", "Unbalanced braces inside template string interpolation.")
+    KEETY_ERROR_ENTRY(ExpectedOpeningParen, 15, "E0015", "expected '('", "Missing opening parenthesis.")
 
     // E1000 - E1999: Module Resolution & Cyclic Dependency Errors
     KEETY_ERROR_ENTRY(CircularModuleDependency, 1001, "E1001", "circular module dependency detected", "KeetScript enforces a strict acyclic dependency graph (DAG) across modules.")

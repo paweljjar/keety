@@ -45,6 +45,7 @@ private:
     bool isZonkRecoveryBlock();
     bool isForInLoop();
     bool isCallTypeArgs();
+    bool isMissingCallLParen(const ast::Expr* expr);
 
     // --- Pratt Expression Parsing ---
     std::unique_ptr<ast::Expr> parsePrimaryExpression();

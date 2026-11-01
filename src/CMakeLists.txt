@@ -2,6 +2,7 @@
 add_library(keety_core STATIC
     diag/source_manager.cpp
     diag/diagnostic_emitter.cpp
+    diag/levenshtein.cpp
     diag/error_code.cpp
     lexer/token.cpp
     lexer/lexer.cpp
@@ -42,6 +43,10 @@ target_include_directories(keety_core PUBLIC
 
 target_link_libraries(keety_core PUBLIC
     keety_warnings
+)
+
+target_compile_definitions(keety_core PRIVATE
+    KEETY_DEFAULT_RUNTIME_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../runtime"
 )
 
 # Main compiler executable

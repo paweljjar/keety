@@ -48,6 +48,7 @@ struct CliOptions {
     OptimizationLevel opt_level{OptimizationLevel::O3};
     bool wrapv{true};
     bool verbose{false};
+    bool verbose_cpp{false};
     bool test_conformance{false};
     bool test_benchmarks{false};
     std::vector<std::string> run_args{};

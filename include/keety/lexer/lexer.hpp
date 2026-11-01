@@ -70,6 +70,8 @@ private:
     size_t cursor_{0};
     uint32_t line_{1};
     uint32_t column_{1};
+    uint32_t tokenStartLine_{1};
+    uint32_t tokenStartColumn_{1};
     LexerMode mode_{LexerMode::Normal};
     int genericDepth_{0};
     bool hadPrecedingWhitespace_{false};

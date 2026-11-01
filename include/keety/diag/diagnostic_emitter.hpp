@@ -23,6 +23,7 @@ public:
 
     void setColorMode(ColorMode mode) noexcept { colorMode_ = mode; }
     [[nodiscard]] ColorMode getColorMode() const noexcept { return colorMode_; }
+    [[nodiscard]] bool shouldUseColor() const noexcept;
 
     /// Formats a diagnostic into standard Rustc/Clang style string.
     [[nodiscard]] std::string format(const Diagnostic& diag) const;

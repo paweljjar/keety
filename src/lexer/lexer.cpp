@@ -194,7 +194,7 @@ void Lexer::skipWhitespaceAndComments() {
 diag::SourceSpan Lexer::makeSpan(size_t startOffset, size_t endOffset) const {
     // In a fully loaded source file, line/column can be precisely computed,
     // or approximated from current lexer tracking:
-    diag::SourceLocation start{fileId_, static_cast<uint32_t>(startOffset), line_, column_};
+    diag::SourceLocation start{fileId_, static_cast<uint32_t>(startOffset), tokenStartLine_, tokenStartColumn_};
     diag::SourceLocation end{fileId_, static_cast<uint32_t>(endOffset), line_, column_};
     return diag::SourceSpan{start, end};
 }
@@ -210,6 +210,9 @@ Token Lexer::makeToken(TokenKind kind, size_t startOffset, size_t endOffset) con
 Token Lexer::nextToken() {
     skipWhitespaceAndComments();
 
+    tokenStartLine_ = line_;
+    tokenStartColumn_ = column_;
+
     if (isAtEnd()) {
         return makeToken(TokenKind::Eof, cursor_, cursor_);
     }
@@ -218,8 +221,20 @@ Token Lexer::nextToken() {
 }
 
 Token Lexer::scanToken() {
+    char c = peek();
+
+    // Numbers (Integer and Float)
+    if (isAsciiDigit(c)) {
+        return scanNumber();
+    }
+
+    // Template strings
+    if (c == '`') {
+        return scanTemplate();
+    }
+
     size_t start = cursor_;
-    char c = advance();
+    c = advance();
 
     // Blank identifier (`_`) vs regular Identifier starting with `_`
     // Section 'Letters and digits' & 'Blank identifier':
@@ -250,21 +265,9 @@ Token Lexer::scanToken() {
         return makeToken(TokenKind::Identifier, start, cursor_);
     }
 
-    // Numbers (Integer and Float)
-    if (isAsciiDigit(c)) {
-        cursor_ = start; // rewind
-        return scanNumber();
-    }
-
     // Strings
     if (c == '"' || c == '\'') {
         return scanString(c);
-    }
-
-    // Template strings
-    if (c == '`') {
-        cursor_ = start;
-        return scanTemplate();
     }
 
     // Single-character and Multi-character Operators & Punctuators (Maximal Munch)

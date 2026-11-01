@@ -24,6 +24,7 @@ enum class ErrorCode : uint16_t {
     ExpectedColon                 = 12,
     InvalidEscapeSequence         = 13,
     UnbalancedTemplateBrace       = 14,
+    ExpectedOpeningParen          = 15,
 
     // -------------------------------------------------------------------------
     // E1000 - E1999: Module Resolution & Cyclic Dependency Errors

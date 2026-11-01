@@ -2,6 +2,21 @@
 
 namespace keety::parser {
 
+namespace {
+
+std::string getExprDisplayName(const ast::Expr* expr) {
+    if (!expr) return "function";
+    if (const auto* id = dynamic_cast<const ast::IdentExpr*>(expr)) {
+        return id->getName();
+    }
+    if (const auto* mem = dynamic_cast<const ast::MemberExpr*>(expr)) {
+        return getExprDisplayName(mem->getObject()) + "." + mem->getMemberName();
+    }
+    return "function";
+}
+
+} // namespace
+
 Parser::Parser(lexer::Lexer& lexer, diag::DiagnosticEmitter* emitter)
     : lexer_(lexer), emitter_(emitter) {
     // Prime the lookahead buffer
@@ -46,8 +61,20 @@ const lexer::Token& Parser::expect(lexer::TokenKind kind, diag::ErrorCode errCod
 
     if (emitter_ && !panicMode_) {
         diag::SourceSpan span = peek().span;
-        emitter_->report(diag::Diagnostic::makeError(errCode, std::string(msg), span.start)
-                             .withLabel(span, std::string(msg)));
+        auto d = diag::Diagnostic::makeError(errCode, std::string(msg), span.start)
+                     .withLabel(span, std::string(msg));
+        if (kind == lexer::TokenKind::Semicolon) {
+            d.withHelp("add ';' at the end of the statement");
+        } else if (kind == lexer::TokenKind::Colon) {
+            d.withHelp("add ':' before type annotation");
+        } else if (kind == lexer::TokenKind::RParen) {
+            d.withHelp("add ')' to close parentheses");
+        } else if (kind == lexer::TokenKind::RBrace) {
+            d.withHelp("add '}' to close block");
+        } else if (kind == lexer::TokenKind::RBracket) {
+            d.withHelp("add ']' to close bracket");
+        }
+        emitter_->report(std::move(d));
     }
     panicMode_ = true;
     return peek();
@@ -165,10 +192,38 @@ std::unique_ptr<ast::VarDecl> Parser::parseVarDecl(bool isExported) {
     std::string name = std::string(nameTok.lexeme);
 
     std::unique_ptr<ast::TypeAnnotation> type = nullptr;
+    auto isLikelyTypeToken = [](const lexer::Token& t) {
+        if (t.kind == lexer::TokenKind::Identifier && t.lexeme != "=" && t.lexeme != ";") return true;
+        switch (t.kind) {
+        case lexer::TokenKind::KwInt:
+        case lexer::TokenKind::KwFloat:
+        case lexer::TokenKind::KwString:
+        case lexer::TokenKind::KwBool:
+        case lexer::TokenKind::KwChar:
+        case lexer::TokenKind::KwVoid:
+        case lexer::TokenKind::KwArray:
+        case lexer::TokenKind::KwMap:
+            return true;
+        default:
+            return false;
+        }
+    };
+
     if (match(lexer::TokenKind::Colon)) {
         type = parseTypeAnnotation();
     } else {
-        if (emitter_) {
+        if (isLikelyTypeToken(peek())) {
+            if (emitter_) {
+                diag::SourceSpan span = peek().span;
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::ExpectedColon,
+                    "expected ':' before type annotation",
+                    span.start)
+                    .withLabel(span, "expected ':' before this type")
+                    .withHelp("add ':' between variable name and type annotation: 'let " + name + ": ...'"));
+            }
+            type = parseTypeAnnotation();
+        } else if (emitter_) {
             diag::SourceSpan span = nameTok.span;
             emitter_->report(diag::Diagnostic::makeError(
                 diag::ErrorCode::MissingTypeAnnotation,
@@ -196,11 +251,39 @@ std::unique_ptr<ast::ConstDecl> Parser::parseConstDecl(bool isExported) {
     const auto& nameTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected constant name");
     std::string name = std::string(nameTok.lexeme);
 
+    auto isLikelyTypeToken = [](const lexer::Token& t) {
+        if (t.kind == lexer::TokenKind::Identifier && t.lexeme != "=" && t.lexeme != ";") return true;
+        switch (t.kind) {
+        case lexer::TokenKind::KwInt:
+        case lexer::TokenKind::KwFloat:
+        case lexer::TokenKind::KwString:
+        case lexer::TokenKind::KwBool:
+        case lexer::TokenKind::KwChar:
+        case lexer::TokenKind::KwVoid:
+        case lexer::TokenKind::KwArray:
+        case lexer::TokenKind::KwMap:
+            return true;
+        default:
+            return false;
+        }
+    };
+
     std::unique_ptr<ast::TypeAnnotation> type = nullptr;
     if (match(lexer::TokenKind::Colon)) {
         type = parseTypeAnnotation();
     } else {
-        if (emitter_) {
+        if (isLikelyTypeToken(peek())) {
+            if (emitter_) {
+                diag::SourceSpan span = peek().span;
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::ExpectedColon,
+                    "expected ':' before type annotation",
+                    span.start)
+                    .withLabel(span, "expected ':' before this type")
+                    .withHelp("add ':' between constant name and type annotation: 'const " + name + ": ...'"));
+            }
+            type = parseTypeAnnotation();
+        } else if (emitter_) {
             diag::SourceSpan span = nameTok.span;
             emitter_->report(diag::Diagnostic::makeError(
                 diag::ErrorCode::MissingTypeAnnotation,
@@ -633,6 +716,18 @@ std::unique_ptr<ast::Stmt> Parser::parseStatement() {
     // Expression statement
     diag::SourceLocation startLoc = peek().span.start;
     auto expr = parseExpression();
+    if (check(lexer::TokenKind::RParen)) {
+        if (emitter_ && !panicMode_) {
+            diag::SourceSpan span = peek().span;
+            emitter_->report(diag::Diagnostic::makeError(
+                diag::ErrorCode::UnexpectedToken,
+                "unmatched ')' without preceding '('",
+                span.start)
+                .withLabel(span, "unmatched closing parenthesis")
+                .withHelp("remove the extra ')' or add an opening '('"));
+        }
+        advance();
+    }
     const auto& semiTok = expect(lexer::TokenKind::Semicolon, diag::ErrorCode::ExpectedSemicolon, "expected ';' after expression statement");
     diag::SourceSpan span{startLoc, semiTok.span.end};
 
@@ -769,6 +864,101 @@ bool Parser::isCallTypeArgs() {
     }
 }
 
+bool Parser::isMissingCallLParen(const ast::Expr* expr) {
+    if (!expr) return false;
+    if (!dynamic_cast<const ast::IdentExpr*>(expr) && !dynamic_cast<const ast::MemberExpr*>(expr)) {
+        return false;
+    }
+
+    const auto& nextTok = peek(0);
+    // Must be on the exact same line as the callee
+    if (nextTok.span.start.line != lastConsumed_.span.end.line) {
+        return false;
+    }
+
+    // Next token cannot be an operator or delimiter
+    switch (nextTok.kind) {
+    case lexer::TokenKind::Semicolon:
+    case lexer::TokenKind::Comma:
+    case lexer::TokenKind::Dot:
+    case lexer::TokenKind::Colon:
+    case lexer::TokenKind::LParen:
+    case lexer::TokenKind::RParen:
+    case lexer::TokenKind::LBracket:
+    case lexer::TokenKind::RBracket:
+    case lexer::TokenKind::LBrace:
+    case lexer::TokenKind::RBrace:
+    case lexer::TokenKind::Equal:
+    case lexer::TokenKind::PlusEqual:
+    case lexer::TokenKind::MinusEqual:
+    case lexer::TokenKind::StarEqual:
+    case lexer::TokenKind::SlashEqual:
+    case lexer::TokenKind::PercentEqual:
+    case lexer::TokenKind::Question:
+    case lexer::TokenKind::PipePipe:
+    case lexer::TokenKind::AmpAmp:
+    case lexer::TokenKind::EqualEqual:
+    case lexer::TokenKind::ExclaimEqual:
+    case lexer::TokenKind::Less:
+    case lexer::TokenKind::LessEqual:
+    case lexer::TokenKind::Greater:
+    case lexer::TokenKind::GreaterEqual:
+    case lexer::TokenKind::KwAs:
+    case lexer::TokenKind::KwZonk:
+    case lexer::TokenKind::Plus:
+    case lexer::TokenKind::Star:
+    case lexer::TokenKind::Slash:
+    case lexer::TokenKind::Percent:
+    case lexer::TokenKind::PlusPlus:
+    case lexer::TokenKind::MinusMinus:
+    case lexer::TokenKind::Eof:
+        return false;
+    default:
+        break;
+    }
+
+    // Now scan ahead on the same line to check for an unmatched ')' or a ';'
+    int parenDepth = 0;
+    size_t k = 0;
+    while (true) {
+        const auto& tok = peek(k);
+        if (tok.is(lexer::TokenKind::Eof) || tok.span.start.line != lastConsumed_.span.end.line) {
+            break;
+        }
+        if (tok.is(lexer::TokenKind::LBrace) || tok.is(lexer::TokenKind::RBrace)) {
+            break;
+        }
+
+        if (tok.is(lexer::TokenKind::LParen)) {
+            parenDepth++;
+        } else if (tok.is(lexer::TokenKind::RParen)) {
+            if (parenDepth == 0) {
+                // Found unmatched ')' on the same line (e.g. `io.print"Hello, World!");`)
+                return true;
+            }
+            parenDepth--;
+        } else if (tok.is(lexer::TokenKind::Semicolon)) {
+            // Reached semicolon with parenDepth == 0.
+            // If the argument starts immediately, e.g. `io.print "Hello";`
+            if (nextTok.is(lexer::TokenKind::StringLiteral) ||
+                nextTok.is(lexer::TokenKind::CharLiteral) ||
+                nextTok.is(lexer::TokenKind::IntLiteral) ||
+                nextTok.is(lexer::TokenKind::FloatLiteral) ||
+                nextTok.is(lexer::TokenKind::TemplateNoSub) ||
+                nextTok.is(lexer::TokenKind::TemplateHead) ||
+                nextTok.is(lexer::TokenKind::KwTrue) ||
+                nextTok.is(lexer::TokenKind::KwFalse) ||
+                nextTok.is(lexer::TokenKind::KwNull)) {
+                return true;
+            }
+            break;
+        }
+        k++;
+    }
+
+    return false;
+}
+
 std::unique_ptr<ast::Stmt> Parser::parseIfStatement() {
     diag::SourceLocation startLoc = lastConsumed_.span.start;
     expect(lexer::TokenKind::LParen, diag::ErrorCode::UnexpectedToken, "expected '(' after 'if'");
@@ -797,6 +987,20 @@ std::unique_ptr<ast::Stmt> Parser::parseIfStatement() {
     }
 
     auto condition = parseExpression();
+    if (condition) {
+        if (const auto* bin = dynamic_cast<const ast::BinaryExpr*>(condition.get())) {
+            if (bin->getOp() == lexer::TokenKind::Equal) {
+                if (emitter_) {
+                    emitter_->report(diag::Diagnostic::makeWarning(
+                        "W1001",
+                        "assignment '=' used in condition expression",
+                        condition->getSpan().start)
+                        .withLabel(condition->getSpan(), "assignment in condition")
+                        .withHelp("did you mean '==' for comparison?"));
+                }
+            }
+        }
+    }
     expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after if condition");
 
     auto thenBranch = parseBlockStatement();
@@ -839,6 +1043,20 @@ std::unique_ptr<ast::Stmt> Parser::parseWhileStatement() {
     }
 
     auto condition = parseExpression();
+    if (condition) {
+        if (const auto* bin = dynamic_cast<const ast::BinaryExpr*>(condition.get())) {
+            if (bin->getOp() == lexer::TokenKind::Equal) {
+                if (emitter_) {
+                    emitter_->report(diag::Diagnostic::makeWarning(
+                        "W1001",
+                        "assignment '=' used in condition expression",
+                        condition->getSpan().start)
+                        .withLabel(condition->getSpan(), "assignment in condition")
+                        .withHelp("did you mean '==' for comparison?"));
+                }
+            }
+        }
+    }
     expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after while condition");
 
     std::string label;
@@ -1712,6 +1930,45 @@ std::unique_ptr<ast::Expr> Parser::parsePrefixExpression() {
             const auto& rParen = expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after call arguments");
             diag::SourceSpan span{startLoc, rParen.span.end};
             expr = std::make_unique<ast::CallExpr>(span, std::move(expr), std::move(args), std::move(typeArgs));
+        } else if (isMissingCallLParen(expr.get())) {
+            std::string calleeName = getExprDisplayName(expr.get());
+            diag::SourceSpan missingParenSpan{peek().span.start, peek().span.start};
+            if (emitter_ && !panicMode_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::ExpectedOpeningParen,
+                    "expected '(' after '" + calleeName + "' for function call argument list",
+                    missingParenSpan.start)
+                    .withLabel(peek().span, "expected '(' before argument")
+                    .withHelp("add '(' to call '" + calleeName + "': '" + calleeName + "(...'"));
+            }
+            // Check if there is a closing ')' on this line
+            bool hasClosingParen = false;
+            size_t k = 0;
+            while (!check(lexer::TokenKind::Semicolon, k) && !check(lexer::TokenKind::Eof, k) &&
+                   peek(k).span.start.line == lastConsumed_.span.end.line) {
+                if (check(lexer::TokenKind::RParen, k)) {
+                    hasClosingParen = true;
+                    break;
+                }
+                k++;
+            }
+
+            std::vector<ast::CallArg> args;
+            while (!check(lexer::TokenKind::Semicolon) && !check(lexer::TokenKind::RParen) && !check(lexer::TokenKind::Eof)) {
+                bool isMut = match(lexer::TokenKind::KwMut);
+                diag::SourceLocation argStart = isMut ? lastConsumed_.span.start : peek().span.start;
+                auto argVal = parseExpression();
+                diag::SourceSpan argSpan{argStart, argVal ? argVal->getSpan().end : lastConsumed_.span.end};
+                args.push_back(ast::CallArg{argSpan, std::move(argVal), isMut});
+                if (!match(lexer::TokenKind::Comma)) {
+                    break;
+                }
+            }
+            if (hasClosingParen) {
+                expect(lexer::TokenKind::RParen, diag::ErrorCode::ExpectedClosingParen, "expected ')' after call arguments");
+            }
+            diag::SourceSpan span{startLoc, lastConsumed_.span.end};
+            expr = std::make_unique<ast::CallExpr>(span, std::move(expr), std::move(args), std::vector<std::unique_ptr<ast::TypeAnnotation>>{});
         } else if (match(lexer::TokenKind::PlusPlus) || match(lexer::TokenKind::MinusMinus)) {
             lexer::TokenKind op = lastConsumed_.kind;
             diag::SourceSpan span{startLoc, lastConsumed_.span.end};

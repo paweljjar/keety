@@ -23,9 +23,46 @@
 #include <sys/wait.h>
 #endif
 
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
 namespace keety::driver {
 
 namespace {
+
+std::filesystem::path get_executable_path() {
+    std::error_code ec;
+#if defined(__APPLE__)
+    char path[1024];
+    uint32_t size = sizeof(path);
+    if (_NSGetExecutablePath(path, &size) == 0) {
+        return std::filesystem::weakly_canonical(path, ec);
+    }
+    std::vector<char> dynamic_path(size);
+    if (_NSGetExecutablePath(dynamic_path.data(), &size) == 0) {
+        return std::filesystem::weakly_canonical(dynamic_path.data(), ec);
+    }
+#elif defined(_WIN32)
+    wchar_t path[MAX_PATH];
+    DWORD len = GetModuleFileNameW(NULL, path, MAX_PATH);
+    if (len > 0) {
+        return std::filesystem::weakly_canonical(std::filesystem::path(path), ec);
+    }
+#elif defined(__linux__)
+    char path[1024];
+    ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
+    if (len != -1) {
+        path[len] = '\0';
+        return std::filesystem::weakly_canonical(path, ec);
+    }
+#endif
+    return {};
+}
 
 std::string quote_arg(const std::string& arg) {
     if (arg.empty()) {
@@ -54,10 +91,41 @@ std::string quote_arg(const std::string& arg) {
 }
 
 std::filesystem::path find_runtime_directory() {
+    // 1. Explicit environment variable override
     const char* env_dir = std::getenv("KEETY_RUNTIME_DIR");
     if (env_dir && std::filesystem::exists(std::filesystem::path(env_dir) / "keet" / "runtime.hpp")) {
         return env_dir;
     }
+
+    // 2. Relative to running executable (resolves symlinks)
+    auto exe_path = get_executable_path();
+    if (!exe_path.empty()) {
+        std::filesystem::path curr = exe_path.parent_path();
+        for (int i = 0; i < 6; ++i) {
+            std::filesystem::path candidate = curr / "runtime";
+            if (std::filesystem::exists(candidate / "keet" / "runtime.hpp")) {
+                return candidate;
+            }
+            std::filesystem::path inc_candidate = curr / "include";
+            if (std::filesystem::exists(inc_candidate / "keet" / "runtime.hpp")) {
+                return inc_candidate;
+            }
+            if (!curr.has_parent_path() || curr.parent_path() == curr) {
+                break;
+            }
+            curr = curr.parent_path();
+        }
+    }
+
+#if defined(KEETY_DEFAULT_RUNTIME_DIR)
+    // 3. Compile-time default runtime directory from build tree
+    std::filesystem::path default_dir = KEETY_DEFAULT_RUNTIME_DIR;
+    if (std::filesystem::exists(default_dir / "keet" / "runtime.hpp")) {
+        return default_dir;
+    }
+#endif
+
+    // 4. Relative to current working directory
     std::filesystem::path curr = std::filesystem::current_path();
     for (int i = 0; i < 5; ++i) {
         std::filesystem::path candidate = curr / "runtime";
@@ -385,6 +453,8 @@ CliOptions CliDriver::parse_args(const std::vector<std::string>& args) {
 
         if (arg == "-v" || arg == "--verbose") {
             options.verbose = true;
+        } else if (arg == "--verbose-cpp") {
+            options.verbose_cpp = true;
         } else if (arg == "--benchmarks") {
             options.test_benchmarks = true;
         } else if (arg == "--conformance") {
@@ -1100,6 +1170,11 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
         if (options.verbose) {
             out << "[verbose] KeetScript runtime include directory: " << runtime_dir.string() << "\n";
         }
+    } else {
+        err << "error: KeetScript runtime directory could not be located.\n"
+            << "  --> Expected to find 'keet/runtime.hpp'\n"
+            << "  --> Set the KEETY_RUNTIME_DIR environment variable to the path containing 'keet/runtime.hpp'\n";
+        return std::nullopt;
     }
 
     std::vector<std::filesystem::path> object_files;
@@ -1112,8 +1187,15 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
         }
         auto comp_res = toolchain_driver.compile(cpp_src, obj_path, comp_opts);
         if (!comp_res.success) {
-            err << "error: compilation failed for '" << cpp_src.filename().string() << "':\n"
-                << comp_res.output << "\n";
+            if (options.verbose || options.verbose_cpp) {
+                err << "error: compilation failed for '" << cpp_src.filename().string() << "':\n"
+                    << comp_res.output << "\n";
+            } else {
+                err << "error[ICE]: internal compiler error: generated C++ failed to compile for '"
+                    << cpp_src.filename().string() << "'\n"
+                    << "  --> Please file a bug report at https://github.com/keetscript/keety/issues\n"
+                    << "      Run with '--verbose-cpp' or '--verbose' to view raw backend compiler backtrace.\n";
+            }
             return std::nullopt;
         }
         object_files.push_back(obj_path);
@@ -1127,8 +1209,15 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     }
     auto link_res = toolchain_driver.link_executable(object_files, target_binary, link_opts);
     if (!link_res.success) {
-        err << "error: linking failed for '" << target_binary.filename().string() << "':\n"
-            << link_res.output << "\n";
+        if (options.verbose || options.verbose_cpp) {
+            err << "error: linking failed for '" << target_binary.filename().string() << "':\n"
+                << link_res.output << "\n";
+        } else {
+            err << "error[ICE]: internal compiler error: backend linking failed for '"
+                << target_binary.filename().string() << "'\n"
+                << "  --> Please file a bug report at https://github.com/keetscript/keety/issues\n"
+                << "      Run with '--verbose-cpp' or '--verbose' to view raw backend linker backtrace.\n";
+        }
         return std::nullopt;
     }
 
