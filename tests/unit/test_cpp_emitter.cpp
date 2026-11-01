@@ -6,6 +6,7 @@
 #include <keety/ir/operand.hpp>
 #include <keety/parser/parser.hpp>
 #include <keety/typechecker/type.hpp>
+#include <keet/typeof.hpp>
 
 #include <sstream>
 #include <string>
@@ -807,7 +808,29 @@ TEST_CASE("C++ Implementation Emitter translates standard time module calls and 
     }
 }
 
+TEST_CASE("C++ Implementation Emitter supports flow-based union narrowing in ternary expressions", "[emitter][ternary][narrowing]") {
+    SECTION("Narrowing nullable union with a == null ? 5 : a and a != null ? a : 5") {
+        const std::string source = R"(
+            fn compute(a: int | null): int {
+                let b: int = a == null ? 5 : a;
+                let c: int = a != null ? a : 5;
+                return b + c;
+            }
+        )";
 
+        keety::parser::ModuleAST ast = parseSource(source, "ternary_narrowing");
+        keety::emitter::CppEmitter emitter(ast);
 
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("std::get<int64_t>(a)") != std::string::npos);
+        REQUIRE(cpp.find("int64_t b = ((a == std::monostate{}) ? keet::branch_type_t<decltype(5), decltype(std::get<int64_t>(a))>(5) : keet::branch_type_t<decltype(5), decltype(std::get<int64_t>(a))>(std::get<int64_t>(a)));") != std::string::npos);
+        REQUIRE(cpp.find("int64_t c = ((a != std::monostate{}) ? keet::branch_type_t<decltype(std::get<int64_t>(a)), decltype(5)>(std::get<int64_t>(a)) : keet::branch_type_t<decltype(std::get<int64_t>(a)), decltype(5)>(5));") != std::string::npos);
+    }
 
-
+    SECTION("Runtime branch_type_t normalizes int and int64_t to int64_t") {
+        STATIC_REQUIRE(std::is_same_v<keet::branch_type_t<int, int64_t>, int64_t>);
+        STATIC_REQUIRE(std::is_same_v<keet::branch_type_t<int64_t, int>, int64_t>);
+        STATIC_REQUIRE(std::is_same_v<keet::branch_type_t<int, int>, int>);
+        STATIC_REQUIRE(std::is_same_v<keet::branch_type_t<int64_t, int64_t>, int64_t>);
+    }
+}

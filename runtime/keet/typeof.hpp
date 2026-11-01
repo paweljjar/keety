@@ -97,19 +97,52 @@ template <typename T>
     }
 }
 
+namespace detail {
+template <typename T1, typename T2, typename = void>
+struct branch_type_impl {
+    using type = std::variant<std::decay_t<T1>, std::decay_t<T2>>;
+};
+
+template <typename T1, typename T2>
+struct branch_type_impl<T1, T2, std::enable_if_t<std::is_same_v<std::decay_t<T1>, std::decay_t<T2>>>> {
+    using type = std::decay_t<T1>;
+};
+
+template <typename T1, typename T2>
+struct branch_type_impl<T1, T2, std::enable_if_t<
+    !std::is_same_v<std::decay_t<T1>, std::decay_t<T2>> &&
+    std::is_integral_v<std::decay_t<T1>> &&
+    std::is_integral_v<std::decay_t<T2>> &&
+    !std::is_same_v<std::decay_t<T1>, bool> &&
+    !std::is_same_v<std::decay_t<T2>, bool>
+>> {
+    using type = std::conditional_t<
+        (sizeof(std::decay_t<T1>) >= sizeof(int64_t) || sizeof(std::decay_t<T2>) >= sizeof(int64_t)),
+        int64_t,
+        std::common_type_t<std::decay_t<T1>, std::decay_t<T2>>
+    >;
+};
+
+template <typename T1, typename T2>
+struct branch_type_impl<T1, T2, std::enable_if_t<
+    !std::is_same_v<std::decay_t<T1>, std::decay_t<T2>> &&
+    ((std::is_same_v<std::decay_t<T1>, std::string> && std::is_convertible_v<std::decay_t<T2>, std::string>) ||
+     (std::is_same_v<std::decay_t<T2>, std::string> && std::is_convertible_v<std::decay_t<T1>, std::string>))
+>> {
+    using type = std::string;
+};
+} // namespace detail
+
 // Polymorphic conditional branch type
 template <typename T1, typename T2>
-using branch_type_t = std::conditional_t<
-    std::is_same_v<std::decay_t<T1>, std::decay_t<T2>>,
-    std::decay_t<T1>,
-    std::variant<std::decay_t<T1>, std::decay_t<T2>>
->;
+using branch_type_t = typename detail::branch_type_impl<T1, T2>::type;
 
 // Polymorphic conditional branch returning common type or union variant
 template <typename Cond, typename T1, typename T2>
 inline auto branch(Cond&& cond, T1&& t1, T2&& t2) {
-    if constexpr (std::is_same_v<std::decay_t<T1>, std::decay_t<T2>>) {
-        return cond ? std::forward<T1>(t1) : std::forward<T2>(t2);
+    using R = branch_type_t<T1, T2>;
+    if constexpr (!std::is_same_v<R, std::variant<std::decay_t<T1>, std::decay_t<T2>>>) {
+        return cond ? static_cast<R>(std::forward<T1>(t1)) : static_cast<R>(std::forward<T2>(t2));
     } else {
         using V = std::variant<std::decay_t<T1>, std::decay_t<T2>>;
         return cond ? V(std::forward<T1>(t1)) : V(std::forward<T2>(t2));

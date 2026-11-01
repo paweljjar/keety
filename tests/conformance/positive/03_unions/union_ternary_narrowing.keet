@@ -1,0 +1,48 @@
+fn test_fallback(a: int | null): int {
+    let b: int = a == null ? 5 : a;
+    return b;
+}
+
+fn test_narrowed(a: int | null): int {
+    let c: int = a != null ? a : 5;
+    return c;
+}
+
+fn main(): int {
+    let a: int | null = null;
+    let b: int = a == null ? 5 : a;
+    let c: int = a != null ? a : 5;
+
+    if (b != 5) {
+        return 1;
+    }
+    if (c != 5) {
+        return 2;
+    }
+
+    let x: int | null = 42;
+    let y: int = x == null ? 5 : x;
+    let z: int = x != null ? x : 5;
+
+    if (y != 42) {
+        return 3;
+    }
+    if (z != 42) {
+        return 4;
+    }
+
+    if (test_fallback(null) != 5) {
+        return 5;
+    }
+    if (test_fallback(100) != 100) {
+        return 6;
+    }
+    if (test_narrowed(null) != 5) {
+        return 7;
+    }
+    if (test_narrowed(100) != 100) {
+        return 8;
+    }
+
+    return 0;
+}

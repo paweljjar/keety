@@ -55,4 +55,17 @@ TEST_CASE("Positive conformance: Unions and flow narrowing", "[conformance][unio
         int exit_code = CliDriver::run(opts, out, err);
         CHECK(exit_code == 0);
     }
+
+    SECTION("Verify flow-based union narrowing in ternary expressions in union_ternary_narrowing") {
+        auto test_file = locate_conformance_test("positive/03_unions/union_ternary_narrowing.keet");
+        REQUIRE(!test_file.empty());
+        REQUIRE(std::filesystem::exists(test_file));
+
+        std::ostringstream out;
+        std::ostringstream err;
+        auto opts = CliDriver::parse_args({"run", test_file.string()});
+
+        int exit_code = CliDriver::run(opts, out, err);
+        CHECK(exit_code == 0);
+    }
 }

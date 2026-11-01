@@ -12,6 +12,33 @@
 
 namespace keety::emitter {
 
+namespace {
+struct ScopedNarrowing {
+    std::unordered_map<std::string, std::string>& map;
+    std::vector<std::pair<std::string, std::optional<std::string>>> prev;
+
+    ScopedNarrowing(std::unordered_map<std::string, std::string>& m,
+                    const std::vector<CppEmitter::NarrowingFact>& facts)
+        : map(m) {
+        for (const auto& fact : facts) {
+            auto it = map.find(fact.var_name);
+            prev.push_back({fact.var_name, it != map.end() ? std::make_optional(it->second) : std::nullopt});
+            map[fact.var_name] = fact.cpp_type;
+        }
+    }
+
+    ~ScopedNarrowing() {
+        for (const auto& [var_name, old_val] : prev) {
+            if (old_val.has_value()) {
+                map[var_name] = *old_val;
+            } else {
+                map.erase(var_name);
+            }
+        }
+    }
+};
+} // namespace
+
 CppEmitter::CppEmitter(CppEmitterOptions options)
     : options_(std::move(options)) {}
 
@@ -188,11 +215,17 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
         if (!decl) continue;
         if (const auto* var = dynamic_cast<const ast::VarDecl*>(decl.get())) {
             register_module_var(var->getName());
+            if (var->getType()) {
+                global_var_types_[var->getName()] = var->getType();
+            }
             std::string cpp_type = var->getType() ? HeaderEmitter::to_cpp_type(var->getType()) : "auto";
             std::string init_val = var->getInitializer() ? HeaderEmitter::to_cpp_expr(var->getInitializer()) : "{}";
             add_storage_allocation(var->getName(), cpp_type, init_val);
         } else if (const auto* cst = dynamic_cast<const ast::ConstDecl*>(decl.get())) {
             register_module_var(cst->getName());
+            if (cst->getType()) {
+                global_var_types_[cst->getName()] = cst->getType();
+            }
             std::string cpp_type = cst->getType() ? HeaderEmitter::to_cpp_type(cst->getType()) : "auto";
             std::string init_val = cst->getInitializer() ? HeaderEmitter::to_cpp_expr(cst->getInitializer()) : "{}";
             add_storage_allocation(cst->getName(), "const " + cpp_type, init_val);
@@ -399,8 +432,20 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
 
     if (const auto* tern = dynamic_cast<const ast::TernaryExpr*>(expr)) {
         std::string cond_s = translate_expression(tern->getCondition());
-        std::string then_s = translate_expression(tern->getThenExpr());
-        std::string else_s = translate_expression(tern->getElseExpr());
+        BranchNarrowing narrowing = analyze_narrowing_condition(tern->getCondition());
+
+        std::string then_s;
+        {
+            ScopedNarrowing scope(narrowed_vars_, narrowing.then_facts);
+            then_s = translate_expression(tern->getThenExpr());
+        }
+
+        std::string else_s;
+        {
+            ScopedNarrowing scope(narrowed_vars_, narrowing.else_facts);
+            else_s = translate_expression(tern->getElseExpr());
+        }
+
         return "((" + cond_s + ") ? keet::branch_type_t<decltype(" + then_s + "), decltype(" + else_s + ")>(" + then_s + ") : " +
                "keet::branch_type_t<decltype(" + then_s + "), decltype(" + else_s + ")>(" + else_s + "))";
     }
@@ -807,6 +852,9 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
 
     if (const auto* decl = dynamic_cast<const ast::DeclStmt*>(stmt)) {
         if (const auto* var = dynamic_cast<const ast::VarDecl*>(decl->getDeclaration())) {
+            if (var->getType()) {
+                var_types_[var->getName()] = var->getType();
+            }
             std::string type_s = var->getType() ? HeaderEmitter::to_cpp_type(var->getType()) : "auto";
             std::string init_s;
             if (var->getInitializer()) {
@@ -817,6 +865,9 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
             return indent_str + type_s + " " + var->getName() + init_s + ";\n";
         }
         if (const auto* cst = dynamic_cast<const ast::ConstDecl*>(decl->getDeclaration())) {
+            if (cst->getType()) {
+                var_types_[cst->getName()] = cst->getType();
+            }
             std::string type_s = cst->getType() ? HeaderEmitter::to_cpp_type(cst->getType()) : "auto";
             std::string init_s = cst->getInitializer() ? " = " + translate_expression(cst->getInitializer()) : "{}";
             return indent_str + "const " + type_s + " " + cst->getName() + init_s + ";\n";
@@ -867,61 +918,6 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
     }
 
     if (const auto* if_stmt = dynamic_cast<const ast::IfStmt*>(stmt)) {
-        std::string narrowed_var;
-        std::string narrowed_type;
-        if (const auto* bin = dynamic_cast<const ast::BinaryExpr*>(if_stmt->getCondition())) {
-            if (bin->getOp() == lexer::TokenKind::EqualEqual) {
-                const ast::TypeofExpr* top = dynamic_cast<const ast::TypeofExpr*>(bin->getLeft());
-                const ast::LiteralExpr* lit = dynamic_cast<const ast::LiteralExpr*>(bin->getRight());
-                if (!top) {
-                    top = dynamic_cast<const ast::TypeofExpr*>(bin->getRight());
-                    lit = dynamic_cast<const ast::LiteralExpr*>(bin->getLeft());
-                }
-                if (top && lit && lit->getLiteralKind() == lexer::TokenKind::StringLiteral) {
-                    if (const auto* id = dynamic_cast<const ast::IdentExpr*>(top->getExpr())) {
-                        narrowed_var = id->getName();
-                        std::string tname = lit->getRawText();
-                        if (tname.size() >= 2 && (tname.front() == '"' || tname.front() == '\'')) {
-                            tname = tname.substr(1, tname.size() - 2);
-                        }
-                        if (tname == "int") narrowed_type = "int64_t";
-                        else if (tname == "string") narrowed_type = "std::string";
-                        else if (tname == "float") narrowed_type = "double";
-                        else if (tname == "bool") narrowed_type = "bool";
-                        else if (tname == "char") narrowed_type = "char";
-                    }
-                }
-            } else if (bin->getOp() == lexer::TokenKind::ExclaimEqual) {
-                const ast::IdentExpr* id = dynamic_cast<const ast::IdentExpr*>(bin->getLeft());
-                const ast::LiteralExpr* lit = dynamic_cast<const ast::LiteralExpr*>(bin->getRight());
-                if (!id) {
-                    id = dynamic_cast<const ast::IdentExpr*>(bin->getRight());
-                    lit = dynamic_cast<const ast::LiteralExpr*>(bin->getLeft());
-                }
-                if (id && lit && lit->getRawText() == "null") {
-                    if (if_stmt->hasInit()) {
-                        if (const auto* decl = dynamic_cast<const ast::DeclStmt*>(if_stmt->getInit())) {
-                            if (const auto* var = dynamic_cast<const ast::VarDecl*>(decl->getDeclaration())) {
-                                if (var->getName() == id->getName() && var->getType()) {
-                                    if (const auto* un = dynamic_cast<const ast::UnionType*>(var->getType())) {
-                                        for (const auto& v : un->getVariants()) {
-                                            if (const auto* prim = dynamic_cast<const ast::PrimitiveType*>(v.get())) {
-                                                if (prim->getKind() != ast::PrimitiveTypeKind::Null) {
-                                                    narrowed_var = id->getName();
-                                                    narrowed_type = HeaderEmitter::to_cpp_type(v.get());
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         std::string res = indent_str + "if (";
         if (if_stmt->hasInit()) {
             std::string init_s = translate_statement(if_stmt->getInit(), 0);
@@ -930,29 +926,16 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
         }
         res += translate_expression(if_stmt->getCondition()) + ") {\n";
 
-        std::string prev_narrowed;
-        bool had_prev = false;
-        if (!narrowed_var.empty() && !narrowed_type.empty()) {
-            auto it = narrowed_vars_.find(narrowed_var);
-            if (it != narrowed_vars_.end()) {
-                prev_narrowed = it->second;
-                had_prev = true;
-            }
-            narrowed_vars_[narrowed_var] = narrowed_type;
-        }
+        BranchNarrowing narrowing = analyze_narrowing_condition(if_stmt->getCondition());
 
-        res += translate_block(if_stmt->getThenBranch(), indent + 1);
-
-        if (!narrowed_var.empty() && !narrowed_type.empty()) {
-            if (had_prev) {
-                narrowed_vars_[narrowed_var] = prev_narrowed;
-            } else {
-                narrowed_vars_.erase(narrowed_var);
-            }
+        {
+            ScopedNarrowing scope(narrowed_vars_, narrowing.then_facts);
+            res += translate_block(if_stmt->getThenBranch(), indent + 1);
         }
 
         res += indent_str + "}";
         if (if_stmt->hasElseBranch()) {
+            ScopedNarrowing scope(narrowed_vars_, narrowing.else_facts);
             if (const auto* else_if = dynamic_cast<const ast::IfStmt*>(if_stmt->getElseBranch())) {
                 std::string elif_str = translate_statement(else_if, indent);
                 size_t first_non_space = elif_str.find_first_not_of(' ');
@@ -1079,6 +1062,16 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
 }
 
 std::string CppEmitter::translate_function(const ast::FnDecl& fn) const {
+    var_types_ = global_var_types_;
+    for (const auto& p : fn.getParams()) {
+        if (p.type) {
+            var_types_[p.name] = p.type.get();
+        }
+    }
+    if (fn.getBody()) {
+        collect_local_var_types(fn.getBody());
+    }
+
     std::string raw_ret = fn.getReturnType() ? HeaderEmitter::to_cpp_type(fn.getReturnType()) : "void";
     std::string ret_type = fn.isAsync() ? ("keet::Task<" + raw_ret + ">") : raw_ret;
     std::string params_str;
@@ -1122,6 +1115,16 @@ std::string CppEmitter::translate_function(const ast::FnDecl& fn) const {
 }
 
 std::string CppEmitter::translate_method(std::string_view class_name, const ast::FnDecl& fn) const {
+    var_types_ = global_var_types_;
+    for (const auto& p : fn.getParams()) {
+        if (p.type) {
+            var_types_[p.name] = p.type.get();
+        }
+    }
+    if (fn.getBody()) {
+        collect_local_var_types(fn.getBody());
+    }
+
     std::string ret_type = fn.getReturnType() ? HeaderEmitter::to_cpp_type(fn.getReturnType()) : "void";
     std::string params_str;
     for (size_t i = 0; i < fn.getParams().size(); ++i) {
@@ -1468,6 +1471,276 @@ std::string CppEmitter::emit_namespace_body() const {
     }
 
     return ss.str();
+}
+
+std::string CppEmitter::get_non_null_cpp_type(const std::string& var_name) const {
+    const ast::TypeAnnotation* annot = nullptr;
+    auto it = var_types_.find(var_name);
+    if (it != var_types_.end()) {
+        annot = it->second;
+    } else {
+        auto git = global_var_types_.find(var_name);
+        if (git != global_var_types_.end()) {
+            annot = git->second;
+        }
+    }
+
+    if (annot) {
+        if (const auto* un = dynamic_cast<const ast::UnionType*>(annot)) {
+            std::vector<const ast::TypeAnnotation*> non_null_variants;
+            for (const auto& v : un->getVariants()) {
+                if (const auto* prim = dynamic_cast<const ast::PrimitiveType*>(v.get())) {
+                    if (prim->getKind() == ast::PrimitiveTypeKind::Null) {
+                        continue;
+                    }
+                }
+                non_null_variants.push_back(v.get());
+            }
+            if (non_null_variants.size() == 1) {
+                return HeaderEmitter::to_cpp_type(non_null_variants[0]);
+            } else if (non_null_variants.size() > 1) {
+                std::string res = "std::variant<";
+                for (size_t i = 0; i < non_null_variants.size(); ++i) {
+                    if (i > 0) res += ", ";
+                    res += HeaderEmitter::to_cpp_type(non_null_variants[i]);
+                }
+                res += ">";
+                return res;
+            }
+        }
+    }
+
+    if (ir_module_) {
+        for (const auto& g : ir_module_->get_globals()) {
+            if (g.name == var_name && g.type) {
+                if (const auto* u = dynamic_cast<const typechecker::UnionType*>(g.type.get())) {
+                    std::vector<typechecker::TypePtr> non_null_variants;
+                    for (const auto& v : u->getVariants()) {
+                        if (!v->isNull()) {
+                            non_null_variants.push_back(v);
+                        }
+                    }
+                    if (non_null_variants.size() == 1) {
+                        return HeaderEmitter::to_cpp_type(non_null_variants[0]);
+                    } else if (non_null_variants.size() > 1) {
+                        std::string res = "std::variant<";
+                        for (size_t i = 0; i < non_null_variants.size(); ++i) {
+                            if (i > 0) res += ", ";
+                            res += HeaderEmitter::to_cpp_type(non_null_variants[i]);
+                        }
+                        res += ">";
+                        return res;
+                    }
+                }
+            }
+        }
+    }
+
+    return "";
+}
+
+CppEmitter::BranchNarrowing CppEmitter::analyze_narrowing_condition(const ast::Expr* condition) const {
+    BranchNarrowing result;
+    if (!condition) return result;
+
+    if (const auto* unary = dynamic_cast<const ast::UnaryExpr*>(condition)) {
+        if (unary->getOp() == lexer::TokenKind::Exclaim && unary->getOperand()) {
+            auto inner = analyze_narrowing_condition(unary->getOperand());
+            result.then_facts = std::move(inner.else_facts);
+            result.else_facts = std::move(inner.then_facts);
+            return result;
+        }
+    }
+
+    if (const auto* binary = dynamic_cast<const ast::BinaryExpr*>(condition)) {
+        auto op = binary->getOp();
+
+        if (op == lexer::TokenKind::AmpAmp) {
+            auto left = analyze_narrowing_condition(binary->getLeft());
+            auto right = analyze_narrowing_condition(binary->getRight());
+            result.then_facts = std::move(left.then_facts);
+            for (auto& rf : right.then_facts) {
+                bool found = false;
+                for (auto& lf : result.then_facts) {
+                    if (lf.var_name == rf.var_name) {
+                        lf.cpp_type = rf.cpp_type;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    result.then_facts.push_back(std::move(rf));
+                }
+            }
+            result.else_facts = std::move(left.else_facts);
+            return result;
+        }
+
+        if (op == lexer::TokenKind::PipePipe) {
+            auto left = analyze_narrowing_condition(binary->getLeft());
+            auto right = analyze_narrowing_condition(binary->getRight());
+            result.else_facts = std::move(left.else_facts);
+            for (auto& rf : right.else_facts) {
+                bool found = false;
+                for (auto& ef : result.else_facts) {
+                    if (ef.var_name == rf.var_name) {
+                        ef.cpp_type = rf.cpp_type;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    result.else_facts.push_back(std::move(rf));
+                }
+            }
+            return result;
+        }
+
+        if (op == lexer::TokenKind::EqualEqual || op == lexer::TokenKind::ExclaimEqual) {
+            // Pattern A: `typeof(x) == "T"` or `typeof(x) != "T"`
+            const ast::TypeofExpr* typeof_expr = nullptr;
+            std::string target_type_str;
+            bool found_typeof = false;
+
+            auto check_typeof_and_str = [&](const ast::Expr* a, const ast::Expr* b) {
+                if (const auto* te = dynamic_cast<const ast::TypeofExpr*>(a)) {
+                    if (const auto* lit = dynamic_cast<const ast::LiteralExpr*>(b)) {
+                        if (lit->getLiteralKind() == lexer::TokenKind::StringLiteral) {
+                            std::string raw = lit->getRawText();
+                            if (raw.size() >= 2 && ((raw.front() == '"' && raw.back() == '"') ||
+                                                    (raw.front() == '\'' && raw.back() == '\''))) {
+                                raw = raw.substr(1, raw.size() - 2);
+                            }
+                            typeof_expr = te;
+                            target_type_str = raw;
+                            found_typeof = true;
+                        }
+                    }
+                }
+            };
+
+            check_typeof_and_str(binary->getLeft(), binary->getRight());
+            if (!found_typeof) check_typeof_and_str(binary->getRight(), binary->getLeft());
+
+            if (found_typeof && typeof_expr && typeof_expr->getExpr()) {
+                if (const auto* id = dynamic_cast<const ast::IdentExpr*>(typeof_expr->getExpr())) {
+                    std::string var_name = id->getName();
+                    std::string narrowed_t;
+                    if (target_type_str == "int") narrowed_t = "int64_t";
+                    else if (target_type_str == "string") narrowed_t = "std::string";
+                    else if (target_type_str == "float") narrowed_t = "double";
+                    else if (target_type_str == "bool") narrowed_t = "bool";
+                    else if (target_type_str == "char") narrowed_t = "char";
+                    else narrowed_t = target_type_str;
+
+                    if (op == lexer::TokenKind::EqualEqual) {
+                        result.then_facts.push_back({var_name, narrowed_t});
+                    } else {
+                        result.else_facts.push_back({var_name, narrowed_t});
+                    }
+                    return result;
+                }
+            }
+
+            // Pattern B: `x == null` or `x != null`
+            const ast::IdentExpr* ident_expr = nullptr;
+            bool found_null = false;
+
+            auto check_ident_and_null = [&](const ast::Expr* a, const ast::Expr* b) {
+                if (const auto* ie = dynamic_cast<const ast::IdentExpr*>(a)) {
+                    if (const auto* lit = dynamic_cast<const ast::LiteralExpr*>(b)) {
+                        if (lit->getRawText() == "null" || lit->getLiteralKind() == lexer::TokenKind::KwNull) {
+                            ident_expr = ie;
+                            found_null = true;
+                        }
+                    }
+                }
+            };
+
+            check_ident_and_null(binary->getLeft(), binary->getRight());
+            if (!found_null) check_ident_and_null(binary->getRight(), binary->getLeft());
+
+            if (found_null && ident_expr) {
+                std::string var_name = ident_expr->getName();
+                std::string non_null_t = get_non_null_cpp_type(var_name);
+                if (!non_null_t.empty()) {
+                    if (op == lexer::TokenKind::ExclaimEqual) { // x != null
+                        result.then_facts.push_back({var_name, non_null_t});
+                    } else { // x == null
+                        result.else_facts.push_back({var_name, non_null_t});
+                    }
+                }
+                return result;
+            }
+        }
+    }
+
+    return result;
+}
+
+void CppEmitter::collect_local_var_types(const ast::Stmt* stmt) const {
+    if (!stmt) return;
+
+    if (const auto* decl = dynamic_cast<const ast::DeclStmt*>(stmt)) {
+        if (const auto* var = dynamic_cast<const ast::VarDecl*>(decl->getDeclaration())) {
+            if (var->getType()) {
+                var_types_[var->getName()] = var->getType();
+            }
+        } else if (const auto* cst = dynamic_cast<const ast::ConstDecl*>(decl->getDeclaration())) {
+            if (cst->getType()) {
+                var_types_[cst->getName()] = cst->getType();
+            }
+        }
+        return;
+    }
+
+    if (const auto* blk = dynamic_cast<const ast::BlockStmt*>(stmt)) {
+        for (const auto& s : blk->getStatements()) {
+            collect_local_var_types(s.get());
+        }
+        return;
+    }
+
+    if (const auto* if_stmt = dynamic_cast<const ast::IfStmt*>(stmt)) {
+        if (if_stmt->hasInit()) {
+            collect_local_var_types(if_stmt->getInit());
+        }
+        collect_local_var_types(if_stmt->getThenBranch());
+        if (if_stmt->hasElseBranch()) {
+            collect_local_var_types(if_stmt->getElseBranch());
+        }
+        return;
+    }
+
+    if (const auto* whl = dynamic_cast<const ast::WhileStmt*>(stmt)) {
+        collect_local_var_types(whl->getBody());
+        return;
+    }
+
+    if (const auto* for_stmt = dynamic_cast<const ast::ForStmt*>(stmt)) {
+        if (for_stmt->getInit()) {
+            collect_local_var_types(for_stmt->getInit());
+        }
+        collect_local_var_types(for_stmt->getBody());
+        return;
+    }
+
+    if (const auto* for_in = dynamic_cast<const ast::ForInStmt*>(stmt)) {
+        collect_local_var_types(for_in->getBody());
+        return;
+    }
+
+    if (const auto* sw = dynamic_cast<const ast::SwitchStmt*>(stmt)) {
+        if (sw->hasInit()) {
+            collect_local_var_types(sw->getInit());
+        }
+        for (const auto& c : sw->getCases()) {
+            if (c.body) {
+                collect_local_var_types(c.body.get());
+            }
+        }
+        return;
+    }
 }
 
 std::string CppEmitter::emit() const {

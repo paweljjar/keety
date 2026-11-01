@@ -1,6 +1,7 @@
 #pragma once
 
 #include <keety/ast/decl.hpp>
+#include <keety/ast/type.hpp>
 #include <keety/emitter/header_emitter.hpp>
 #include <keety/ir/module.hpp>
 #include <keety/ir/operand.hpp>
@@ -107,6 +108,20 @@ public:
     // KeetIR Operand to C++ formatting
     [[nodiscard]] std::string to_cpp_ir_operand(const ir::Operand& operand) const;
     [[nodiscard]] static std::string to_cpp_operand(const ir::Operand& operand);
+    // Flow-based narrowing facts
+    struct NarrowingFact {
+        std::string var_name;
+        std::string cpp_type;
+    };
+
+    struct BranchNarrowing {
+        std::vector<NarrowingFact> then_facts;
+        std::vector<NarrowingFact> else_facts;
+    };
+
+    [[nodiscard]] BranchNarrowing analyze_narrowing_condition(const ast::Expr* condition) const;
+    [[nodiscard]] std::string get_non_null_cpp_type(const std::string& var_name) const;
+    void collect_local_var_types(const ast::Stmt* stmt) const;
 
 private:
     std::string module_name_{"main"};
@@ -124,6 +139,8 @@ private:
     bool manual_root_override_{false};
     mutable bool in_zonk_expr_{false};
     mutable std::unordered_map<std::string, std::string> narrowed_vars_{};
+    mutable std::unordered_map<std::string, const ast::TypeAnnotation*> var_types_{};
+    std::unordered_map<std::string, const ast::TypeAnnotation*> global_var_types_{};
     bool has_io_import_{false};
     std::unordered_set<std::string> imported_io_symbols_{};
     bool has_fs_import_{false};
