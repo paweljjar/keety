@@ -18,7 +18,8 @@ tests/
 │   │   ├── 04_oop/
 │   │   ├── 05_control_errors/
 │   │   ├── 06_io/
-│   │   └── 07_fs/
+│   │   ├── 07_fs/
+│   │   └── 08_sys/
 │   └── negative/      # Must fail compilation at designated stage with expected error codes
 │       ├── E1000_modules/
 │       ├── E2000_scoping/
@@ -277,6 +278,11 @@ keety test [--conformance | --benchmarks | --all] [--filter <pattern>]
     ```
   * **Assertion:** Exits cleanly with status code `0`.
 
+### Group 8: Standard System & Process Operations
+* **Test 8.1 (`sys_environment.keet`):**
+  * **Objective:** Validate standard `sys` module imports, command-line argument access (`sys.args`), process ID retrieval (`sys.pid`), platform detection (`sys.platform`), CPU hardware concurrency queries (`sys.cpuCount`), working and temporary directory paths (`sys.cwd`, `sys.tempDir`), environment variable manipulation (`sys.setEnv`, `sys.getEnv`, `sys.getEnvOr`, `sys.hasEnv`, `sys.unsetEnv`), and subprocess execution with `zonk` fallback recovery.
+  * **Assertion:** Exits cleanly with status code `0`.
+
 ---
 
 ## 3. Negative Compiler Diagnostic Test Cases (Compile-Time Rejection)
@@ -294,6 +300,7 @@ keety test [--conformance | --benchmarks | --all] [--filter <pattern>]
 | `neg_async_mut.keet` | `E4004` | Declaring `mut` reference parameter inside an `async fn`. |
 | `neg_io_type_mismatch.keet` | `E3003` | Passing invalid argument type to standard `io` function or member: `io.input(42)`. |
 | `neg_fs_type_mismatch.keet` | `E3003` | Passing invalid argument type to standard `fs` function or member: `fs.readText(42)`. |
+| `neg_sys_type_mismatch.keet` | `E3003` | Passing invalid argument type to standard `sys` function or member: `sys.exit("invalid")`. |
 
 ---
 

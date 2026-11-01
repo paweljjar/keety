@@ -599,5 +599,95 @@ TEST_CASE("C++ Implementation Emitter translates standard fs module calls and zo
     }
 }
 
+TEST_CASE("C++ Implementation Emitter translates standard sys module calls and zonk expressions", "[emitter][cpp][sys]") {
+    SECTION("Translates sys method calls to ::keet::sys::*") {
+        std::string source = R"(
+            import sys;
+
+            fn test_sys(): void {
+                let p: string = sys.platform();
+                let a: array<string> = sys.args();
+                let c: string = sys.cwd();
+                let e: string | null = sys.getEnv("PATH");
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "sys_demo");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("#include <keet/runtime.hpp>") != std::string::npos);
+        REQUIRE(cpp.find("::keet::sys::platform();") != std::string::npos);
+        REQUIRE(cpp.find("::keet::sys::args();") != std::string::npos);
+        REQUIRE(cpp.find("::keet::sys::cwd();") != std::string::npos);
+        REQUIRE(cpp.find("::keet::sys::getEnv(\"PATH\");") != std::string::npos);
+    }
+
+    SECTION("Translates selective imports from sys module") {
+        std::string source = R"(
+            from "sys" import platform, getEnv;
+
+            fn test_selective(): void {
+                let p: string = platform();
+                let e: string | null = getEnv("HOME");
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "sys_selective");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("#include <keet/runtime.hpp>") != std::string::npos);
+        REQUIRE(cpp.find("::keet::sys::platform();") != std::string::npos);
+        REQUIRE(cpp.find("::keet::sys::getEnv(\"HOME\");") != std::string::npos);
+    }
+
+    SECTION("Translates IR module with sys runtime calls") {
+        keety::ir::Module irMod("ir_sys_mod");
+        auto fn = std::make_unique<keety::ir::Function>("run", std::make_shared<keety::typechecker::Type>(keety::typechecker::TypeKind::Void));
+        auto* bb = fn->create_basic_block("entry");
+        std::vector<keety::ir::Operand> args;
+        bb->append_instruction(std::make_unique<keety::ir::CallInst>(std::nullopt, "@keet.sys.platform", std::move(args)));
+        bb->append_instruction(std::make_unique<keety::ir::ReturnInst>());
+        irMod.add_function(std::move(fn));
+
+        keety::emitter::CppEmitter emitter(irMod);
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("::keet::sys::platform();") != std::string::npos);
+    }
+
+    SECTION("Translates sys fallible call wrapped in zonk expression") {
+        std::string source = R"(
+            import sys;
+
+            fn run_cmd(): string {
+                let out: string = sys.execOutput("false") zonk "default";
+                return out;
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "sys_zonk");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("::keet::sys::execOutput(\"false\")") != std::string::npos);
+        REQUIRE(cpp.find("catch (...)") != std::string::npos);
+    }
+
+    SECTION("Emits ::keet::sys::initArgs(argc, argv) in main wrapper") {
+        std::string source = R"(
+            fn main(): void {
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "sys_main");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("::keet::sys::initArgs(argc, argv);") != std::string::npos);
+    }
+}
+
+
 
 

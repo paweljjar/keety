@@ -270,3 +270,38 @@ TEST_CASE("Fallible fs.readText in zonk expression lowers to CFG with landing pa
     CHECK(try_bb->get_landing_pad() == catch_bb);
     CHECK(catch_bb->is_landing_pad());
 }
+
+TEST_CASE("Fallible sys.execOutput in zonk expression lowers to CFG with landing pads", "[zonk_lowering][sys]") {
+    std::string src = R"(
+        import sys;
+
+        fn runSafeCommand(cmd: string): string {
+            let out: string = sys.execOutput(cmd) zonk "";
+            return out;
+        }
+    )";
+    auto ast = parse_source(src, "sys_zonk_test");
+    AstLowerer lowerer;
+    auto mod = lowerer.lower_module(ast);
+
+    REQUIRE(mod != nullptr);
+    Function* fn = mod->find_function("runSafeCommand");
+    REQUIRE(fn != nullptr);
+
+    std::string err;
+    CHECK(fn->validate_cfg(err));
+    CHECK(err.empty());
+
+    BasicBlock* try_bb = fn->find_basic_block("zonk.try.1");
+    BasicBlock* catch_bb = fn->find_basic_block("zonk.catch.2");
+    BasicBlock* end_bb = fn->find_basic_block("zonk.end.3");
+
+    REQUIRE(try_bb != nullptr);
+    REQUIRE(catch_bb != nullptr);
+    REQUIRE(end_bb != nullptr);
+
+    CHECK(try_bb->has_landing_pad());
+    CHECK(try_bb->get_landing_pad() == catch_bb);
+    CHECK(catch_bb->is_landing_pad());
+}
+

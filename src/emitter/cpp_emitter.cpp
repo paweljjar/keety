@@ -154,6 +154,12 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                 for (const auto& s : imp->getSymbols()) {
                     imported_fs_symbols_.insert(s.getEffectiveName());
                 }
+            } else if (p == "sys" || p == "std.sys" || p == "keet.sys") {
+                has_sys_import_ = true;
+                add_standard_header("<keet/runtime.hpp>");
+                for (const auto& s : imp->getSymbols()) {
+                    imported_sys_symbols_.insert(s.getEffectiveName());
+                }
             }
         }
     }
@@ -442,6 +448,27 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
                     return "::keet::fs::" + m_name + "(" + args_str + ")";
                 }
             }
+            if (obj_s == "sys") {
+                if (m_name == "args" ||
+                    m_name == "exit" ||
+                    m_name == "pid" ||
+                    m_name == "getEnv" ||
+                    m_name == "getEnvOr" ||
+                    m_name == "setEnv" ||
+                    m_name == "unsetEnv" ||
+                    m_name == "hasEnv" ||
+                    m_name == "platform" ||
+                    m_name == "arch" ||
+                    m_name == "cpuCount" ||
+                    m_name == "cwd" ||
+                    m_name == "chdir" ||
+                    m_name == "homeDir" ||
+                    m_name == "tempDir" ||
+                    m_name == "exec" ||
+                    m_name == "execOutput") {
+                    return "::keet::sys::" + m_name + "(" + args_str + ")";
+                }
+            }
             // Container member mapping
             if (m_name == "push") {
                 return obj_s + ".push_back(" + args_str + ")";
@@ -520,6 +547,26 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
                 name == "extension" ||
                 name == "parentDir")) {
                 return "::keet::fs::" + name + "(" + args_str + ")";
+            }
+            if (has_sys_import_ && (imported_sys_symbols_.count(name) ||
+                name == "args" ||
+                name == "exit" ||
+                name == "pid" ||
+                name == "getEnv" ||
+                name == "getEnvOr" ||
+                name == "setEnv" ||
+                name == "unsetEnv" ||
+                name == "hasEnv" ||
+                name == "platform" ||
+                name == "arch" ||
+                name == "cpuCount" ||
+                name == "cwd" ||
+                name == "chdir" ||
+                name == "homeDir" ||
+                name == "tempDir" ||
+                name == "exec" ||
+                name == "execOutput")) {
+                return "::keet::sys::" + name + "(" + args_str + ")";
             }
         }
 
@@ -1166,6 +1213,9 @@ std::string CppEmitter::translate_ir_function(const ir::Function& fn) const {
                 } else if (callee.rfind("keet.fs.", 0) == 0) {
                     std::string func_name = callee.substr(8);
                     call_expr = "::keet::fs::" + func_name + "(";
+                } else if (callee.rfind("keet.sys.", 0) == 0) {
+                    std::string func_name = callee.substr(9);
+                    call_expr = "::keet::sys::" + func_name + "(";
                 } else {
                     call_expr = callee + "(";
                 }
@@ -1287,6 +1337,7 @@ std::string CppEmitter::emit_main_wrapper() const {
     std::ostringstream ss;
     ss << "int main(int argc, char* argv[]) {\n";
     ss << "    try {\n";
+    ss << "        ::keet::sys::initArgs(argc, argv);\n";
 
     std::string ns = get_namespace_name();
     if (main_has_args_ || !has_main_function_) {

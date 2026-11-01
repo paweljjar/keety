@@ -22,6 +22,7 @@ namespace keet_module_scalars_float_clamp_bounds {
 
 int main(int argc, char* argv[]) {
     try {
+        ::keet::sys::initArgs(argc, argv);
         return static_cast<int>(keet_module_scalars_float_clamp_bounds::_keet_main());
     } catch (const keet::error& err) {
         std::cerr << "Uncaught error: " << err.toString() << "\n";

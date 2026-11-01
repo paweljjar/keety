@@ -1,0 +1,6 @@
+import sys;
+
+fn main(): void {
+    // sys.exit expects int; passing a string causes E3003
+    sys.exit("invalid_exit_code");
+}

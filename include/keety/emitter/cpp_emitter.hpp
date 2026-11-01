@@ -128,6 +128,8 @@ private:
     std::unordered_set<std::string> imported_io_symbols_{};
     bool has_fs_import_{false};
     std::unordered_set<std::string> imported_fs_symbols_{};
+    bool has_sys_import_{false};
+    std::unordered_set<std::string> imported_sys_symbols_{};
 };
 
 } // namespace keety::emitter

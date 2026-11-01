@@ -2608,6 +2608,56 @@ fn main(): void {
 }
 ```
 
+### Standard Library: `sys` (System and Process Operations)
+
+The built-in `sys` standard library module provides cross-platform access to command-line arguments, process lifecycle management, environment variables, system and CPU information, working directory manipulations, and subprocess execution. It is brought into scope via `import sys;`, `import sys as alias;`, or selective imports (`from "sys" import args, getEnv, platform, cpuCount;`).
+
+#### Module Declarations & Signatures
+
+```keet
+// Command-Line Arguments & Process Lifecycle
+fn args(): array<string>;
+fn pid(): int;
+fn exit(code: int): void;
+
+// Environment Variables
+fn getEnv(key: string): string | null;
+fn getEnvOr(key: string, fallback: string): string;
+fn hasEnv(key: string): bool;
+fn setEnv(key: string, value: string): bool;
+fn unsetEnv(key: string): bool;
+
+// System & Platform Information
+fn platform(): string;
+fn arch(): string;
+fn cpuCount(): int;
+
+// Directory & Path Primitives
+fn cwd(): string;
+fn chdir(path: string): bool;
+fn homeDir(): string;
+fn tempDir(): string;
+
+// Subprocess Execution (Fallible, zonk-compatible)
+fn exec(command: string): int;
+fn execOutput(command: string): string;
+```
+
+#### Example Usage with Error Recovery (`zonk`)
+
+```keet
+import sys;
+import io;
+
+fn main(): void {
+    let home: string = sys.getEnvOr("HOME", "/tmp");
+    let cpus: int = sys.cpuCount();
+    let gitRev: string = sys.execOutput("git rev-parse --short HEAD") zonk "unknown";
+    io.println("Running on platform:", sys.platform(), "with", cpus, "CPUs");
+    io.println("Current revision:", gitRev);
+}
+```
+
 ## C++ AOT translation and header generation
 
 

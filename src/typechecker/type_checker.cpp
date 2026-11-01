@@ -1865,6 +1865,239 @@ TypePtr TypeChecker::checkFsDirectCall(const ast::IdentExpr* callee, const ast::
     return Type::unknownType();
 }
 
+TypePtr TypeChecker::checkSysMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!member || !call) return Type::unknownType();
+    const std::string& name = member->getMemberName();
+
+    auto checkArgCount = [&](size_t expected) -> bool {
+        if (call->getArgs().size() != expected) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function 'sys." + name + "' expects " + std::to_string(expected) +
+                    (expected == 1 ? " argument" : " arguments") + ", but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "wrong argument count"));
+            }
+            hasErrors_ = true;
+            return false;
+        }
+        return true;
+    };
+
+    auto checkStringArg = [&](size_t idx, const char* argName) {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::stringType());
+                if (aType && !aType->isString()) {
+                    reportTypeMismatch(Type::stringType(), aType, arg.value->getSpan(), "sys." + name + " " + argName + " argument");
+                }
+            }
+        }
+    };
+
+    auto checkIntArg = [&](size_t idx, const char* argName) {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::intType());
+                if (aType && !aType->isInt()) {
+                    reportTypeMismatch(Type::intType(), aType, arg.value->getSpan(), "sys." + name + " " + argName + " argument");
+                }
+            }
+        }
+    };
+
+    if (name == "args") {
+        checkArgCount(0);
+        return Type::array(Type::stringType());
+    }
+    if (name == "exit") {
+        if (checkArgCount(1)) {
+            checkIntArg(0, "code");
+        }
+        return Type::voidType();
+    }
+    if (name == "pid") {
+        checkArgCount(0);
+        return Type::intType();
+    }
+    if (name == "getEnv") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "key");
+        }
+        return Type::unionOf({Type::stringType(), Type::nullType()});
+    }
+    if (name == "getEnvOr") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "key");
+            checkStringArg(1, "fallback");
+        }
+        return Type::stringType();
+    }
+    if (name == "setEnv") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "key");
+            checkStringArg(1, "value");
+        }
+        return Type::boolType();
+    }
+    if (name == "unsetEnv" || name == "hasEnv") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "key");
+        }
+        return Type::boolType();
+    }
+    if (name == "platform" || name == "arch" || name == "cwd" || name == "homeDir" || name == "tempDir") {
+        checkArgCount(0);
+        return Type::stringType();
+    }
+    if (name == "cpuCount") {
+        checkArgCount(0);
+        return Type::intType();
+    }
+    if (name == "chdir") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "path");
+        }
+        return Type::boolType();
+    }
+    if (name == "exec") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "command");
+        }
+        return Type::intType();
+    }
+    if (name == "execOutput") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "command");
+        }
+        return Type::stringType();
+    }
+
+    if (emitter_) {
+        emitter_->report(diag::Diagnostic::makeError(
+            diag::ErrorCode::InvalidMemberAccess,
+            "module 'sys' has no member function '" + name + "'",
+            member->getSpan().start).withLabel(member->getSpan(), "unknown member function"));
+    }
+    hasErrors_ = true;
+    return Type::unknownType();
+}
+
+TypePtr TypeChecker::checkSysDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!callee || !call) return Type::unknownType();
+    const std::string& name = callee->getName();
+
+    auto checkArgCount = [&](size_t expected) -> bool {
+        if (call->getArgs().size() != expected) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function '" + name + "' expects " + std::to_string(expected) +
+                    (expected == 1 ? " argument" : " arguments") + ", but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "wrong argument count"));
+            }
+            hasErrors_ = true;
+            return false;
+        }
+        return true;
+    };
+
+    auto checkStringArg = [&](size_t idx, const char* argName) {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::stringType());
+                if (aType && !aType->isString()) {
+                    reportTypeMismatch(Type::stringType(), aType, arg.value->getSpan(), name + " " + argName + " argument");
+                }
+            }
+        }
+    };
+
+    auto checkIntArg = [&](size_t idx, const char* argName) {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::intType());
+                if (aType && !aType->isInt()) {
+                    reportTypeMismatch(Type::intType(), aType, arg.value->getSpan(), name + " " + argName + " argument");
+                }
+            }
+        }
+    };
+
+    if (name == "args") {
+        checkArgCount(0);
+        return Type::array(Type::stringType());
+    }
+    if (name == "exit") {
+        if (checkArgCount(1)) {
+            checkIntArg(0, "code");
+        }
+        return Type::voidType();
+    }
+    if (name == "pid") {
+        checkArgCount(0);
+        return Type::intType();
+    }
+    if (name == "getEnv") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "key");
+        }
+        return Type::unionOf({Type::stringType(), Type::nullType()});
+    }
+    if (name == "getEnvOr") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "key");
+            checkStringArg(1, "fallback");
+        }
+        return Type::stringType();
+    }
+    if (name == "setEnv") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "key");
+            checkStringArg(1, "value");
+        }
+        return Type::boolType();
+    }
+    if (name == "unsetEnv" || name == "hasEnv") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "key");
+        }
+        return Type::boolType();
+    }
+    if (name == "platform" || name == "arch" || name == "cwd" || name == "homeDir" || name == "tempDir") {
+        checkArgCount(0);
+        return Type::stringType();
+    }
+    if (name == "cpuCount") {
+        checkArgCount(0);
+        return Type::intType();
+    }
+    if (name == "chdir") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "path");
+        }
+        return Type::boolType();
+    }
+    if (name == "exec") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "command");
+        }
+        return Type::intType();
+    }
+    if (name == "execOutput") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "command");
+        }
+        return Type::stringType();
+    }
+
+    return Type::unknownType();
+}
+
 bool TypeChecker::checkZeroCoercion(const parser::ModuleAST& module, sema::Scope* rootScope) {
     return checkTypes(module, rootScope);
 }
@@ -1950,6 +2183,41 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                                 emitter_->report(diag::Diagnostic::makeError(
                                     diag::ErrorCode::SymbolNotExported,
                                     "symbol '" + symItem.originalName + "' is not exported by module 'fs'",
+                                    symItem.span.start).withLabel(symItem.span, "symbol not exported"));
+                            }
+                            hasErrors_ = true;
+                        }
+                    }
+                }
+            } else if (modPath == "sys" || modPath == "std.sys" || modPath == "keet.sys") {
+                if (importDecl->getSymbols().empty()) {
+                    std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "sys";
+                    if (!targetScope->lookupCurrent(boundName)) {
+                        auto modSym = std::make_shared<sema::Symbol>(boundName, sema::SymbolKind::Module, importDecl->getSpan());
+                        modSym->setExported(importDecl->isReExported());
+                        auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, modSym, emitter_);
+                        if (!res.success) hasErrors_ = true;
+                    }
+                } else {
+                    auto sysScope = sema::createStdlibModuleScope("sys");
+                    for (const auto& symItem : importDecl->getSymbols()) {
+                        auto exportedSym = sysScope->lookupCurrent(symItem.originalName);
+                        if (exportedSym) {
+                            std::string importAsName = symItem.getEffectiveName();
+                            if (!targetScope->lookupCurrent(importAsName)) {
+                                auto importedSym = std::make_shared<sema::Symbol>(
+                                    importAsName, exportedSym->getKind(), symItem.span
+                                );
+                                importedSym->setExported(importDecl->isReExported());
+                                importedSym->setIsType(exportedSym->isType());
+                                auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, importedSym, emitter_);
+                                if (!res.success) hasErrors_ = true;
+                            }
+                        } else {
+                            if (emitter_) {
+                                emitter_->report(diag::Diagnostic::makeError(
+                                    diag::ErrorCode::SymbolNotExported,
+                                    "symbol '" + symItem.originalName + "' is not exported by module 'sys'",
                                     symItem.span.start).withLabel(symItem.span, "symbol not exported"));
                             }
                             hasErrors_ = true;
@@ -2921,6 +3189,19 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     }
                     return checkFsMemberCall(member, call, scope);
                 }
+                if (objIdent->getName() == "sys" || (sym && sym->isModule() && sym->getName() == "sys")) {
+                    if (!sym) {
+                        if (emitter_) {
+                            emitter_->report(diag::Diagnostic::makeError(
+                                diag::ErrorCode::UndeclaredIdentifier,
+                                "undeclared identifier '" + objIdent->getName() + "'",
+                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                        }
+                        hasErrors_ = true;
+                        return Type::unknownType();
+                    }
+                    return checkSysMemberCall(member, call, scope);
+                }
             }
 
             auto objType = member->getObject() ? inferType(*member->getObject(), scope) : Type::unknownType();
@@ -3105,6 +3386,25 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     name == "extension" ||
                     name == "parentDir") {
                     return checkFsDirectCall(calleeIdent, call, scope);
+                }
+                if (name == "args" ||
+                    name == "exit" ||
+                    name == "pid" ||
+                    name == "getEnv" ||
+                    name == "getEnvOr" ||
+                    name == "setEnv" ||
+                    name == "unsetEnv" ||
+                    name == "hasEnv" ||
+                    name == "platform" ||
+                    name == "arch" ||
+                    name == "cpuCount" ||
+                    name == "cwd" ||
+                    name == "chdir" ||
+                    name == "homeDir" ||
+                    name == "tempDir" ||
+                    name == "exec" ||
+                    name == "execOutput") {
+                    return checkSysDirectCall(calleeIdent, call, scope);
                 }
             }
             const ast::FnDecl* fnDecl = nullptr;
@@ -3466,6 +3766,57 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     emitter_->report(diag::Diagnostic::makeError(
                         diag::ErrorCode::InvalidMemberAccess,
                         "module 'fs' has no member '" + member->getMemberName() + "'",
+                        member->getSpan().start).withLabel(member->getSpan(), "unknown module member"));
+                }
+                hasErrors_ = true;
+                return Type::unknownType();
+            }
+            if (objIdent->getName() == "sys" || (sym && sym->isModule() && sym->getName() == "sys")) {
+                if (!sym) {
+                    if (emitter_) {
+                        emitter_->report(diag::Diagnostic::makeError(
+                            diag::ErrorCode::UndeclaredIdentifier,
+                            "undeclared identifier '" + objIdent->getName() + "'",
+                            objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                    }
+                    hasErrors_ = true;
+                    return Type::unknownType();
+                }
+                const std::string& mName = member->getMemberName();
+                if (mName == "args") {
+                    return Type::function({}, Type::array(Type::stringType()), false);
+                }
+                if (mName == "exit") {
+                    return Type::function({Type::intType()}, Type::voidType(), false);
+                }
+                if (mName == "pid" || mName == "cpuCount") {
+                    return Type::function({}, Type::intType(), false);
+                }
+                if (mName == "getEnv") {
+                    return Type::function({Type::stringType()}, Type::unionOf({Type::stringType(), Type::nullType()}), false);
+                }
+                if (mName == "getEnvOr") {
+                    return Type::function({Type::stringType(), Type::stringType()}, Type::stringType(), false);
+                }
+                if (mName == "setEnv") {
+                    return Type::function({Type::stringType(), Type::stringType()}, Type::boolType(), false);
+                }
+                if (mName == "unsetEnv" || mName == "hasEnv" || mName == "chdir") {
+                    return Type::function({Type::stringType()}, Type::boolType(), false);
+                }
+                if (mName == "platform" || mName == "arch" || mName == "cwd" || mName == "homeDir" || mName == "tempDir") {
+                    return Type::function({}, Type::stringType(), false);
+                }
+                if (mName == "exec") {
+                    return Type::function({Type::stringType()}, Type::intType(), false);
+                }
+                if (mName == "execOutput") {
+                    return Type::function({Type::stringType()}, Type::stringType(), false);
+                }
+                if (emitter_) {
+                    emitter_->report(diag::Diagnostic::makeError(
+                        diag::ErrorCode::InvalidMemberAccess,
+                        "module 'sys' has no member '" + member->getMemberName() + "'",
                         member->getSpan().start).withLabel(member->getSpan(), "unknown module member"));
                 }
                 hasErrors_ = true;

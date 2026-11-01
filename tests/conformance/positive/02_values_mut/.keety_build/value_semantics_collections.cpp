@@ -19,6 +19,7 @@ namespace keet_module_value_semantics_collections {
 
 int main(int argc, char* argv[]) {
     try {
+        ::keet::sys::initArgs(argc, argv);
         return static_cast<int>(keet_module_value_semantics_collections::_keet_main());
     } catch (const keet::error& err) {
         std::cerr << "Uncaught error: " << err.toString() << "\n";

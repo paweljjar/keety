@@ -52,6 +52,7 @@ namespace keet_module_io_console {
 
 int main(int argc, char* argv[]) {
     try {
+        ::keet::sys::initArgs(argc, argv);
         return static_cast<int>(keet_module_io_console::_keet_main());
     } catch (const keet::error& err) {
         std::cerr << "Uncaught error: " << err.toString() << "\n";

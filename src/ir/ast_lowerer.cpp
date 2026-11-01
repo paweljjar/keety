@@ -29,6 +29,8 @@ std::unique_ptr<Module> AstLowerer::lower_module(const parser::ModuleAST& module
     imported_io_symbols_.clear();
     has_fs_import_ = false;
     imported_fs_symbols_.clear();
+    has_sys_import_ = false;
+    imported_sys_symbols_.clear();
 
     for (const auto& decl : module_ast.declarations) {
         if (!decl) continue;
@@ -44,6 +46,11 @@ std::unique_ptr<Module> AstLowerer::lower_module(const parser::ModuleAST& module
                 has_fs_import_ = true;
                 for (const auto& s : imp->getSymbols()) {
                     imported_fs_symbols_.insert(s.getEffectiveName());
+                }
+            } else if (p == "sys" || p == "std.sys" || p == "keet.sys") {
+                has_sys_import_ = true;
+                for (const auto& s : imp->getSymbols()) {
+                    imported_sys_symbols_.insert(s.getEffectiveName());
                 }
             }
         } else if (const auto* var_decl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
@@ -786,6 +793,12 @@ Operand AstLowerer::lower_call_expr(const ast::CallExpr& expr) {
                 emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
                 return dest;
             }
+            if (obj_id->getName() == "sys") {
+                const std::string& m_name = member->getMemberName();
+                std::string callee_name = "@keet.sys." + m_name;
+                emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
+                return dest;
+            }
         }
         Operand receiver = lower_expression(*member->getObject());
         emit(std::make_unique<MethodCallInst>(dest, receiver, member->getMemberName(), std::move(args)));
@@ -819,6 +832,28 @@ Operand AstLowerer::lower_call_expr(const ast::CallExpr& expr) {
             name == "extension" ||
             name == "parentDir")) {
             std::string callee_name = "@keet.fs." + name;
+            emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
+            return dest;
+        }
+        if (has_sys_import_ && (imported_sys_symbols_.count(name) ||
+            name == "args" ||
+            name == "exit" ||
+            name == "pid" ||
+            name == "getEnv" ||
+            name == "getEnvOr" ||
+            name == "setEnv" ||
+            name == "unsetEnv" ||
+            name == "hasEnv" ||
+            name == "platform" ||
+            name == "arch" ||
+            name == "cpuCount" ||
+            name == "cwd" ||
+            name == "chdir" ||
+            name == "homeDir" ||
+            name == "tempDir" ||
+            name == "exec" ||
+            name == "execOutput")) {
+            std::string callee_name = "@keet.sys." + name;
             emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
             return dest;
         }

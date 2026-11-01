@@ -47,4 +47,7 @@ void populateIoModuleScope(Scope& ioScope);
 /// Populates an existing Scope with all exported symbols of the 'fs' standard library module.
 void populateFsModuleScope(Scope& fsScope);
 
+/// Populates an existing Scope with all exported symbols of the 'sys' standard library module.
+void populateSysModuleScope(Scope& sysScope);
+
 } // namespace keety::sema

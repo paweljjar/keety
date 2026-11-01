@@ -182,12 +182,43 @@ void populateFsModuleScope(Scope& fsScope) {
     makeFn("parentDir");
 }
 
+void populateSysModuleScope(Scope& sysScope) {
+    diag::SourceSpan span{};
+
+    auto makeFn = [&](const char* name) {
+        auto sym = std::make_shared<Symbol>(name, SymbolKind::Function, span);
+        sym->setExported(true);
+        sym->setConst(true);
+        sysScope.define(sym, false);
+    };
+
+    makeFn("args");
+    makeFn("exit");
+    makeFn("pid");
+    makeFn("getEnv");
+    makeFn("getEnvOr");
+    makeFn("setEnv");
+    makeFn("unsetEnv");
+    makeFn("hasEnv");
+    makeFn("platform");
+    makeFn("arch");
+    makeFn("cpuCount");
+    makeFn("cwd");
+    makeFn("chdir");
+    makeFn("homeDir");
+    makeFn("tempDir");
+    makeFn("exec");
+    makeFn("execOutput");
+}
+
 std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, const std::shared_ptr<Scope>& universe) {
     auto scope = std::make_shared<Scope>(ScopeKind::Module, universe);
     if (moduleName == "io" || moduleName == "std.io" || moduleName == "keet.io") {
         populateIoModuleScope(*scope);
     } else if (moduleName == "fs" || moduleName == "std.fs" || moduleName == "keet.fs") {
         populateFsModuleScope(*scope);
+    } else if (moduleName == "sys" || moduleName == "std.sys" || moduleName == "keet.sys") {
+        populateSysModuleScope(*scope);
     }
     return scope;
 }

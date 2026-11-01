@@ -1,0 +1,86 @@
+import sys;
+import io;
+
+fn main(): int {
+    io.println("Running KeetScript sys conformance tests...");
+
+    // 1. Process arguments & PID
+    let args: array<string> = sys.args();
+    let pid: int = sys.pid();
+    if (pid <= 0) {
+        return 1;
+    }
+
+    // 2. Platform, Architecture, and CPU count
+    let plat: string = sys.platform();
+    if (plat == "") {
+        return 2;
+    }
+
+    let arch: string = sys.arch();
+    if (arch == "") {
+        return 3;
+    }
+
+    let cpus: int = sys.cpuCount();
+    if (cpus < 1) {
+        return 4;
+    }
+
+    // 3. Working directory and temporary directory
+    let cur: string = sys.cwd();
+    if (cur == "") {
+        return 5;
+    }
+
+    let tmp: string = sys.tempDir();
+    if (tmp == "") {
+        return 6;
+    }
+
+    // 4. Environment variables
+    let test_key: string = "KEET_CONFORMANCE_SYS_TEST";
+    let test_val: string = "keet_sys_value_789";
+
+    sys.unsetEnv(test_key);
+    if (sys.hasEnv(test_key)) {
+        return 7;
+    }
+
+    if (sys.getEnvOr(test_key, "default_val") != "default_val") {
+        return 8;
+    }
+
+    sys.setEnv(test_key, test_val);
+    if (!sys.hasEnv(test_key)) {
+        return 9;
+    }
+
+    let env_val: string | null = sys.getEnv(test_key);
+    if (env_val == null) {
+        return 10;
+    }
+
+    if (sys.getEnvOr(test_key, "fallback") != test_val) {
+        return 11;
+    }
+
+    sys.unsetEnv(test_key);
+    if (sys.hasEnv(test_key)) {
+        return 12;
+    }
+
+    // 5. Command execution and zonk error recovery
+    let echo_out: string = sys.execOutput("echo keet_sys_conform") zonk "";
+    if (echo_out == "") {
+        return 13;
+    }
+
+    let recovered: string = sys.execOutput("false || exit 1") zonk "fallback_recovery";
+    if (recovered != "fallback_recovery") {
+        return 14;
+    }
+
+    io.println("KeetScript sys conformance tests passed successfully!");
+    return 0;
+}

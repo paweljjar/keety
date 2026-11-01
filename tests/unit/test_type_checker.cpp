@@ -2984,3 +2984,127 @@ TEST_CASE("Standard fs module type checking and semantic validation", "[typechec
     }
 }
 
+TEST_CASE("Standard sys module type checking and semantic validation", "[typechecker][sys]") {
+    SECTION("Valid import sys and sys.* function calls") {
+        ParseResult res(
+            "import sys;\n"
+            "fn test_sys(): void {\n"
+            "    let a: array<string> = sys.args();\n"
+            "    let p: int = sys.pid();\n"
+            "    let env_val: string | null = sys.getEnv(\"KEY\");\n"
+            "    let env_or: string = sys.getEnvOr(\"KEY\", \"default\");\n"
+            "    let s_ok: bool = sys.setEnv(\"KEY\", \"val\");\n"
+            "    let u_ok: bool = sys.unsetEnv(\"KEY\");\n"
+            "    let h_ok: bool = sys.hasEnv(\"KEY\");\n"
+            "    let plat: string = sys.platform();\n"
+            "    let ar: string = sys.arch();\n"
+            "    let cpus: int = sys.cpuCount();\n"
+            "    let cur: string = sys.cwd();\n"
+            "    let cd_ok: bool = sys.chdir(\"/\");\n"
+            "    let home: string = sys.homeDir();\n"
+            "    let tmp: string = sys.tempDir();\n"
+            "    let ex_code: int = sys.exec(\"echo hi\");\n"
+            "    let ex_out: string = sys.execOutput(\"echo hi\");\n"
+            "    sys.exit(0);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Flow-based type narrowing with sys.getEnv return value") {
+        ParseResult res(
+            "import sys;\n"
+            "fn test_env_narrowing(): string {\n"
+            "    let env_val: string | null = sys.getEnv(\"PATH\");\n"
+            "    if (env_val != null) {\n"
+            "        let s: string = env_val;\n"
+            "        return s;\n"
+            "    }\n"
+            "    return \"none\";\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Reject legacy snake_case sys member with E3011") {
+        ParseResult res(
+            "import sys;\n"
+            "fn test_alias(): void {\n"
+            "    let r = sys.get_env(\"KEY\");\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::InvalidMemberAccess));
+    }
+
+    SECTION("Valid selective import from sys module") {
+        ParseResult res(
+            "from \"sys\" import getEnv, platform, cpuCount;\n"
+            "fn test_selective(): void {\n"
+            "    let env: string | null = getEnv(\"HOME\");\n"
+            "    let os: string = platform();\n"
+            "    let cpus: int = cpuCount();\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Valid sys call with zonk fallback expression") {
+        ParseResult res(
+            "import sys;\n"
+            "fn run_safe(): string {\n"
+            "    let data: string = sys.execOutput(\"cat non_existent\") zonk \"fallback\";\n"
+            "    return data;\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Reject invalid argument count to sys.exit with E3003") {
+        ParseResult res(
+            "import sys;\n"
+            "fn test_invalid(): void {\n"
+            "    sys.exit(1, 2);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Reject non-integer argument to sys.exit with E3003") {
+        ParseResult res(
+            "import sys;\n"
+            "fn test_invalid(): void {\n"
+            "    sys.exit(\"string_code\");\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Reject unknown member on sys with E3011") {
+        ParseResult res(
+            "import sys;\n"
+            "fn test_invalid(): void {\n"
+            "    let r = sys.nonExistentSysFunc();\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::InvalidMemberAccess));
+    }
+
+    SECTION("Reject importing non-exported symbol from sys with E1005") {
+        ParseResult res(
+            "from \"sys\" import unknownSysSymbol;\n"
+            "fn test_invalid(): void {}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::SymbolNotExported));
+    }
+}
+
+
