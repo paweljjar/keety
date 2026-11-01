@@ -2634,6 +2634,335 @@ TypePtr TypeChecker::checkMathDirectCall(const ast::IdentExpr* callee, const ast
     return Type::unknownType();
 }
 
+TypePtr TypeChecker::checkTimeMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!member || !call) return Type::unknownType();
+    const std::string& name = member->getMemberName();
+
+    auto checkArgCount = [&](size_t expected) -> bool {
+        if (call->getArgs().size() != expected) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function 'time." + name + "' expects " + std::to_string(expected) +
+                    (expected == 1 ? " argument" : " arguments") + ", but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "wrong argument count"));
+            }
+            hasErrors_ = true;
+            return false;
+        }
+        return true;
+    };
+
+    auto checkFloatArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::floatType());
+                if (aType && !aType->isFloat()) {
+                    if (aType->isInt()) {
+                        reportImplicitWidening(aType, Type::floatType(), arg.value->getSpan(), "time." + name + " " + argName + " argument");
+                    } else {
+                        reportTypeMismatch(Type::floatType(), aType, arg.value->getSpan(), "time." + name + " " + argName + " argument");
+                    }
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkIntArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::intType());
+                if (aType && !aType->isInt()) {
+                    if (aType->isFloat()) {
+                        reportImplicitWidening(aType, Type::intType(), arg.value->getSpan(), "time." + name + " " + argName + " argument");
+                    } else {
+                        reportTypeMismatch(Type::intType(), aType, arg.value->getSpan(), "time." + name + " " + argName + " argument");
+                    }
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkStringArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::stringType());
+                if (aType && !aType->isString()) {
+                    reportTypeMismatch(Type::stringType(), aType, arg.value->getSpan(), "time." + name + " " + argName + " argument");
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    // Constants called as functions are errors
+    if (name == "NS_PER_US" || name == "NS_PER_MS" || name == "NS_PER_SEC" ||
+        name == "US_PER_MS" || name == "US_PER_SEC" || name == "MS_PER_SEC" ||
+        name == "SEC_PER_MIN" || name == "SEC_PER_HOUR" || name == "SEC_PER_DAY") {
+        if (emitter_) {
+            emitter_->report(diag::Diagnostic::makeError(
+                diag::ErrorCode::TypeMismatch,
+                "cannot call time constant 'time." + name + "' as a function",
+                call->getSpan().start).withLabel(call->getSpan(), "constant called as function"));
+        }
+        hasErrors_ = true;
+        return Type::unknownType();
+    }
+
+    // 0-argument int returns
+    if (name == "now" || name == "nowSec" || name == "nowMs" || name == "nowUs" || name == "nowNs" ||
+        name == "monotonicMs" || name == "monotonicUs" || name == "monotonicNs") {
+        checkArgCount(0);
+        return Type::intType();
+    }
+
+    // 0-argument float returns
+    if (name == "monotonicSec") {
+        checkArgCount(0);
+        return Type::floatType();
+    }
+
+    // 1-argument int -> int
+    if (name == "elapsedMs") {
+        if (checkArgCount(1)) {
+            checkIntArg(0, "startMs");
+        }
+        return Type::intType();
+    }
+
+    // 1-argument int -> float
+    if (name == "elapsedSec") {
+        if (checkArgCount(1)) {
+            checkIntArg(0, "startNs");
+        }
+        return Type::floatType();
+    }
+
+    // sleep functions
+    if (name == "sleep" || name == "sleepMs") {
+        if (checkArgCount(1)) {
+            checkIntArg(0, "ms");
+        }
+        return Type::voidType();
+    }
+    if (name == "sleepUs") {
+        if (checkArgCount(1)) {
+            checkIntArg(0, "us");
+        }
+        return Type::voidType();
+    }
+    if (name == "sleepSec") {
+        if (checkArgCount(1)) {
+            checkFloatArg(0, "seconds");
+        }
+        return Type::voidType();
+    }
+
+    // formatIso8601
+    if (name == "formatIso8601") {
+        if (checkArgCount(1)) {
+            checkIntArg(0, "epochMs");
+        }
+        return Type::stringType();
+    }
+
+    // formatUtc / formatLocal
+    if (name == "formatUtc" || name == "formatLocal") {
+        if (checkArgCount(2)) {
+            checkIntArg(0, "epochMs");
+            checkStringArg(1, "pattern");
+        }
+        return Type::stringType();
+    }
+
+    // calendar extractors
+    if (name == "yearUtc" || name == "monthUtc" || name == "dayUtc" ||
+        name == "hourUtc" || name == "minuteUtc" || name == "secondUtc") {
+        if (checkArgCount(1)) {
+            checkIntArg(0, "epochMs");
+        }
+        return Type::intType();
+    }
+
+    if (emitter_) {
+        emitter_->report(diag::Diagnostic::makeError(
+            diag::ErrorCode::InvalidMemberAccess,
+            "module 'time' has no member named '" + name + "'",
+            member->getSpan().start).withLabel(member->getSpan(), "unknown member"));
+    }
+    hasErrors_ = true;
+    return Type::unknownType();
+}
+
+TypePtr TypeChecker::checkTimeDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!callee || !call) return Type::unknownType();
+    const std::string& name = callee->getName();
+
+    auto checkArgCount = [&](size_t expected) -> bool {
+        if (call->getArgs().size() != expected) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function '" + name + "' expects " + std::to_string(expected) +
+                    (expected == 1 ? " argument" : " arguments") + ", but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "wrong argument count"));
+            }
+            hasErrors_ = true;
+            return false;
+        }
+        return true;
+    };
+
+    auto checkFloatArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::floatType());
+                if (aType && !aType->isFloat()) {
+                    if (aType->isInt()) {
+                        reportImplicitWidening(aType, Type::floatType(), arg.value->getSpan(), name + " " + argName + " argument");
+                    } else {
+                        reportTypeMismatch(Type::floatType(), aType, arg.value->getSpan(), name + " " + argName + " argument");
+                    }
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkIntArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::intType());
+                if (aType && !aType->isInt()) {
+                    if (aType->isFloat()) {
+                        reportImplicitWidening(aType, Type::intType(), arg.value->getSpan(), name + " " + argName + " argument");
+                    } else {
+                        reportTypeMismatch(Type::intType(), aType, arg.value->getSpan(), name + " " + argName + " argument");
+                    }
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkStringArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::stringType());
+                if (aType && !aType->isString()) {
+                    reportTypeMismatch(Type::stringType(), aType, arg.value->getSpan(), name + " " + argName + " argument");
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    // Constants called as functions are errors
+    if (name == "NS_PER_US" || name == "NS_PER_MS" || name == "NS_PER_SEC" ||
+        name == "US_PER_MS" || name == "US_PER_SEC" || name == "MS_PER_SEC" ||
+        name == "SEC_PER_MIN" || name == "SEC_PER_HOUR" || name == "SEC_PER_DAY") {
+        if (emitter_) {
+            emitter_->report(diag::Diagnostic::makeError(
+                diag::ErrorCode::TypeMismatch,
+                "cannot call time constant '" + name + "' as a function",
+                call->getSpan().start).withLabel(call->getSpan(), "constant called as function"));
+        }
+        hasErrors_ = true;
+        return Type::unknownType();
+    }
+
+    // 0-argument int returns
+    if (name == "now" || name == "nowSec" || name == "nowMs" || name == "nowUs" || name == "nowNs" ||
+        name == "monotonicMs" || name == "monotonicUs" || name == "monotonicNs") {
+        checkArgCount(0);
+        return Type::intType();
+    }
+
+    // 0-argument float returns
+    if (name == "monotonicSec") {
+        checkArgCount(0);
+        return Type::floatType();
+    }
+
+    // 1-argument int -> int
+    if (name == "elapsedMs") {
+        if (checkArgCount(1)) {
+            checkIntArg(0, "startMs");
+        }
+        return Type::intType();
+    }
+
+    // 1-argument int -> float
+    if (name == "elapsedSec") {
+        if (checkArgCount(1)) {
+            checkIntArg(0, "startNs");
+        }
+        return Type::floatType();
+    }
+
+    // sleep functions
+    if (name == "sleep" || name == "sleepMs") {
+        if (checkArgCount(1)) {
+            checkIntArg(0, "ms");
+        }
+        return Type::voidType();
+    }
+    if (name == "sleepUs") {
+        if (checkArgCount(1)) {
+            checkIntArg(0, "us");
+        }
+        return Type::voidType();
+    }
+    if (name == "sleepSec") {
+        if (checkArgCount(1)) {
+            checkFloatArg(0, "seconds");
+        }
+        return Type::voidType();
+    }
+
+    // formatIso8601
+    if (name == "formatIso8601") {
+        if (checkArgCount(1)) {
+            checkIntArg(0, "epochMs");
+        }
+        return Type::stringType();
+    }
+
+    // formatUtc / formatLocal
+    if (name == "formatUtc" || name == "formatLocal") {
+        if (checkArgCount(2)) {
+            checkIntArg(0, "epochMs");
+            checkStringArg(1, "pattern");
+        }
+        return Type::stringType();
+    }
+
+    // calendar extractors
+    if (name == "yearUtc" || name == "monthUtc" || name == "dayUtc" ||
+        name == "hourUtc" || name == "minuteUtc" || name == "secondUtc") {
+        if (checkArgCount(1)) {
+            checkIntArg(0, "epochMs");
+        }
+        return Type::intType();
+    }
+
+    return Type::unknownType();
+}
+
 bool TypeChecker::checkZeroCoercion(const parser::ModuleAST& module, sema::Scope* rootScope) {
     return checkTypes(module, rootScope);
 }
@@ -2792,6 +3121,44 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                                 emitter_->report(diag::Diagnostic::makeError(
                                     diag::ErrorCode::SymbolNotExported,
                                     "symbol '" + symItem.originalName + "' is not exported by module 'math'",
+                                    symItem.span.start).withLabel(symItem.span, "symbol not exported"));
+                            }
+                            hasErrors_ = true;
+                        }
+                    }
+                }
+            } else if (modPath == "time" || modPath == "std.time" || modPath == "keet.time") {
+                if (importDecl->getSymbols().empty()) {
+                    std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "time";
+                    if (!targetScope->lookupCurrent(boundName)) {
+                        auto modSym = std::make_shared<sema::Symbol>(boundName, sema::SymbolKind::Module, importDecl->getSpan());
+                        modSym->setExported(importDecl->isReExported());
+                        auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, modSym, emitter_);
+                        if (!res.success) hasErrors_ = true;
+                    }
+                } else {
+                    auto timeScope = sema::createStdlibModuleScope("time");
+                    for (const auto& symItem : importDecl->getSymbols()) {
+                        auto exportedSym = timeScope->lookupCurrent(symItem.originalName);
+                        if (exportedSym) {
+                            std::string importAsName = symItem.getEffectiveName();
+                            if (!targetScope->lookupCurrent(importAsName)) {
+                                auto importedSym = std::make_shared<sema::Symbol>(
+                                    importAsName, exportedSym->getKind(), symItem.span
+                                );
+                                importedSym->setExported(importDecl->isReExported());
+                                importedSym->setIsType(exportedSym->isType());
+                                if (exportedSym->isConstant()) {
+                                    importedSym->setConst(true);
+                                }
+                                auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, importedSym, emitter_);
+                                if (!res.success) hasErrors_ = true;
+                            }
+                        } else {
+                            if (emitter_) {
+                                emitter_->report(diag::Diagnostic::makeError(
+                                    diag::ErrorCode::SymbolNotExported,
+                                    "symbol '" + symItem.originalName + "' is not exported by module 'time'",
                                     symItem.span.start).withLabel(symItem.span, "symbol not exported"));
                             }
                             hasErrors_ = true;
@@ -3523,6 +3890,11 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 if (cName == "PI" || cName == "E" || cName == "TAU" || cName == "INF" || cName == "NAN") {
                     return Type::floatType();
                 }
+                if (cName == "NS_PER_US" || cName == "NS_PER_MS" || cName == "NS_PER_SEC" ||
+                    cName == "US_PER_MS" || cName == "US_PER_SEC" || cName == "MS_PER_SEC" ||
+                    cName == "SEC_PER_MIN" || cName == "SEC_PER_HOUR" || cName == "SEC_PER_DAY") {
+                    return Type::intType();
+                }
             }
         }
         return Type::unknownType();
@@ -3795,6 +4167,19 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     }
                     return checkMathMemberCall(member, call, scope);
                 }
+                if (objIdent->getName() == "time" || (sym && sym->isModule() && sym->getName() == "time")) {
+                    if (!sym) {
+                        if (emitter_) {
+                            emitter_->report(diag::Diagnostic::makeError(
+                                diag::ErrorCode::UndeclaredIdentifier,
+                                "undeclared identifier '" + objIdent->getName() + "'",
+                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                        }
+                        hasErrors_ = true;
+                        return Type::unknownType();
+                    }
+                    return checkTimeMemberCall(member, call, scope);
+                }
             }
 
             auto objType = member->getObject() ? inferType(*member->getObject(), scope) : Type::unknownType();
@@ -4011,6 +4396,16 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     name == "isFinite" || name == "lerp" || name == "fmod" || name == "random" ||
                     name == "randomInt" || name == "randomFloat" || name == "seed") {
                     return checkMathDirectCall(calleeIdent, call, scope);
+                }
+                if (name == "now" || name == "nowSec" || name == "nowMs" || name == "nowUs" ||
+                    name == "nowNs" || name == "monotonicMs" || name == "monotonicUs" ||
+                    name == "monotonicNs" || name == "monotonicSec" || name == "elapsedMs" ||
+                    name == "elapsedSec" || name == "sleep" || name == "sleepMs" ||
+                    name == "sleepUs" || name == "sleepSec" || name == "formatIso8601" ||
+                    name == "formatUtc" || name == "formatLocal" || name == "yearUtc" ||
+                    name == "monthUtc" || name == "dayUtc" || name == "hourUtc" ||
+                    name == "minuteUtc" || name == "secondUtc") {
+                    return checkTimeDirectCall(calleeIdent, call, scope);
                 }
             }
             const ast::FnDecl* fnDecl = nullptr;
@@ -4482,6 +4877,61 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     emitter_->report(diag::Diagnostic::makeError(
                         diag::ErrorCode::InvalidMemberAccess,
                         "module 'math' has no member '" + member->getMemberName() + "'",
+                        member->getSpan().start).withLabel(member->getSpan(), "unknown module member"));
+                }
+                hasErrors_ = true;
+                return Type::unknownType();
+            }
+            if (objIdent->getName() == "time" || (sym && sym->isModule() && sym->getName() == "time")) {
+                if (!sym) {
+                    if (emitter_) {
+                        emitter_->report(diag::Diagnostic::makeError(
+                            diag::ErrorCode::UndeclaredIdentifier,
+                            "undeclared identifier '" + objIdent->getName() + "'",
+                            objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier"));
+                    }
+                    hasErrors_ = true;
+                    return Type::unknownType();
+                }
+                const std::string& mName = member->getMemberName();
+                if (mName == "NS_PER_US" || mName == "NS_PER_MS" || mName == "NS_PER_SEC" ||
+                    mName == "US_PER_MS" || mName == "US_PER_SEC" || mName == "MS_PER_SEC" ||
+                    mName == "SEC_PER_MIN" || mName == "SEC_PER_HOUR" || mName == "SEC_PER_DAY") {
+                    return Type::intType();
+                }
+                if (mName == "now" || mName == "nowSec" || mName == "nowMs" || mName == "nowUs" || mName == "nowNs" ||
+                    mName == "monotonicMs" || mName == "monotonicUs" || mName == "monotonicNs") {
+                    return Type::function({}, Type::intType(), false);
+                }
+                if (mName == "monotonicSec") {
+                    return Type::function({}, Type::floatType(), false);
+                }
+                if (mName == "elapsedMs") {
+                    return Type::function({Type::intType()}, Type::intType(), false);
+                }
+                if (mName == "elapsedSec") {
+                    return Type::function({Type::intType()}, Type::floatType(), false);
+                }
+                if (mName == "sleep" || mName == "sleepMs" || mName == "sleepUs") {
+                    return Type::function({Type::intType()}, Type::voidType(), false);
+                }
+                if (mName == "sleepSec") {
+                    return Type::function({Type::floatType()}, Type::voidType(), false);
+                }
+                if (mName == "formatIso8601") {
+                    return Type::function({Type::intType()}, Type::stringType(), false);
+                }
+                if (mName == "formatUtc" || mName == "formatLocal") {
+                    return Type::function({Type::intType(), Type::stringType()}, Type::stringType(), false);
+                }
+                if (mName == "yearUtc" || mName == "monthUtc" || mName == "dayUtc" ||
+                    mName == "hourUtc" || mName == "minuteUtc" || mName == "secondUtc") {
+                    return Type::function({Type::intType()}, Type::intType(), false);
+                }
+                if (emitter_) {
+                    emitter_->report(diag::Diagnostic::makeError(
+                        diag::ErrorCode::InvalidMemberAccess,
+                        "module 'time' has no member '" + member->getMemberName() + "'",
                         member->getSpan().start).withLabel(member->getSpan(), "unknown module member"));
                 }
                 hasErrors_ = true;

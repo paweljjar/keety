@@ -3226,5 +3226,129 @@ TEST_CASE("Standard math module type checking and semantic validation", "[typech
     }
 }
 
+TEST_CASE("Standard time module type checking and semantic validation", "[typechecker][time]") {
+    SECTION("Valid time module member calls and constants") {
+        ParseResult res(
+            "import time;\n"
+            "fn run(): int {\n"
+            "    let c: int = time.MS_PER_SEC;\n"
+            "    let t: int = time.now();\n"
+            "    let ms: int = time.nowMs();\n"
+            "    let sec: int = time.nowSec();\n"
+            "    let mono: int = time.monotonicMs();\n"
+            "    let mono_sec: float = time.monotonicSec();\n"
+            "    let el_ms: int = time.elapsedMs(mono);\n"
+            "    let el_sec: float = time.elapsedSec(time.monotonicNs());\n"
+            "    time.sleep(10);\n"
+            "    time.sleepMs(5);\n"
+            "    time.sleepUs(100);\n"
+            "    time.sleepSec(0.01);\n"
+            "    let iso: string = time.formatIso8601(t);\n"
+            "    let utc_s: string = time.formatUtc(t, \"%Y-%m-%d\");\n"
+            "    let loc_s: string = time.formatLocal(t, \"%H:%M\");\n"
+            "    let yr: int = time.yearUtc(t);\n"
+            "    let mo: int = time.monthUtc(t);\n"
+            "    let dy: int = time.dayUtc(t);\n"
+            "    let hr: int = time.hourUtc(t);\n"
+            "    let mi: int = time.minuteUtc(t);\n"
+            "    let se: int = time.secondUtc(t);\n"
+            "    return c + t + ms + sec + mono + el_ms + yr + mo + dy + hr + mi + se;\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Valid selective import and direct calls") {
+        ParseResult res(
+            "from \"time\" import nowMs, sleepMs, MS_PER_SEC, monotonicSec;\n"
+            "fn run(): float {\n"
+            "    let c: int = MS_PER_SEC;\n"
+            "    let t: int = nowMs();\n"
+            "    sleepMs(5);\n"
+            "    let m: float = monotonicSec();\n"
+            "    return m;\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Valid time call with zonk fallback expression") {
+        ParseResult res(
+            "import time;\n"
+            "fn run_safe(): void {\n"
+            "    time.sleep(-1) zonk () {};\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Strict Zero-Coercion: reject float passed to int-only sleep with E3002") {
+        ParseResult res(
+            "import time;\n"
+            "fn test_coercion(): void {\n"
+            "    time.sleep(1.5);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ImplicitTypeWidening));
+    }
+
+    SECTION("Strict Zero-Coercion: reject int passed to float-only sleepSec with E3002") {
+        ParseResult res(
+            "import time;\n"
+            "fn test_coercion(): void {\n"
+            "    time.sleepSec(1);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ImplicitTypeWidening));
+    }
+
+    SECTION("Reject invalid argument count with E3003") {
+        ParseResult res(
+            "import time;\n"
+            "fn test_invalid(): void {\n"
+            "    time.now(123);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Reject unknown member on time with E3011") {
+        ParseResult res(
+            "import time;\n"
+            "fn test_invalid(): void {\n"
+            "    time.nonExistentTimeMethod();\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::InvalidMemberAccess));
+    }
+
+    SECTION("Reject legacy snake_case on time with E3011") {
+        ParseResult res(
+            "import time;\n"
+            "fn test_invalid(): void {\n"
+            "    time.now_ms();\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::InvalidMemberAccess));
+    }
+
+    SECTION("Reject importing non-exported symbol from time with E1005") {
+        ParseResult res(
+            "from \"time\" import unknownTimeSymbol;\n"
+            "fn test_invalid(): void {}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::SymbolNotExported));
+    }
+}
+
 
 

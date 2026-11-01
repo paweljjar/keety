@@ -339,4 +339,37 @@ TEST_CASE("Fallible math.clamp in zonk expression lowers to CFG with landing pad
     CHECK(catch_bb->is_landing_pad());
 }
 
+TEST_CASE("Fallible time.sleep in zonk statement lowers to CFG with landing pads", "[zonk_lowering][time]") {
+    std::string src = R"(
+        import time;
+
+        fn safeSleep(ms: int): void {
+            time.sleep(ms) zonk () {};
+        }
+    )";
+    auto ast = parse_source(src, "time_zonk_test");
+    AstLowerer lowerer;
+    auto mod = lowerer.lower_module(ast);
+
+    REQUIRE(mod != nullptr);
+    Function* fn = mod->find_function("safeSleep");
+    REQUIRE(fn != nullptr);
+
+    std::string err;
+    CHECK(fn->validate_cfg(err));
+    CHECK(err.empty());
+
+    BasicBlock* try_bb = fn->find_basic_block("zonk.try.1");
+    BasicBlock* catch_bb = fn->find_basic_block("zonk.catch.2");
+    BasicBlock* end_bb = fn->find_basic_block("zonk.end.3");
+
+    REQUIRE(try_bb != nullptr);
+    REQUIRE(catch_bb != nullptr);
+    REQUIRE(end_bb != nullptr);
+
+    CHECK(try_bb->has_landing_pad());
+    CHECK(try_bb->get_landing_pad() == catch_bb);
+    CHECK(catch_bb->is_landing_pad());
+}
+
 

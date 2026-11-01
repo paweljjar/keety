@@ -551,6 +551,7 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
     module_scopes["<stdlib>/fs"] = sema::createStdlibModuleScope("fs", universe);
     module_scopes["<stdlib>/sys"] = sema::createStdlibModuleScope("sys", universe);
     module_scopes["<stdlib>/math"] = sema::createStdlibModuleScope("math", universe);
+    module_scopes["<stdlib>/time"] = sema::createStdlibModuleScope("time", universe);
 
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
@@ -575,6 +576,9 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
             } else if (edge.toCanonicalPath == "<stdlib>/math" || edge.rawImportPath == "math") {
                 auto mathModSym = std::make_shared<sema::Symbol>("math", sema::SymbolKind::Module, edge.importSpan);
                 module_scope->define(mathModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/time" || edge.rawImportPath == "time") {
+                auto timeModSym = std::make_shared<sema::Symbol>("time", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(timeModSym, false);
             }
             if (edge.toCanonicalPath.rfind("<stdlib>/", 0) != 0) {
                 auto it = module_scopes.find(edge.toCanonicalPath);
@@ -692,6 +696,7 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
     module_scopes["<stdlib>/fs"] = sema::createStdlibModuleScope("fs", universe);
     module_scopes["<stdlib>/sys"] = sema::createStdlibModuleScope("sys", universe);
     module_scopes["<stdlib>/math"] = sema::createStdlibModuleScope("math", universe);
+    module_scopes["<stdlib>/time"] = sema::createStdlibModuleScope("time", universe);
 
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
@@ -716,6 +721,9 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
             } else if (edge.toCanonicalPath == "<stdlib>/math" || edge.rawImportPath == "math") {
                 auto mathModSym = std::make_shared<sema::Symbol>("math", sema::SymbolKind::Module, edge.importSpan);
                 module_scope->define(mathModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/time" || edge.rawImportPath == "time") {
+                auto timeModSym = std::make_shared<sema::Symbol>("time", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(timeModSym, false);
             }
             if (edge.toCanonicalPath.rfind("<stdlib>/", 0) != 0) {
                 auto it = module_scopes.find(edge.toCanonicalPath);
@@ -911,6 +919,7 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     module_scopes["<stdlib>/fs"] = sema::createStdlibModuleScope("fs", universe);
     module_scopes["<stdlib>/sys"] = sema::createStdlibModuleScope("sys", universe);
     module_scopes["<stdlib>/math"] = sema::createStdlibModuleScope("math", universe);
+    module_scopes["<stdlib>/time"] = sema::createStdlibModuleScope("time", universe);
 
     // 1. Semantic and type checking across all modules
     for (const auto* node : ordered_nodes) {
@@ -932,6 +941,9 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
             } else if (edge.toCanonicalPath == "<stdlib>/math" || edge.rawImportPath == "math") {
                 auto mathModSym = std::make_shared<sema::Symbol>("math", sema::SymbolKind::Module, edge.importSpan);
                 module_scope->define(mathModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/time" || edge.rawImportPath == "time") {
+                auto timeModSym = std::make_shared<sema::Symbol>("time", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(timeModSym, false);
             }
             if (edge.toCanonicalPath.rfind("<stdlib>/", 0) != 0) {
                 auto it = module_scopes.find(edge.toCanonicalPath);

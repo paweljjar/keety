@@ -53,4 +53,7 @@ void populateSysModuleScope(Scope& sysScope);
 /// Populates an existing Scope with all exported symbols of the 'math' standard library module.
 void populateMathModuleScope(Scope& mathScope);
 
+/// Populates an existing Scope with all exported symbols of the 'time' standard library module.
+void populateTimeModuleScope(Scope& timeScope);
+
 } // namespace keety::sema

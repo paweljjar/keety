@@ -2494,7 +2494,7 @@ While the [universe block](#predeclared-identifiers) remains intentionally minim
 | `fs` | File system and path manipulation (fallible operations integrate with `zonk`): `readText(path: string): string`, `readLines(path: string): array<string>`, `writeText(path: string, content: string): bool`, `appendText(path: string, content: string): bool`, `exists(path: string): bool`, `isFile(path: string): bool`, `isDir(path: string): bool`, `fileSize(path: string): int`, `mkdir(path: string): bool`, `remove(path: string): bool`, `removeAll(path: string): int`, `copy(src: string, dst: string): bool`, `rename(src: string, dst: string): bool`, `listDir(path: string): array<string>`, `cwd(): string`, `join(base: string, child: string): string`, `fileName(path: string): string`, `extension(path: string): string`, `parentDir(path: string): string`. |
 | `sys` | Process environment and lifecycle control: `args: array<string>`, `exit(code: int): void`, `getEnv(key: string): string | null`, `setEnv(key: string, val: string): void`, `platform(): string`, `cwd(): string`. |
 | `math` | IEEE 754 floating-point and integer math utilities: `PI: float`, `E: float`, `sin(x: float): float`, `cos(x: float): float`, `tan(x: float): float`, `sqrt(x: float): float`, `pow(base: float, exp: float): float`, `log(x: float): float`, `min<T: int | float>(a: T, b: T): T`, `max<T: int | float>(a: T, b: T): T`. |
-| `time` | Monotonic and wall-clock time utilities: `now(): Timestamp`, `monotonicMs(): int`, `sleep(ms: int): void`, `Duration` class, `Timestamp` class. |
+| `time` | Monotonic and wall-clock time utilities: `now(): int`, `nowSec(): int`, `nowMs(): int`, `nowUs(): int`, `nowNs(): int`, `monotonicMs(): int`, `monotonicUs(): int`, `monotonicNs(): int`, `monotonicSec(): float`, `elapsedMs(startMs: int): int`, `elapsedSec(startNs: int): float`, `sleep(ms: int): void`, `sleepMs(ms: int): void`, `sleepUs(us: int): void`, `sleepSec(seconds: float): void`, `formatIso8601(epochMs: int): string`, `formatUtc(epochMs: int, pattern: string): string`, `formatLocal(epochMs: int, pattern: string): string`, `yearUtc(epochMs: int): int`, `monthUtc`/`dayUtc`/`hourUtc`/`minuteUtc`/`secondUtc`, and integer unit conversion constants (`NS_PER_MS`, `MS_PER_SEC`, `SEC_PER_DAY`, etc.). |
 
 ### Standard Library: `io` (Console and Stream I/O)
 
@@ -2752,6 +2752,85 @@ fn main(): void {
     // Fallible clamp domain error recovered with zonk fallback
     let safeVal: float = clamp(5.0, 10.0, 0.0) zonk 0.0;
     io.println("sin(45 deg):", s, "die roll:", roll, "clamped:", safeVal);
+}
+```
+
+### Standard Library: `time` (Wall-Clock, Monotonic Timers, Sleep & Formatting)
+
+The built-in `time` standard library module provides high-resolution monotonic and wall-clock time measurement, thread sleeping with zonk-safe parameter validation, ISO-8601 / strftime calendar formatting, and UTC date/time component extraction. It is imported via `import time;` or selective imports (`from "time" import nowMs, monotonicMs, sleepMs, formatIso8601;`).
+
+#### Module Constants & Declarations
+
+```keet
+// Integer Time Unit Conversion Constants
+define NS_PER_US: int = 1000;
+define NS_PER_MS: int = 1000000;
+define NS_PER_SEC: int = 1000000000;
+define US_PER_MS: int = 1000;
+define US_PER_SEC: int = 1000000;
+define MS_PER_SEC: int = 1000;
+define SEC_PER_MIN: int = 60;
+define SEC_PER_HOUR: int = 3600;
+define SEC_PER_DAY: int = 86400;
+
+// Wall-Clock Time Queries (Unix Epoch)
+fn now(): int;
+fn nowSec(): int;
+fn nowMs(): int;
+fn nowUs(): int;
+fn nowNs(): int;
+
+// High-Resolution Monotonic Timers
+fn monotonicMs(): int;
+fn monotonicUs(): int;
+fn monotonicNs(): int;
+fn monotonicSec(): float;
+fn elapsedMs(startMs: int): int;
+fn elapsedSec(startNs: int): float;
+
+// Sleep Primitives (Fallible - negative or non-finite arguments throw TimeError)
+fn sleep(ms: int): void;
+fn sleepMs(ms: int): void;
+fn sleepUs(us: int): void;
+fn sleepSec(seconds: float): void;
+
+// Thread-Safe Calendar Formatting
+fn formatIso8601(epochMs: int): string;
+fn formatUtc(epochMs: int, pattern: string): string;
+fn formatLocal(epochMs: int, pattern: string): string;
+
+// UTC Calendar Component Extractors
+fn yearUtc(epochMs: int): int;
+fn monthUtc(epochMs: int): int;
+fn dayUtc(epochMs: int): int;
+fn hourUtc(epochMs: int): int;
+fn minuteUtc(epochMs: int): int;
+fn secondUtc(epochMs: int): int;
+```
+
+#### Example Usage with Error Recovery (`zonk`)
+
+```keet
+import time;
+import io;
+from "time" import nowMs, monotonicNs, elapsedSec, sleepMs, formatIso8601;
+
+fn main(): void {
+    let t0: int = monotonicNs();
+    let wallMs: int = nowMs();
+    let iso: string = formatIso8601(wallMs);
+    io.println("Current ISO timestamp:", iso);
+
+    // Sleep for 10 milliseconds
+    sleepMs(10);
+
+    let sec: float = elapsedSec(t0);
+    io.println("Elapsed seconds:", sec);
+
+    // Fallible sleep domain validation recovered with zonk
+    time.sleepMs(-5) zonk (err) {
+        io.println("Caught invalid sleep duration safely:", err.message);
+    };
 }
 ```
 

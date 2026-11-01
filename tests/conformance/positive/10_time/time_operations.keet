@@ -1,0 +1,150 @@
+import time;
+import io;
+from "time" import nowMs, sleepMs, MS_PER_SEC, formatIso8601;
+
+fn main(): int {
+    io.println("Running KeetScript time conformance tests...");
+
+    // 1. Constants
+    if (time.NS_PER_US != 1000) {
+        return 1;
+    }
+    if (time.NS_PER_MS != 1000000) {
+        return 2;
+    }
+    if (time.NS_PER_SEC != 1000000000) {
+        return 3;
+    }
+    if (time.US_PER_MS != 1000) {
+        return 4;
+    }
+    if (time.US_PER_SEC != 1000000) {
+        return 5;
+    }
+    if (MS_PER_SEC != 1000) {
+        return 6;
+    }
+    if (time.SEC_PER_MIN != 60) {
+        return 7;
+    }
+    if (time.SEC_PER_HOUR != 3600) {
+        return 8;
+    }
+    if (time.SEC_PER_DAY != 86400) {
+        return 9;
+    }
+
+    // 2. Wall-clock queries
+    let t0: int = time.now();
+    let ms: int = nowMs();
+    let sec: int = time.nowSec();
+    let us: int = time.nowUs();
+    let ns: int = time.nowNs();
+
+    if (t0 < 1700000000000) {
+        return 10;
+    }
+    if (ms < t0) {
+        return 11;
+    }
+    if (sec < 1700000000) {
+        return 12;
+    }
+    if (us < ms * 1000) {
+        return 13;
+    }
+    if (ns < us * 1000) {
+        return 14;
+    }
+
+    // 3. Monotonic high-resolution clock and elapsed timers
+    let m0: int = time.monotonicMs();
+    let n0: int = time.monotonicNs();
+    let s0: float = time.monotonicSec();
+
+    if (m0 < 0 || n0 < 0 || s0 < 0.0) {
+        return 15;
+    }
+
+    // Sleep for 5 milliseconds
+    sleepMs(5);
+
+    let el_ms: int = time.elapsedMs(m0);
+    if (el_ms < 4) {
+        return 16;
+    }
+    let el_sec: float = time.elapsedSec(n0);
+    if (el_sec < 0.004) {
+        return 17;
+    }
+
+    // Sleep microseconds and seconds
+    time.sleepUs(500);
+    time.sleepSec(0.002);
+
+    // 4. Zonk error recovery on invalid negative sleep duration
+    let zonk_recovered: bool = false;
+    time.sleep(-10) zonk (err) {
+        zonk_recovered = true;
+    };
+    if (!zonk_recovered) {
+        return 18;
+    }
+
+    // 5. Epoch 0 formatting and calendar components
+    let iso0: string = formatIso8601(0);
+    if (iso0 != "1970-01-01T00:00:00Z") {
+        return 19;
+    }
+    if (time.yearUtc(0) != 1970) {
+        return 20;
+    }
+    if (time.monthUtc(0) != 1) {
+        return 21;
+    }
+    if (time.dayUtc(0) != 1) {
+        return 22;
+    }
+    if (time.hourUtc(0) != 0) {
+        return 23;
+    }
+    if (time.minuteUtc(0) != 0) {
+        return 24;
+    }
+    if (time.secondUtc(0) != 0) {
+        return 25;
+    }
+
+    // 6. Known timestamp 1700000000000 ms (2023-11-14T22:13:20Z)
+    let ts: int = 1700000000000;
+    let iso_ts: string = time.formatIso8601(ts);
+    if (iso_ts != "2023-11-14T22:13:20Z") {
+        return 26;
+    }
+    if (time.yearUtc(ts) != 2023) {
+        return 27;
+    }
+    if (time.monthUtc(ts) != 11) {
+        return 28;
+    }
+    if (time.dayUtc(ts) != 14) {
+        return 29;
+    }
+    if (time.hourUtc(ts) != 22) {
+        return 30;
+    }
+    if (time.minuteUtc(ts) != 13) {
+        return 31;
+    }
+    if (time.secondUtc(ts) != 20) {
+        return 32;
+    }
+
+    let date_str: string = time.formatUtc(ts, "%Y-%m-%d");
+    if (date_str != "2023-11-14") {
+        return 33;
+    }
+
+    io.println("All KeetScript time conformance tests passed successfully!");
+    return 0;
+}

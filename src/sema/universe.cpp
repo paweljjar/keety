@@ -102,7 +102,8 @@ bool isStdlibModule(std::string_view name) noexcept {
     return name == "io" || name == "std.io" || name == "keet.io" ||
            name == "fs" || name == "std.fs" || name == "keet.fs" ||
            name == "sys" || name == "std.sys" || name == "keet.sys" ||
-           name == "math" || name == "std.math" || name == "keet.math";
+           name == "math" || name == "std.math" || name == "keet.math" ||
+           name == "time" || name == "std.time" || name == "keet.time";
 }
 
 void populateIoModuleScope(Scope& ioScope) {
@@ -291,6 +292,67 @@ void populateMathModuleScope(Scope& mathScope) {
     makeFn("seed");
 }
 
+void populateTimeModuleScope(Scope& timeScope) {
+    diag::SourceSpan span{};
+
+    auto makeConst = [&](const char* name) {
+        auto sym = std::make_shared<Symbol>(name, SymbolKind::Constant, span);
+        sym->setExported(true);
+        sym->setConst(true);
+        timeScope.define(sym, false);
+    };
+
+    auto makeFn = [&](const char* name) {
+        auto sym = std::make_shared<Symbol>(name, SymbolKind::Function, span);
+        sym->setExported(true);
+        sym->setConst(true);
+        timeScope.define(sym, false);
+    };
+
+    // Time Unit Conversion Constants
+    makeConst("NS_PER_US");
+    makeConst("NS_PER_MS");
+    makeConst("NS_PER_SEC");
+    makeConst("US_PER_MS");
+    makeConst("US_PER_SEC");
+    makeConst("MS_PER_SEC");
+    makeConst("SEC_PER_MIN");
+    makeConst("SEC_PER_HOUR");
+    makeConst("SEC_PER_DAY");
+
+    // Wall-Clock Time Queries
+    makeFn("now");
+    makeFn("nowSec");
+    makeFn("nowMs");
+    makeFn("nowUs");
+    makeFn("nowNs");
+
+    // Monotonic High-Resolution Timers
+    makeFn("monotonicMs");
+    makeFn("monotonicUs");
+    makeFn("monotonicNs");
+    makeFn("monotonicSec");
+    makeFn("elapsedMs");
+    makeFn("elapsedSec");
+
+    // Thread Sleep Operations
+    makeFn("sleep");
+    makeFn("sleepMs");
+    makeFn("sleepUs");
+    makeFn("sleepSec");
+
+    // Timestamp Formatting & Calendar Extraction
+    makeFn("formatIso8601");
+    makeFn("formatUtc");
+    makeFn("formatLocal");
+    makeFn("yearUtc");
+    makeFn("monthUtc");
+    makeFn("dayUtc");
+    makeFn("hourUtc");
+    makeFn("minuteUtc");
+    makeFn("secondUtc");
+}
+
 std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, const std::shared_ptr<Scope>& universe) {
     auto scope = std::make_shared<Scope>(ScopeKind::Module, universe);
     if (moduleName == "io" || moduleName == "std.io" || moduleName == "keet.io") {
@@ -301,6 +363,8 @@ std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, cons
         populateSysModuleScope(*scope);
     } else if (moduleName == "math" || moduleName == "std.math" || moduleName == "keet.math") {
         populateMathModuleScope(*scope);
+    } else if (moduleName == "time" || moduleName == "std.time" || moduleName == "keet.time") {
+        populateTimeModuleScope(*scope);
     }
     return scope;
 }

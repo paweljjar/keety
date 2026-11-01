@@ -288,6 +288,11 @@ keety test [--conformance | --benchmarks | --all] [--filter <pattern>]
   * **Objective:** Validate standard `math` module imports (`import math;`, `from "math" import ...`), constants (`PI`, `E`, `TAU`, `INF`, `NAN`), basic and rounding operations (`absInt`, `minInt`, `maxInt`, `clampInt`, `floor`, `ceil`, `round`, `trunc`), exponential and power functions (`sqrt`, `pow`, `hypot`, `lerp`), trigonometric and angle conversions (`sin`, `cos`, `toRadians`, `toDegrees`), pseudo-random number generator and deterministic seed reproducibility (`seed`, `random`, `randomInt`, `randomFloat`), and `zonk` fallback recovery on domain bounds errors.
   * **Assertion:** Exits cleanly with status code `0`.
 
+### Group 10: Standard Time Module & Timing Operations
+* **Test 10.1 (`time_operations.keet`):**
+  * **Objective:** Validate standard `time` module imports (`import time;`, `from "time" import ...`), integer unit conversion constants (`NS_PER_US`, `NS_PER_MS`, `NS_PER_SEC`, `US_PER_MS`, `US_PER_SEC`, `MS_PER_SEC`, `SEC_PER_MIN`, `SEC_PER_HOUR`, `SEC_PER_DAY`), wall-clock timestamps (`now`, `nowSec`, `nowMs`, `nowUs`, `nowNs`), monotonic timers (`monotonicMs`, `monotonicUs`, `monotonicNs`, `monotonicSec`, `elapsedMs`, `elapsedSec`), thread sleeping (`sleep`, `sleepMs`, `sleepUs`, `sleepSec`), calendar formatting (`formatIso8601`, `formatUtc`, `formatLocal`), UTC component extraction (`yearUtc`, `monthUtc`, `dayUtc`, `hourUtc`, `minuteUtc`, `secondUtc`), and `zonk` error recovery on invalid sleep durations.
+  * **Assertion:** Exits cleanly with status code `0`.
+
 ---
 
 ## 3. Negative Compiler Diagnostic Test Cases (Compile-Time Rejection)
@@ -307,6 +312,7 @@ keety test [--conformance | --benchmarks | --all] [--filter <pattern>]
 | `neg_fs_type_mismatch.keet` | `E3003` | Passing invalid argument type to standard `fs` function or member: `fs.readText(42)`. |
 | `neg_sys_type_mismatch.keet` | `E3003` | Passing invalid argument type to standard `sys` function or member: `sys.exit("invalid")`. |
 | `neg_math_type_mismatch.keet`| `E3002` | Passing integer to float-only standard `math` function: `math.sin(1)`. |
+| `neg_time_type_mismatch.keet`| `E3002` | Passing float to integer time sleep function: `time.sleepMs(1.5)`. |
 
 ---
 

@@ -63,6 +63,18 @@ std::unique_ptr<Module> AstLowerer::lower_module(const parser::ModuleAST& module
                         imported_math_symbols_.insert(sym_name);
                     }
                 }
+            } else if (p == "time" || p == "std.time" || p == "keet.time") {
+                has_time_import_ = true;
+                for (const auto& s : imp->getSymbols()) {
+                    const std::string& sym_name = s.getEffectiveName();
+                    if (sym_name == "NS_PER_US" || sym_name == "NS_PER_MS" || sym_name == "NS_PER_SEC" ||
+                        sym_name == "US_PER_MS" || sym_name == "US_PER_SEC" || sym_name == "MS_PER_SEC" ||
+                        sym_name == "SEC_PER_MIN" || sym_name == "SEC_PER_HOUR" || sym_name == "SEC_PER_DAY") {
+                        imported_time_constants_.insert(sym_name);
+                    } else {
+                        imported_time_symbols_.insert(sym_name);
+                    }
+                }
             }
         } else if (const auto* var_decl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
             typechecker::TypePtr type = typechecker::Type::fromAnnotation(var_decl->getType());
@@ -641,6 +653,9 @@ Operand AstLowerer::lower_ident_expr(const ast::IdentExpr& expr) {
     if (imported_math_constants_.count(expr.getName())) {
         return Operand::create_var("::keet::math::" + expr.getName(), typechecker::Type::floatType());
     }
+    if (imported_time_constants_.count(expr.getName())) {
+        return Operand::create_var("::keet::time::" + expr.getName(), typechecker::Type::intType());
+    }
     return Operand::create_var(expr.getName(), nullptr);
 }
 
@@ -819,6 +834,12 @@ Operand AstLowerer::lower_call_expr(const ast::CallExpr& expr) {
                 emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
                 return dest;
             }
+            if (obj_id->getName() == "time") {
+                const std::string& m_name = member->getMemberName();
+                std::string callee_name = "@keet.time." + m_name;
+                emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
+                return dest;
+            }
         }
         Operand receiver = lower_expression(*member->getObject());
         emit(std::make_unique<MethodCallInst>(dest, receiver, member->getMemberName(), std::move(args)));
@@ -893,6 +914,19 @@ Operand AstLowerer::lower_call_expr(const ast::CallExpr& expr) {
             emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
             return dest;
         }
+        if (has_time_import_ && (imported_time_symbols_.count(name) ||
+            name == "now" || name == "nowSec" || name == "nowMs" || name == "nowUs" ||
+            name == "nowNs" || name == "monotonicMs" || name == "monotonicUs" ||
+            name == "monotonicNs" || name == "monotonicSec" || name == "elapsedMs" ||
+            name == "elapsedSec" || name == "sleep" || name == "sleepMs" ||
+            name == "sleepUs" || name == "sleepSec" || name == "formatIso8601" ||
+            name == "formatUtc" || name == "formatLocal" || name == "yearUtc" ||
+            name == "monthUtc" || name == "dayUtc" || name == "hourUtc" ||
+            name == "minuteUtc" || name == "secondUtc")) {
+            std::string callee_name = "@keet.time." + name;
+            emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
+            return dest;
+        }
         emit(std::make_unique<CallInst>(dest, ident->getName(), std::move(args)));
     } else {
         Operand callee_op = lower_expression(*expr.getCallee());
@@ -924,6 +958,14 @@ Operand AstLowerer::lower_member_expr(const ast::MemberExpr& expr) {
             const std::string& m_name = expr.getMemberName();
             if (m_name == "PI" || m_name == "E" || m_name == "TAU" || m_name == "INF" || m_name == "NAN") {
                 return Operand::create_var("::keet::math::" + m_name, typechecker::Type::floatType());
+            }
+        }
+        if (obj_id->getName() == "time") {
+            const std::string& m_name = expr.getMemberName();
+            if (m_name == "NS_PER_US" || m_name == "NS_PER_MS" || m_name == "NS_PER_SEC" ||
+                m_name == "US_PER_MS" || m_name == "US_PER_SEC" || m_name == "MS_PER_SEC" ||
+                m_name == "SEC_PER_MIN" || m_name == "SEC_PER_HOUR" || m_name == "SEC_PER_DAY") {
+                return Operand::create_var("::keet::time::" + m_name, typechecker::Type::intType());
             }
         }
     }

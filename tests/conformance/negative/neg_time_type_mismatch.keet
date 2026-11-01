@@ -1,0 +1,6 @@
+import time;
+
+fn main(): void {
+    // time.sleep expects integer duration (ms); passing float triggers E3002
+    time.sleep(10.5);
+}

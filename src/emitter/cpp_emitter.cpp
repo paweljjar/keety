@@ -166,6 +166,19 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                 for (const auto& s : imp->getSymbols()) {
                     imported_math_symbols_.insert(s.getEffectiveName());
                 }
+            } else if (p == "time" || p == "std.time" || p == "keet.time") {
+                has_time_import_ = true;
+                add_standard_header("<keet/runtime.hpp>");
+                for (const auto& s : imp->getSymbols()) {
+                    const std::string& sym_name = s.getEffectiveName();
+                    if (sym_name == "NS_PER_US" || sym_name == "NS_PER_MS" || sym_name == "NS_PER_SEC" ||
+                        sym_name == "US_PER_MS" || sym_name == "US_PER_SEC" || sym_name == "MS_PER_SEC" ||
+                        sym_name == "SEC_PER_MIN" || sym_name == "SEC_PER_HOUR" || sym_name == "SEC_PER_DAY") {
+                        imported_time_constants_.insert(sym_name);
+                    } else {
+                        imported_time_symbols_.insert(sym_name);
+                    }
+                }
             }
         }
     }
@@ -334,6 +347,13 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             id->getName() == "INF" || id->getName() == "NAN")) {
             return "::keet::math::" + id->getName();
         }
+        if (has_time_import_ && (imported_time_symbols_.count(id->getName()) ||
+            imported_time_constants_.count(id->getName()) ||
+            id->getName() == "NS_PER_US" || id->getName() == "NS_PER_MS" || id->getName() == "NS_PER_SEC" ||
+            id->getName() == "US_PER_MS" || id->getName() == "US_PER_SEC" || id->getName() == "MS_PER_SEC" ||
+            id->getName() == "SEC_PER_MIN" || id->getName() == "SEC_PER_HOUR" || id->getName() == "SEC_PER_DAY")) {
+            return "::keet::time::" + id->getName();
+        }
         auto nit = narrowed_vars_.find(id->getName());
         if (nit != narrowed_vars_.end()) {
             return "std::get<" + nit->second + ">(" + id->getName() + ")";
@@ -399,6 +419,9 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             }
             if (obj_id->getName() == "math") {
                 return "::keet::math::" + mem->getMemberName();
+            }
+            if (obj_id->getName() == "time") {
+                return "::keet::time::" + mem->getMemberName();
             }
         }
         if (const auto* obj_mem = dynamic_cast<const ast::MemberExpr*>(mem->getObject())) {
@@ -485,6 +508,9 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             }
             if (obj_s == "math") {
                 return "::keet::math::" + m_name + "(" + args_str + ")";
+            }
+            if (obj_s == "time") {
+                return "::keet::time::" + m_name + "(" + args_str + ")";
             }
             // Container member mapping
             if (m_name == "push") {
@@ -598,6 +624,17 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
                 name == "isFinite" || name == "lerp" || name == "fmod" || name == "random" ||
                 name == "randomInt" || name == "randomFloat" || name == "seed")) {
                 return "::keet::math::" + name + "(" + args_str + ")";
+            }
+            if (has_time_import_ && (imported_time_symbols_.count(name) ||
+                name == "now" || name == "nowSec" || name == "nowMs" || name == "nowUs" ||
+                name == "nowNs" || name == "monotonicMs" || name == "monotonicUs" ||
+                name == "monotonicNs" || name == "monotonicSec" || name == "elapsedMs" ||
+                name == "elapsedSec" || name == "sleep" || name == "sleepMs" ||
+                name == "sleepUs" || name == "sleepSec" || name == "formatIso8601" ||
+                name == "formatUtc" || name == "formatLocal" || name == "yearUtc" ||
+                name == "monthUtc" || name == "dayUtc" || name == "hourUtc" ||
+                name == "minuteUtc" || name == "secondUtc")) {
+                return "::keet::time::" + name + "(" + args_str + ")";
             }
         }
 
@@ -1250,6 +1287,9 @@ std::string CppEmitter::translate_ir_function(const ir::Function& fn) const {
                 } else if (callee.rfind("keet.math.", 0) == 0) {
                     std::string func_name = callee.substr(10);
                     call_expr = "::keet::math::" + func_name + "(";
+                } else if (callee.rfind("keet.time.", 0) == 0) {
+                    std::string func_name = callee.substr(10);
+                    call_expr = "::keet::time::" + func_name + "(";
                 } else {
                     call_expr = callee + "(";
                 }

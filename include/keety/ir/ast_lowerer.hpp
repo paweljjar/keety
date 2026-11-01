@@ -123,6 +123,9 @@ private:
     bool has_math_import_{false};
     std::unordered_set<std::string> imported_math_symbols_;
     std::unordered_set<std::string> imported_math_constants_;
+    bool has_time_import_{false};
+    std::unordered_set<std::string> imported_time_symbols_;
+    std::unordered_set<std::string> imported_time_constants_;
 };
 
 } // namespace keety::ir

@@ -748,6 +748,65 @@ TEST_CASE("C++ Implementation Emitter translates math standard library calls and
     }
 }
 
+TEST_CASE("C++ Implementation Emitter translates standard time module calls and constants", "[emitter][cpp][time]") {
+    SECTION("Translates time member calls and constants") {
+        const std::string source = R"(
+            import time;
+
+            fn test_time(): int {
+                let ms = time.nowMs();
+                time.sleepMs(10);
+                let c = time.MS_PER_SEC;
+                return ms + c;
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "time_app");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("#include <keet/runtime.hpp>") != std::string::npos);
+        REQUIRE(cpp.find("::keet::time::nowMs(") != std::string::npos);
+        REQUIRE(cpp.find("::keet::time::sleepMs(") != std::string::npos);
+        REQUIRE(cpp.find("::keet::time::MS_PER_SEC") != std::string::npos);
+    }
+
+    SECTION("Translates direct imported time functions and constants") {
+        std::string source = R"(
+            from "time" import nowMs, sleepMs, MS_PER_SEC;
+
+            fn run(): int {
+                let x = MS_PER_SEC;
+                let y = nowMs();
+                sleepMs(5);
+                return x + y;
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "time_direct");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("::keet::time::MS_PER_SEC") != std::string::npos);
+        REQUIRE(cpp.find("::keet::time::nowMs(") != std::string::npos);
+        REQUIRE(cpp.find("::keet::time::sleepMs(") != std::string::npos);
+    }
+
+    SECTION("Translates IR @keet.time call instructions") {
+        keety::ir::Module irMod("time_ir_test");
+        auto fn = std::make_unique<keety::ir::Function>("test_fn", keety::typechecker::Type::intType());
+        auto* bb = fn->create_basic_block("entry");
+        std::vector<keety::ir::Operand> args;
+        bb->append_instruction(std::make_unique<keety::ir::CallInst>(std::nullopt, "@keet.time.monotonicMs", std::move(args)));
+        bb->append_instruction(std::make_unique<keety::ir::ReturnInst>());
+        irMod.add_function(std::move(fn));
+
+        keety::emitter::CppEmitter emitter(irMod);
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("::keet::time::monotonicMs(") != std::string::npos);
+    }
+}
+
 
 
 
