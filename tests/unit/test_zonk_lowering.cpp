@@ -237,12 +237,12 @@ TEST_CASE("Invoke instruction connects normal and exceptional landing pad edges 
     CHECK(text.find("invoke @dispatchRequest(\"request\") to @normal.1 unwind @catch.2") != std::string::npos);
 }
 
-TEST_CASE("Fallible fs.read_text in zonk expression lowers to CFG with landing pads", "[zonk_lowering][fs]") {
+TEST_CASE("Fallible fs.readText in zonk expression lowers to CFG with landing pads", "[zonk_lowering][fs]") {
     std::string src = R"(
         import fs;
 
         fn loadConfigFile(path: string): string {
-            let config: string = fs.read_text(path) zonk "{}";
+            let config: string = fs.readText(path) zonk "{}";
             return config;
         }
     )";

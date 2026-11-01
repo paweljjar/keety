@@ -10,7 +10,7 @@ namespace keet_module_fs_operations {
         if (cur == "") {
             return 1;
         }
-        if (::keet::fs::filename("dir/test_file.txt") != "test_file.txt") {
+        if (::keet::fs::fileName("dir/test_file.txt") != "test_file.txt") {
             return 2;
         }
         if (::keet::fs::extension("dir/test_file.txt") != ".txt") {
@@ -19,32 +19,32 @@ namespace keet_module_fs_operations {
         if (::keet::fs::extension("dir/test_file") != "") {
             return 4;
         }
-        if (::keet::fs::parent_dir("dir/sub/file.txt") != "dir/sub") {
+        if (::keet::fs::parentDir("dir/sub/file.txt") != "dir/sub") {
             return 5;
         }
         std::string sandbox = ::keet::fs::join("temp_fs_conformance", "inner_dir");
         ::keet::fs::mkdir(sandbox);
-        if (!::keet::fs::exists(sandbox) || !::keet::fs::is_dir(sandbox)) {
+        if (!::keet::fs::exists(sandbox) || !::keet::fs::isDir(sandbox)) {
             return 6;
         }
         std::string target_file = ::keet::fs::join(sandbox, "data.txt");
-        ::keet::fs::write_text(target_file, "First Line\nSecond Line\n");
-        if (!::keet::fs::exists(target_file) || !::keet::fs::is_file(target_file)) {
+        ::keet::fs::writeText(target_file, "First Line\nSecond Line\n");
+        if (!::keet::fs::exists(target_file) || !::keet::fs::isFile(target_file)) {
             return 7;
         }
-        std::string read_str = ::keet::fs::read_text(target_file);
+        std::string read_str = ::keet::fs::readText(target_file);
         if (read_str != "First Line\nSecond Line\n") {
             return 8;
         }
-        ::keet::fs::append_text(target_file, "Third Line\n");
-        std::vector<std::string> lines = ::keet::fs::read_lines(target_file);
+        ::keet::fs::appendText(target_file, "Third Line\n");
+        std::vector<std::string> lines = ::keet::fs::readLines(target_file);
         if (lines.size() != 3) {
             return 9;
         }
         if (lines[0] != "First Line" || lines[1] != "Second Line" || lines[2] != "Third Line") {
             return 10;
         }
-        int64_t sz = ::keet::fs::file_size(target_file);
+        int64_t sz = ::keet::fs::fileSize(target_file);
         if (sz <= 0) {
             return 11;
         }
@@ -58,12 +58,12 @@ namespace keet_module_fs_operations {
         if (::keet::fs::exists(copy_file) || !::keet::fs::exists(moved_file)) {
             return 13;
         }
-        std::vector<std::string> entries = ::keet::fs::list_dir(sandbox);
+        std::vector<std::string> entries = ::keet::fs::listDir(sandbox);
         if (entries.size() != 2) {
             return 14;
         }
         std::string missing_path = ::keet::fs::join(sandbox, "missing_file_404.txt");
-        std::string fallback_val = ([&]() -> std::decay_t<decltype(::keet::fs::read_text(missing_path))> { try { return ::keet::fs::read_text(missing_path); } catch (...) { return "FALLBACK_VALUE"; } })();
+        std::string fallback_val = ([&]() -> std::decay_t<decltype(::keet::fs::readText(missing_path))> { try { return ::keet::fs::readText(missing_path); } catch (...) { return "FALLBACK_VALUE"; } })();
         if (fallback_val != "FALLBACK_VALUE") {
             return 15;
         }
@@ -71,7 +71,7 @@ namespace keet_module_fs_operations {
         if (::keet::fs::exists(moved_file)) {
             return 16;
         }
-        int64_t count = ::keet::fs::remove_all("temp_fs_conformance");
+        int64_t count = ::keet::fs::removeAll("temp_fs_conformance");
         if (count <= 0 || ::keet::fs::exists("temp_fs_conformance")) {
             return 17;
         }

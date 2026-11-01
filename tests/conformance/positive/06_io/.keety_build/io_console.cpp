@@ -25,7 +25,7 @@ namespace keet_module_io_console {
         if (line2 != "sample input") {
             return 2;
         }
-        std::variant<std::string, std::monostate> emptyLineOpt = ::keet::io::read_line();
+        std::variant<std::string, std::monostate> emptyLineOpt = ::keet::io::readLine();
         if (emptyLineOpt == std::monostate{}) {
             return 3;
         }
@@ -33,7 +33,7 @@ namespace keet_module_io_console {
         if (emptyStr != "") {
             return 4;
         }
-        std::variant<std::string, std::monostate> eofOpt = ::keet::io::read_line();
+        std::variant<std::string, std::monostate> eofOpt = ::keet::io::readLine();
         if (eofOpt != std::monostate{}) {
             return 5;
         }

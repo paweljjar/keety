@@ -414,25 +414,31 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             std::string m_name = mem->getMemberName();
             if (obj_s == "io") {
                 if (m_name == "print" || m_name == "println" || m_name == "eprint" || m_name == "eprintln" ||
-                    m_name == "readln" || m_name == "read_line" || m_name == "eof" ||
+                    m_name == "readln" || m_name == "readLine" || m_name == "eof" ||
                     m_name == "input" || m_name == "flush" || m_name == "red" ||
                     m_name == "green" || m_name == "yellow" || m_name == "blue" ||
                     m_name == "magenta" || m_name == "cyan" || m_name == "white" ||
                     m_name == "gray" || m_name == "bold") {
                     return "::keet::io::" + m_name + "(" + args_str + ")";
                 }
-                if (m_name == "readLine") {
-                    return "::keet::io::readln(" + args_str + ")";
-                }
             }
             if (obj_s == "fs") {
-                if (m_name == "read_text" || m_name == "read_lines" || m_name == "write_text" ||
-                    m_name == "append_text" || m_name == "exists" || m_name == "is_file" ||
-                    m_name == "is_dir" || m_name == "file_size" || m_name == "mkdir" ||
-                    m_name == "remove" || m_name == "remove_all" || m_name == "copy" ||
-                    m_name == "rename" || m_name == "list_dir" || m_name == "cwd" ||
-                    m_name == "join" || m_name == "filename" || m_name == "extension" ||
-                    m_name == "parent_dir") {
+                if (m_name == "readText" ||
+                    m_name == "readLines" ||
+                    m_name == "writeText" ||
+                    m_name == "appendText" ||
+                    m_name == "exists" ||
+                    m_name == "isFile" ||
+                    m_name == "isDir" ||
+                    m_name == "fileSize" ||
+                    m_name == "mkdir" || m_name == "remove" ||
+                    m_name == "removeAll" ||
+                    m_name == "copy" || m_name == "rename" ||
+                    m_name == "listDir" ||
+                    m_name == "cwd" || m_name == "join" ||
+                    m_name == "fileName" ||
+                    m_name == "extension" ||
+                    m_name == "parentDir") {
                     return "::keet::fs::" + m_name + "(" + args_str + ")";
                 }
             }
@@ -490,21 +496,29 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             const std::string& name = callee_id->getName();
             if (has_io_import_ && (imported_io_symbols_.count(name) ||
                 name == "print" || name == "println" || name == "eprint" || name == "eprintln" ||
-                name == "readln" || name == "readLine" || name == "read_line" || name == "eof" ||
+                name == "readln" || name == "readLine" || name == "eof" ||
                 name == "input" || name == "flush" || name == "red" || name == "green" ||
                 name == "yellow" || name == "blue" || name == "magenta" || name == "cyan" ||
                 name == "white" || name == "gray" || name == "bold")) {
-                std::string fn_name = (name == "readLine" ? "readln" : name);
-                return "::keet::io::" + fn_name + "(" + args_str + ")";
+                return "::keet::io::" + name + "(" + args_str + ")";
             }
             if (has_fs_import_ && (imported_fs_symbols_.count(name) ||
-                name == "read_text" || name == "read_lines" || name == "write_text" ||
-                name == "append_text" || name == "exists" || name == "is_file" ||
-                name == "is_dir" || name == "file_size" || name == "mkdir" ||
-                name == "remove" || name == "remove_all" || name == "copy" ||
-                name == "rename" || name == "list_dir" || name == "cwd" ||
-                name == "join" || name == "filename" || name == "extension" ||
-                name == "parent_dir")) {
+                name == "readText" ||
+                name == "readLines" ||
+                name == "writeText" ||
+                name == "appendText" ||
+                name == "exists" ||
+                name == "isFile" ||
+                name == "isDir" ||
+                name == "fileSize" ||
+                name == "mkdir" || name == "remove" ||
+                name == "removeAll" ||
+                name == "copy" || name == "rename" ||
+                name == "listDir" ||
+                name == "cwd" || name == "join" ||
+                name == "fileName" ||
+                name == "extension" ||
+                name == "parentDir")) {
                 return "::keet::fs::" + name + "(" + args_str + ")";
             }
         }

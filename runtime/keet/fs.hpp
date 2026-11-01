@@ -53,7 +53,7 @@ public:
 namespace fs {
 
 /// Reads entire text file as UTF-8 string. Throws keet::error on failure.
-inline std::string read_text(const std::string& path) {
+inline std::string readText(const std::string& path) {
     std::ifstream ifs(path, std::ios::in | std::ios::binary);
     if (!ifs.is_open()) {
         throw keet::error("FileSystemError", "Cannot open file for reading: '" + path + "'");
@@ -66,7 +66,7 @@ inline std::string read_text(const std::string& path) {
 }
 
 /// Reads file lines into a vector of strings, stripping \r\n and \n. Throws keet::error on failure.
-inline std::vector<std::string> read_lines(const std::string& path) {
+inline std::vector<std::string> readLines(const std::string& path) {
     std::ifstream ifs(path, std::ios::in | std::ios::binary);
     if (!ifs.is_open()) {
         throw keet::error("FileSystemError", "Cannot open file for reading lines: '" + path + "'");
@@ -86,7 +86,7 @@ inline std::vector<std::string> read_lines(const std::string& path) {
 }
 
 /// Overwrites or creates file with text. Returns true on success; throws keet::error on failure.
-inline bool write_text(const std::string& path, const std::string& content) {
+inline bool writeText(const std::string& path, const std::string& content) {
     std::ofstream ofs(path, std::ios::out | std::ios::trunc | std::ios::binary);
     if (!ofs.is_open()) {
         throw keet::error("FileSystemError", "Cannot open file for writing: '" + path + "'");
@@ -100,7 +100,7 @@ inline bool write_text(const std::string& path, const std::string& content) {
 }
 
 /// Appends text to an existing or new file. Returns true on success; throws keet::error on failure.
-inline bool append_text(const std::string& path, const std::string& content) {
+inline bool appendText(const std::string& path, const std::string& content) {
     std::ofstream ofs(path, std::ios::out | std::ios::app | std::ios::binary);
     if (!ofs.is_open()) {
         throw keet::error("FileSystemError", "Cannot open file for appending: '" + path + "'");
@@ -120,19 +120,19 @@ inline bool append_text(const std::string& path, const std::string& content) {
 }
 
 /// Checks if path is a regular file. Non-throwing.
-[[nodiscard]] inline bool is_file(const std::string& path) noexcept {
+[[nodiscard]] inline bool isFile(const std::string& path) noexcept {
     std::error_code ec;
     return std::filesystem::is_regular_file(path, ec) && !ec;
 }
 
 /// Checks if path is a directory. Non-throwing.
-[[nodiscard]] inline bool is_dir(const std::string& path) noexcept {
+[[nodiscard]] inline bool isDir(const std::string& path) noexcept {
     std::error_code ec;
     return std::filesystem::is_directory(path, ec) && !ec;
 }
 
 /// Returns file size in bytes as int64_t. Throws keet::error on failure.
-inline int64_t file_size(const std::string& path) {
+inline int64_t fileSize(const std::string& path) {
     std::error_code ec;
     auto sz = std::filesystem::file_size(path, ec);
     if (ec) {
@@ -162,7 +162,7 @@ inline bool remove(const std::string& path) {
 }
 
 /// Recursively removes a directory/file and returns count of removed items. Throws keet::error on failure.
-inline int64_t remove_all(const std::string& path) {
+inline int64_t removeAll(const std::string& path) {
     std::error_code ec;
     auto count = std::filesystem::remove_all(path, ec);
     if (ec) {
@@ -193,7 +193,7 @@ inline bool rename(const std::string& src, const std::string& dst) {
 }
 
 /// Returns a sorted list of entry names inside a directory. Throws keet::error on failure.
-inline std::vector<std::string> list_dir(const std::string& path) {
+inline std::vector<std::string> listDir(const std::string& path) {
     std::error_code ec;
     std::filesystem::directory_iterator it(path, ec);
     if (ec) {
@@ -223,7 +223,7 @@ inline std::vector<std::string> list_dir(const std::string& path) {
 }
 
 /// Extracts file name with extension.
-[[nodiscard]] inline std::string filename(const std::string& path) {
+[[nodiscard]] inline std::string fileName(const std::string& path) {
     return std::filesystem::path(path).filename().generic_string();
 }
 
@@ -233,7 +233,7 @@ inline std::vector<std::string> list_dir(const std::string& path) {
 }
 
 /// Extracts parent directory path.
-[[nodiscard]] inline std::string parent_dir(const std::string& path) {
+[[nodiscard]] inline std::string parentDir(const std::string& path) {
     return std::filesystem::path(path).parent_path().generic_string();
 }
 

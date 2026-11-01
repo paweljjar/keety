@@ -119,7 +119,6 @@ void populateIoModuleScope(Scope& ioScope) {
     makeFn("eprintln");
     makeFn("readln");
     makeFn("readLine");
-    makeFn("read_line");
     makeFn("input");
     makeFn("eof");
     makeFn("red");
@@ -161,25 +160,26 @@ void populateFsModuleScope(Scope& fsScope) {
         fsScope.define(sym, false);
     };
 
-    makeFn("read_text");
-    makeFn("read_lines");
-    makeFn("write_text");
-    makeFn("append_text");
+    // Standard camelCase library functions
+    makeFn("readText");
+    makeFn("readLines");
+    makeFn("writeText");
+    makeFn("appendText");
     makeFn("exists");
-    makeFn("is_file");
-    makeFn("is_dir");
-    makeFn("file_size");
+    makeFn("isFile");
+    makeFn("isDir");
+    makeFn("fileSize");
     makeFn("mkdir");
     makeFn("remove");
-    makeFn("remove_all");
+    makeFn("removeAll");
     makeFn("copy");
     makeFn("rename");
-    makeFn("list_dir");
+    makeFn("listDir");
     makeFn("cwd");
     makeFn("join");
-    makeFn("filename");
+    makeFn("fileName");
     makeFn("extension");
-    makeFn("parent_dir");
+    makeFn("parentDir");
 }
 
 std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, const std::shared_ptr<Scope>& universe) {

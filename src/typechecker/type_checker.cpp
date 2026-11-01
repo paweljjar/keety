@@ -1451,12 +1451,12 @@ TypePtr TypeChecker::checkIoMemberCall(const ast::MemberExpr* member, const ast:
         return Type::voidType();
     }
 
-    if (mName == "readln" || mName == "readLine") {
+    if (mName == "readln") {
         if (!call->getArgs().empty()) {
             if (emitter_) {
                 emitter_->report(diag::Diagnostic::makeError(
                     diag::ErrorCode::TypeMismatch,
-                    "function 'io." + mName + "' expects 0 arguments, but got " + std::to_string(call->getArgs().size()),
+                    "function 'io.readln' expects 0 arguments, but got " + std::to_string(call->getArgs().size()),
                     call->getSpan().start).withLabel(call->getSpan(), "unexpected arguments"));
             }
             hasErrors_ = true;
@@ -1464,12 +1464,12 @@ TypePtr TypeChecker::checkIoMemberCall(const ast::MemberExpr* member, const ast:
         return Type::stringType();
     }
 
-    if (mName == "read_line") {
+    if (mName == "readLine") {
         if (!call->getArgs().empty()) {
             if (emitter_) {
                 emitter_->report(diag::Diagnostic::makeError(
                     diag::ErrorCode::TypeMismatch,
-                    "function 'io.read_line' expects 0 arguments, but got " + std::to_string(call->getArgs().size()),
+                    "function 'io.readLine' expects 0 arguments, but got " + std::to_string(call->getArgs().size()),
                     call->getSpan().start).withLabel(call->getSpan(), "unexpected arguments"));
             }
             hasErrors_ = true;
@@ -1590,12 +1590,12 @@ TypePtr TypeChecker::checkIoDirectCall(const ast::IdentExpr* callee, const ast::
         return Type::voidType();
     }
 
-    if (name == "readln" || name == "readLine") {
+    if (name == "readln") {
         if (!call->getArgs().empty()) {
             if (emitter_) {
                 emitter_->report(diag::Diagnostic::makeError(
                     diag::ErrorCode::TypeMismatch,
-                    "function '" + name + "' expects 0 arguments, but got " + std::to_string(call->getArgs().size()),
+                    "function 'readln' expects 0 arguments, but got " + std::to_string(call->getArgs().size()),
                     call->getSpan().start).withLabel(call->getSpan(), "unexpected arguments"));
             }
             hasErrors_ = true;
@@ -1603,12 +1603,12 @@ TypePtr TypeChecker::checkIoDirectCall(const ast::IdentExpr* callee, const ast::
         return Type::stringType();
     }
 
-    if (name == "read_line") {
+    if (name == "readLine") {
         if (!call->getArgs().empty()) {
             if (emitter_) {
                 emitter_->report(diag::Diagnostic::makeError(
                     diag::ErrorCode::TypeMismatch,
-                    "function '" + name + "' expects 0 arguments, but got " + std::to_string(call->getArgs().size()),
+                    "function 'readLine' expects 0 arguments, but got " + std::to_string(call->getArgs().size()),
                     call->getSpan().start).withLabel(call->getSpan(), "unexpected arguments"));
             }
             hasErrors_ = true;
@@ -1725,31 +1725,31 @@ TypePtr TypeChecker::checkFsMemberCall(const ast::MemberExpr* member, const ast:
         checkArgCount(0);
         return Type::stringType();
     }
-    if (name == "read_text" || name == "filename" || name == "extension" || name == "parent_dir") {
+    if (name == "readText" || name == "fileName" || name == "extension" || name == "parentDir") {
         if (checkArgCount(1)) {
             checkStringArg(0, "path");
         }
         return Type::stringType();
     }
-    if (name == "read_lines" || name == "list_dir") {
+    if (name == "readLines" || name == "listDir") {
         if (checkArgCount(1)) {
             checkStringArg(0, "path");
         }
         return Type::array(Type::stringType());
     }
-    if (name == "exists" || name == "is_file" || name == "is_dir" || name == "mkdir" || name == "remove") {
+    if (name == "exists" || name == "isFile" || name == "isDir" || name == "mkdir" || name == "remove") {
         if (checkArgCount(1)) {
             checkStringArg(0, "path");
         }
         return Type::boolType();
     }
-    if (name == "file_size" || name == "remove_all") {
+    if (name == "fileSize" || name == "removeAll") {
         if (checkArgCount(1)) {
             checkStringArg(0, "path");
         }
         return Type::intType();
     }
-    if (name == "write_text" || name == "append_text") {
+    if (name == "writeText" || name == "appendText") {
         if (checkArgCount(2)) {
             checkStringArg(0, "path");
             checkStringArg(1, "content");
@@ -1816,31 +1816,31 @@ TypePtr TypeChecker::checkFsDirectCall(const ast::IdentExpr* callee, const ast::
         checkArgCount(0);
         return Type::stringType();
     }
-    if (name == "read_text" || name == "filename" || name == "extension" || name == "parent_dir") {
+    if (name == "readText" || name == "fileName" || name == "extension" || name == "parentDir") {
         if (checkArgCount(1)) {
             checkStringArg(0, "path");
         }
         return Type::stringType();
     }
-    if (name == "read_lines" || name == "list_dir") {
+    if (name == "readLines" || name == "listDir") {
         if (checkArgCount(1)) {
             checkStringArg(0, "path");
         }
         return Type::array(Type::stringType());
     }
-    if (name == "exists" || name == "is_file" || name == "is_dir" || name == "mkdir" || name == "remove") {
+    if (name == "exists" || name == "isFile" || name == "isDir" || name == "mkdir" || name == "remove") {
         if (checkArgCount(1)) {
             checkStringArg(0, "path");
         }
         return Type::boolType();
     }
-    if (name == "file_size" || name == "remove_all") {
+    if (name == "fileSize" || name == "removeAll") {
         if (checkArgCount(1)) {
             checkStringArg(0, "path");
         }
         return Type::intType();
     }
-    if (name == "write_text" || name == "append_text") {
+    if (name == "writeText" || name == "appendText") {
         if (checkArgCount(2)) {
             checkStringArg(0, "path");
             checkStringArg(1, "content");
@@ -3082,19 +3082,28 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             if (sym && sym->isImportedSymbol()) {
                 const std::string& name = calleeIdent->getName();
                 if (name == "print" || name == "println" || name == "eprint" || name == "eprintln" ||
-                    name == "readln" || name == "readLine" || name == "read_line" || name == "eof" ||
+                    name == "readln" || name == "readLine" || name == "eof" ||
                     name == "input" || name == "red" || name == "green" || name == "yellow" ||
                     name == "blue" || name == "magenta" || name == "cyan" || name == "white" ||
                     name == "gray" || name == "bold" || name == "flush") {
                     return checkIoDirectCall(calleeIdent, call, scope);
                 }
-                if (name == "read_text" || name == "read_lines" || name == "write_text" ||
-                    name == "append_text" || name == "exists" || name == "is_file" ||
-                    name == "is_dir" || name == "file_size" || name == "mkdir" ||
-                    name == "remove" || name == "remove_all" || name == "copy" ||
-                    name == "rename" || name == "list_dir" || name == "cwd" ||
-                    name == "join" || name == "filename" || name == "extension" ||
-                    name == "parent_dir") {
+                if (name == "readText" ||
+                    name == "readLines" ||
+                    name == "writeText" ||
+                    name == "appendText" ||
+                    name == "exists" ||
+                    name == "isFile" ||
+                    name == "isDir" ||
+                    name == "fileSize" ||
+                    name == "mkdir" || name == "remove" ||
+                    name == "removeAll" ||
+                    name == "copy" || name == "rename" ||
+                    name == "listDir" ||
+                    name == "cwd" || name == "join" ||
+                    name == "fileName" ||
+                    name == "extension" ||
+                    name == "parentDir") {
                     return checkFsDirectCall(calleeIdent, call, scope);
                 }
             }
@@ -3432,19 +3441,19 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     return Type::unknownType();
                 }
                 const std::string& mName = member->getMemberName();
-                if (mName == "read_text" || mName == "filename" || mName == "extension" || mName == "parent_dir") {
+                if (mName == "readText" || mName == "fileName" || mName == "extension" || mName == "parentDir") {
                     return Type::function({Type::stringType()}, Type::stringType(), false);
                 }
-                if (mName == "read_lines" || mName == "list_dir") {
+                if (mName == "readLines" || mName == "listDir") {
                     return Type::function({Type::stringType()}, Type::array(Type::stringType()), false);
                 }
-                if (mName == "write_text" || mName == "append_text" || mName == "copy" || mName == "rename") {
+                if (mName == "writeText" || mName == "appendText" || mName == "copy" || mName == "rename") {
                     return Type::function({Type::stringType(), Type::stringType()}, Type::boolType(), false);
                 }
-                if (mName == "exists" || mName == "is_file" || mName == "is_dir" || mName == "mkdir" || mName == "remove") {
+                if (mName == "exists" || mName == "isFile" || mName == "isDir" || mName == "mkdir" || mName == "remove") {
                     return Type::function({Type::stringType()}, Type::boolType(), false);
                 }
-                if (mName == "file_size" || mName == "remove_all") {
+                if (mName == "fileSize" || mName == "removeAll") {
                     return Type::function({Type::stringType()}, Type::intType(), false);
                 }
                 if (mName == "cwd") {

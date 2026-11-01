@@ -776,7 +776,7 @@ Operand AstLowerer::lower_call_expr(const ast::CallExpr& expr) {
         if (const auto* obj_id = dynamic_cast<const ast::IdentExpr*>(member->getObject())) {
             if (obj_id->getName() == "io") {
                 const std::string& m_name = member->getMemberName();
-                std::string callee_name = "@keet.io." + (m_name == "readLine" ? "readln" : m_name);
+                std::string callee_name = "@keet.io." + m_name;
                 emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
                 return dest;
             }
@@ -793,22 +793,31 @@ Operand AstLowerer::lower_call_expr(const ast::CallExpr& expr) {
         const std::string& name = ident->getName();
         if (has_io_import_ && (imported_io_symbols_.count(name) ||
             name == "print" || name == "println" || name == "eprint" || name == "eprintln" ||
-            name == "readln" || name == "readLine" || name == "read_line" || name == "eof" ||
+            name == "readln" || name == "readLine" || name == "eof" ||
             name == "input" || name == "flush" || name == "red" || name == "green" ||
             name == "yellow" || name == "blue" || name == "magenta" || name == "cyan" ||
             name == "white" || name == "gray" || name == "bold")) {
-            std::string callee_name = "@keet.io." + (name == "readLine" ? "readln" : name);
+            std::string callee_name = "@keet.io." + name;
             emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
             return dest;
         }
         if (has_fs_import_ && (imported_fs_symbols_.count(name) ||
-            name == "read_text" || name == "read_lines" || name == "write_text" ||
-            name == "append_text" || name == "exists" || name == "is_file" ||
-            name == "is_dir" || name == "file_size" || name == "mkdir" ||
-            name == "remove" || name == "remove_all" || name == "copy" ||
-            name == "rename" || name == "list_dir" || name == "cwd" ||
-            name == "join" || name == "filename" || name == "extension" ||
-            name == "parent_dir")) {
+            name == "readText" ||
+            name == "readLines" ||
+            name == "writeText" ||
+            name == "appendText" ||
+            name == "exists" ||
+            name == "isFile" ||
+            name == "isDir" ||
+            name == "fileSize" ||
+            name == "mkdir" || name == "remove" ||
+            name == "removeAll" ||
+            name == "copy" || name == "rename" ||
+            name == "listDir" ||
+            name == "cwd" || name == "join" ||
+            name == "fileName" ||
+            name == "extension" ||
+            name == "parentDir")) {
             std::string callee_name = "@keet.fs." + name;
             emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
             return dest;

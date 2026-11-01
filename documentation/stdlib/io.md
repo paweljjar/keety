@@ -71,7 +71,7 @@ Explicitly flushes the standard output stream buffer.
 
 ### 2.3 Console Input Functions
 
-#### `io.read_line(): string | null`
+#### `io.readLine(): string | null`
 Reads a single line of text from standard input (`stdin`) up to the terminating newline (`\n`).
 - Strips any trailing carriage return (`\r`) automatically for cross-platform CRLF compatibility.
 - Returns `string` on success, including `""` for an empty line.
@@ -81,7 +81,7 @@ Reads a single line of text from standard input (`stdin`) up to the terminating 
 #### `io.readln(): string`
 Reads a single line of text from standard input (`stdin`) up to the terminating newline (`\n`).
 - Preserved for backward compatibility. Returns an empty string `""` on end-of-file (EOF) or stream error.
-- Use `io.read_line()` when distinguishing between an empty line and EOF is required.
+- Use `io.readLine()` when distinguishing between an empty line and EOF is required.
 
 #### `io.eof(): bool`
 Returns `true` if standard input has reached end-of-file (EOF), and `false` otherwise. In standard stream I/O semantics, `eof()` becomes true after a read operation has attempted to read past the end of the input stream (i.e., the stream `eofbit` is set).
@@ -135,7 +135,7 @@ The `keety` compiler lowers `io` calls directly into standard C++ calls and runt
 | `io.println("Done", io.Color.Green)` | `::keet::io::println("Done", ::keet::io::Color::Green);` |
 | `io.eprint("Error:", err)` | `::keet::io::eprint("Error:", err);` |
 | `io.eprintln("Fatal error")` | `::keet::io::eprintln("Fatal error");` |
-| `io.read_line()` | `::keet::io::read_line();` |
+| `io.readLine()` | `::keet::io::readLine();` |
 | `io.readln()` | `::keet::io::readln();` |
 | `io.eof()` | `::keet::io::eof();` |
 | `io.input("Name: ")` | `::keet::io::input("Name: ");` |

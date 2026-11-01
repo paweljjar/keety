@@ -2880,37 +2880,48 @@ TEST_CASE("Standard fs module type checking and semantic validation", "[typechec
         ParseResult res(
             "import fs;\n"
             "fn test_fs(): void {\n"
-            "    let ok_w: bool = fs.write_text(\"test.txt\", \"data\");\n"
-            "    let ok_a: bool = fs.append_text(\"test.txt\", \"more\");\n"
-            "    let text: string = fs.read_text(\"test.txt\");\n"
-            "    let lines: array<string> = fs.read_lines(\"test.txt\");\n"
+            "    let ok_w: bool = fs.writeText(\"test.txt\", \"data\");\n"
+            "    let ok_a: bool = fs.appendText(\"test.txt\", \"more\");\n"
+            "    let text: string = fs.readText(\"test.txt\");\n"
+            "    let lines: array<string> = fs.readLines(\"test.txt\");\n"
             "    let ex: bool = fs.exists(\"test.txt\");\n"
-            "    let is_f: bool = fs.is_file(\"test.txt\");\n"
-            "    let is_d: bool = fs.is_dir(\"test.txt\");\n"
-            "    let sz: int = fs.file_size(\"test.txt\");\n"
+            "    let is_f: bool = fs.isFile(\"test.txt\");\n"
+            "    let is_d: bool = fs.isDir(\"test.txt\");\n"
+            "    let sz: int = fs.fileSize(\"test.txt\");\n"
             "    let mk: bool = fs.mkdir(\"sub_dir\");\n"
-            "    let entries: array<string> = fs.list_dir(\"sub_dir\");\n"
+            "    let entries: array<string> = fs.listDir(\"sub_dir\");\n"
             "    let cp: bool = fs.copy(\"test.txt\", \"test2.txt\");\n"
             "    let rn: bool = fs.rename(\"test2.txt\", \"test3.txt\");\n"
             "    let rm: bool = fs.remove(\"test3.txt\");\n"
-            "    let rma: int = fs.remove_all(\"sub_dir\");\n"
+            "    let rma: int = fs.removeAll(\"sub_dir\");\n"
             "    let cur: string = fs.cwd();\n"
             "    let joined: string = fs.join(\"a\", \"b\");\n"
-            "    let fname: string = fs.filename(\"a/b.txt\");\n"
+            "    let fname: string = fs.fileName(\"a/b.txt\");\n"
             "    let ext: string = fs.extension(\"a/b.txt\");\n"
-            "    let pdir: string = fs.parent_dir(\"a/b.txt\");\n"
+            "    let pdir: string = fs.parentDir(\"a/b.txt\");\n"
             "}\n"
         );
         REQUIRE(res.checkZeroCoercion());
         REQUIRE_FALSE(res.emitter.hasErrors());
     }
 
+    SECTION("Reject legacy snake_case fs member with E3011") {
+        ParseResult res(
+            "import fs;\n"
+            "fn test_alias(): void {\n"
+            "    let r = fs.read_text(\"test.txt\");\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::InvalidMemberAccess));
+    }
+
     SECTION("Valid selective import from fs module") {
         ParseResult res(
-            "from \"fs\" import read_text, write_text, exists;\n"
+            "from \"fs\" import readText, writeText, exists;\n"
             "fn test_selective(): void {\n"
-            "    write_text(\"cfg.json\", \"{}\");\n"
-            "    let data: string = read_text(\"cfg.json\");\n"
+            "    writeText(\"cfg.json\", \"{}\");\n"
+            "    let data: string = readText(\"cfg.json\");\n"
             "    let found: bool = exists(\"cfg.json\");\n"
             "}\n"
         );
@@ -2922,7 +2933,7 @@ TEST_CASE("Standard fs module type checking and semantic validation", "[typechec
         ParseResult res(
             "import fs;\n"
             "fn load_config(): string {\n"
-            "    let data: string = fs.read_text(\"cfg.json\") zonk \"{}\";\n"
+            "    let data: string = fs.readText(\"cfg.json\") zonk \"{}\";\n"
             "    return data;\n"
             "}\n"
         );
@@ -2930,11 +2941,11 @@ TEST_CASE("Standard fs module type checking and semantic validation", "[typechec
         REQUIRE_FALSE(res.emitter.hasErrors());
     }
 
-    SECTION("Reject invalid argument count to fs.read_text with E3003") {
+    SECTION("Reject invalid argument count to fs.readText with E3003") {
         ParseResult res(
             "import fs;\n"
             "fn test_invalid(): void {\n"
-            "    let data = fs.read_text(\"a\", \"b\");\n"
+            "    let data = fs.readText(\"a\", \"b\");\n"
             "}\n"
         );
         REQUIRE_FALSE(res.checkZeroCoercion());

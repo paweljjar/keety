@@ -10,7 +10,7 @@ fn main(): int {
         return 1;
     }
 
-    if (fs.filename("dir/test_file.txt") != "test_file.txt") {
+    if (fs.fileName("dir/test_file.txt") != "test_file.txt") {
         return 2;
     }
 
@@ -22,7 +22,7 @@ fn main(): int {
         return 4;
     }
 
-    if (fs.parent_dir("dir/sub/file.txt") != "dir/sub") {
+    if (fs.parentDir("dir/sub/file.txt") != "dir/sub") {
         return 5;
     }
 
@@ -30,26 +30,26 @@ fn main(): int {
 
     // 2. Directory creation
     fs.mkdir(sandbox);
-    if (!fs.exists(sandbox) || !fs.is_dir(sandbox)) {
+    if (!fs.exists(sandbox) || !fs.isDir(sandbox)) {
         return 6;
     }
 
     // 3. Write and read text
     let target_file: string = fs.join(sandbox, "data.txt");
-    fs.write_text(target_file, "First Line\nSecond Line\n");
+    fs.writeText(target_file, "First Line\nSecond Line\n");
 
-    if (!fs.exists(target_file) || !fs.is_file(target_file)) {
+    if (!fs.exists(target_file) || !fs.isFile(target_file)) {
         return 7;
     }
 
-    let read_str: string = fs.read_text(target_file);
+    let read_str: string = fs.readText(target_file);
     if (read_str != "First Line\nSecond Line\n") {
         return 8;
     }
 
     // 4. Append text and read lines
-    fs.append_text(target_file, "Third Line\n");
-    let lines: array<string> = fs.read_lines(target_file);
+    fs.appendText(target_file, "Third Line\n");
+    let lines: array<string> = fs.readLines(target_file);
     if (lines.len() != 3) {
         return 9;
     }
@@ -58,7 +58,7 @@ fn main(): int {
     }
 
     // 5. File size
-    let sz: int = fs.file_size(target_file);
+    let sz: int = fs.fileSize(target_file);
     if (sz <= 0) {
         return 11;
     }
@@ -77,25 +77,25 @@ fn main(): int {
     }
 
     // 7. List directory
-    let entries: array<string> = fs.list_dir(sandbox);
+    let entries: array<string> = fs.listDir(sandbox);
     if (entries.len() != 2) {
         return 14;
     }
 
     // 8. Zonk error recovery fallback
     let missing_path: string = fs.join(sandbox, "missing_file_404.txt");
-    let fallback_val: string = fs.read_text(missing_path) zonk "FALLBACK_VALUE";
+    let fallback_val: string = fs.readText(missing_path) zonk "FALLBACK_VALUE";
     if (fallback_val != "FALLBACK_VALUE") {
         return 15;
     }
 
-    // 9. Cleanup with remove and remove_all
+    // 9. Cleanup with remove and removeAll
     fs.remove(moved_file);
     if (fs.exists(moved_file)) {
         return 16;
     }
 
-    let count: int = fs.remove_all("temp_fs_conformance");
+    let count: int = fs.removeAll("temp_fs_conformance");
     if (count <= 0 || fs.exists("temp_fs_conformance")) {
         return 17;
     }

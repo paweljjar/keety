@@ -27,7 +27,7 @@ fn main(): int {
     }
 
     // Read valid empty line
-    let emptyLineOpt: string | null = io.read_line();
+    let emptyLineOpt: string | null = io.readLine();
     if (emptyLineOpt == null) {
         return 3;
     }
@@ -37,7 +37,7 @@ fn main(): int {
     }
 
     // Read at EOF
-    let eofOpt: string | null = io.read_line();
+    let eofOpt: string | null = io.readLine();
     if (eofOpt != null) {
         return 5;
     }

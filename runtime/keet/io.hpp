@@ -419,17 +419,12 @@ void println_colored(Color color, Args&&... args) {
     return "";
 }
 
-/// Alias for readln matching language specification naming.
-[[nodiscard]] inline std::string readLine(std::istream& in = std::cin) {
-    return readln(in);
-}
-
 /// Reads a line from stream, returning std::variant<std::string, std::monostate>.
 /// In KeetScript, this corresponds to `string | null`.
 /// Returns std::string(line) on successful line read (including empty line "").
 /// Returns std::monostate{} (null) on EOF.
 /// Throws keet::error("IOError", ...) on hardware/stream failure (badbit).
-[[nodiscard]] inline std::variant<std::string, std::monostate> read_line(std::istream& in = std::cin) {
+[[nodiscard]] inline std::variant<std::string, std::monostate> readLine(std::istream& in = std::cin) {
     if (in.bad()) {
         throw error("IOError", "Input stream is in a bad state before read");
     }
@@ -453,8 +448,8 @@ void println_colored(Color color, Args&&... args) {
 /// Returns std::string on success (including empty line "").
 /// Returns std::nullopt on EOF.
 /// Throws keet::error("IOError", ...) on hardware/stream failure (badbit).
-[[nodiscard]] inline std::optional<std::string> read_line_opt(std::istream& in = std::cin) {
-    auto res = read_line(in);
+[[nodiscard]] inline std::optional<std::string> readLineOpt(std::istream& in = std::cin) {
+    auto res = readLine(in);
     if (std::holds_alternative<std::string>(res)) {
         return std::get<std::string>(res);
     }

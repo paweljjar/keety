@@ -197,9 +197,11 @@ TEST_CASE("keet::io stream input reading", "[runtime][io]") {
         REQUIRE(keet::io::readln(iss).empty());
     }
 
-    SECTION("readLine alias matches readln") {
-        std::istringstream iss("AliasTest\n");
-        REQUIRE(keet::io::readLine(iss) == "AliasTest");
+    SECTION("readLine reads line as variant matching string | null") {
+        std::istringstream iss("ReadLineTest\n");
+        auto lineRes = keet::io::readLine(iss);
+        REQUIRE(std::holds_alternative<std::string>(lineRes));
+        REQUIRE(std::get<std::string>(lineRes) == "ReadLineTest");
     }
 
     SECTION("input prompts and flushes before reading line") {
@@ -374,48 +376,48 @@ TEST_CASE("keet::io NO_COLOR specification compliance and precedence", "[runtime
 }
 
 TEST_CASE("keet::io end-of-input, empty line, and error handling", "[runtime][io][eof]") {
-    SECTION("Distinguish valid empty line from end of file using read_line") {
+    SECTION("Distinguish valid empty line from end of file using readLine") {
         std::istringstream iss("\nSecond\n");
 
-        auto first = keet::io::read_line(iss);
+        auto first = keet::io::readLine(iss);
         REQUIRE(std::holds_alternative<std::string>(first));
         REQUIRE(std::get<std::string>(first).empty());
         REQUIRE_FALSE(keet::io::eof(iss));
 
-        auto second = keet::io::read_line(iss);
+        auto second = keet::io::readLine(iss);
         REQUIRE(std::holds_alternative<std::string>(second));
         REQUIRE(std::get<std::string>(second) == "Second");
         REQUIRE_FALSE(keet::io::eof(iss));
 
-        auto eofResult = keet::io::read_line(iss);
+        auto eofResult = keet::io::readLine(iss);
         REQUIRE(std::holds_alternative<std::monostate>(eofResult));
         REQUIRE(keet::io::eof(iss));
     }
 
-    SECTION("read_line_opt returns empty string on empty line and nullopt on EOF") {
+    SECTION("readLineOpt returns empty string on empty line and nullopt on EOF") {
         std::istringstream iss("\nData\n");
 
-        auto opt1 = keet::io::read_line_opt(iss);
+        auto opt1 = keet::io::readLineOpt(iss);
         REQUIRE(opt1.has_value());
         REQUIRE(opt1.value().empty());
 
-        auto opt2 = keet::io::read_line_opt(iss);
+        auto opt2 = keet::io::readLineOpt(iss);
         REQUIRE(opt2.has_value());
         REQUIRE(opt2.value() == "Data");
 
-        auto opt3 = keet::io::read_line_opt(iss);
+        auto opt3 = keet::io::readLineOpt(iss);
         REQUIRE_FALSE(opt3.has_value());
     }
 
     SECTION("Final line without terminating newline is read before EOF") {
         std::istringstream iss("NoTrailingNewline");
 
-        auto lineRes = keet::io::read_line(iss);
+        auto lineRes = keet::io::readLine(iss);
         REQUIRE(std::holds_alternative<std::string>(lineRes));
         REQUIRE(std::get<std::string>(lineRes) == "NoTrailingNewline");
         REQUIRE(keet::io::eof(iss));
 
-        auto nextRes = keet::io::read_line(iss);
+        auto nextRes = keet::io::readLine(iss);
         REQUIRE(std::holds_alternative<std::monostate>(nextRes));
         REQUIRE(keet::io::eof(iss));
     }
@@ -441,17 +443,17 @@ TEST_CASE("keet::io end-of-input, empty line, and error handling", "[runtime][io
         REQUIRE(keet::io::readln(emptyStream).empty());
         REQUIRE(keet::io::eof(emptyStream));
 
-        auto lineEmpty = keet::io::read_line(emptyStream);
+        auto lineEmpty = keet::io::readLine(emptyStream);
         REQUIRE(std::holds_alternative<std::monostate>(lineEmpty));
     }
 
-    SECTION("readln and read_line throw IOError on stream badbit failure") {
+    SECTION("readln and readLine throw IOError on stream badbit failure") {
         std::istringstream badStream("broken");
         badStream.setstate(std::ios::badbit);
 
         REQUIRE_THROWS_AS(keet::io::readln(badStream), keet::error);
-        REQUIRE_THROWS_AS(keet::io::read_line(badStream), keet::error);
-        REQUIRE_THROWS_AS(keet::io::read_line_opt(badStream), keet::error);
+        REQUIRE_THROWS_AS(keet::io::readLine(badStream), keet::error);
+        REQUIRE_THROWS_AS(keet::io::readLineOpt(badStream), keet::error);
     }
 }
 
