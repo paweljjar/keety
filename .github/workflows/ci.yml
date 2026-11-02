@@ -27,3 +27,14 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Verify CLI Executables
+        shell: bash
+        run: |
+          BUILD_BIN="build/src"
+          [ -d "build/src/Release" ] && BUILD_BIN="build/src/Release"
+          EXE=""
+          [ -f "$BUILD_BIN/keety.exe" ] && EXE=".exe"
+          "$BUILD_BIN/keety$EXE" --version
+          "$BUILD_BIN/kattery$EXE" --version
+
