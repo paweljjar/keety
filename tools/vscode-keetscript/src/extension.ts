@@ -4,50 +4,63 @@ import { KeetCodeActionProvider } from './codeActions';
 import { KeetCompletionItemProvider } from './completions';
 import { KeetHoverProvider } from './hover';
 import { CommandManager } from './commands';
+import { LspClientManager } from './lspClient';
 
+let lspManager: LspClientManager | null = null;
 let diagnosticManager: DiagnosticManager | null = null;
 
-export function activate(context: vscode.ExtensionContext): void {
-  // 1. Live diagnostics manager & background worker
-  diagnosticManager = new DiagnosticManager();
-  context.subscriptions.push(diagnosticManager);
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  // 1. Try starting keet-lsp Language Server
+  lspManager = new LspClientManager();
+  context.subscriptions.push(lspManager);
+  const lspStarted = await lspManager.start();
 
-  // 2. Quick Fix Code Action Provider (lightbulb)
-  context.subscriptions.push(
-    vscode.languages.registerCodeActionsProvider(
-      'keetscript',
-      new KeetCodeActionProvider(),
-      {
-        providedCodeActionKinds: KeetCodeActionProvider.providedCodeActionKinds
-      }
-    )
-  );
+  if (!lspStarted) {
+    // Fall back gracefully to standalone compiler checking & providers
+    diagnosticManager = new DiagnosticManager();
+    context.subscriptions.push(diagnosticManager);
 
-  // 3. IntelliSense Autocompletion Provider
-  context.subscriptions.push(
-    vscode.languages.registerCompletionItemProvider(
-      'keetscript',
-      new KeetCompletionItemProvider(),
-      '.',
-      ':',
-      '<'
-    )
-  );
+    // Quick Fix Code Action Provider (lightbulb)
+    context.subscriptions.push(
+      vscode.languages.registerCodeActionsProvider(
+        'keetscript',
+        new KeetCodeActionProvider(),
+        {
+          providedCodeActionKinds: KeetCodeActionProvider.providedCodeActionKinds
+        }
+      )
+    );
 
-  // 4. Hover Documentation Provider
-  context.subscriptions.push(
-    vscode.languages.registerHoverProvider(
-      'keetscript',
-      new KeetHoverProvider()
-    )
-  );
+    // Fallback IntelliSense Autocompletion Provider
+    context.subscriptions.push(
+      vscode.languages.registerCompletionItemProvider(
+        'keetscript',
+        new KeetCompletionItemProvider(),
+        '.',
+        ':',
+        '<'
+      )
+    );
 
-  // 5. Commands and Editor UI (Run ▶, Build, Check)
+    // Fallback Hover Documentation Provider
+    context.subscriptions.push(
+      vscode.languages.registerHoverProvider(
+        'keetscript',
+        new KeetHoverProvider()
+      )
+    );
+  }
+
+  // 2. Commands and Editor UI (Run ▶, Build, Check)
   const commandManager = new CommandManager(diagnosticManager);
   commandManager.registerCommands(context);
 }
 
-export function deactivate(): void {
+export async function deactivate(): Promise<void> {
+  if (lspManager) {
+    await lspManager.stop();
+    lspManager = null;
+  }
   if (diagnosticManager) {
     diagnosticManager.dispose();
     diagnosticManager = null;

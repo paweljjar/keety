@@ -21,6 +21,7 @@ bin/
 *.dll
 *.exe
 *.log
+*.vsix
 
 # KeetScript compilation & package artifacts
 .keety_build/
