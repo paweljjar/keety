@@ -37,6 +37,10 @@ Initialize a new project:
 ```bash
 mkdir my-app && cd my-app
 kattery init
+# Scaffolds pedigree.json, .gitignore, and src/main.keet with "Hello, World!"
+
+# Run immediately:
+kattery run start
 ```
 
 Add a Git or local path dependency:

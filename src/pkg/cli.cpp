@@ -113,6 +113,16 @@ int handleInit(
                   << ".keety_build/\n";
     }
 
+    std::filesystem::path entryPath = cwd / m.entry;
+    if (!std::filesystem::exists(entryPath, ec)) {
+        std::filesystem::create_directories(entryPath.parent_path(), ec);
+        std::ofstream entryFile(entryPath);
+        entryFile << "import io;\n\n"
+                  << "fn main(): void {\n"
+                  << "    io.println(\"Hello, World!\");\n"
+                  << "}\n";
+    }
+
     out << "Initialized new KeetScript project '" << name << "' in " << cwd.string() << "\n";
     return 0;
 }

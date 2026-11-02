@@ -76,6 +76,11 @@ TEST_CASE("Cli: kattery init", "[kattery][cli]") {
         std::string gitignoreContent((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
         REQUIRE(gitignoreContent.find("build/") != std::string::npos);
         REQUIRE(gitignoreContent.find("keet_modules/") != std::string::npos);
+
+        REQUIRE(fs::exists(temp.path / "src" / "main.keet"));
+        std::ifstream mainFs(temp.path / "src" / "main.keet");
+        std::string mainContent((std::istreambuf_iterator<char>(mainFs)), std::istreambuf_iterator<char>());
+        REQUIRE(mainContent.find("Hello, World!") != std::string::npos);
     }
 
     SECTION("Scaffold with explicit --name") {
