@@ -159,6 +159,7 @@ private:
     bool has_net_import_{false};
     std::unordered_set<std::string> net_aliases_{};
     std::unordered_set<std::string> imported_net_symbols_{};
+    std::unordered_set<std::string> user_imported_modules_{};
 };
 
 } // namespace keety::emitter

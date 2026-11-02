@@ -4,6 +4,7 @@
 #include <keety/pkg/installer.hpp>
 #include <keety/pkg/lockfile.hpp>
 #include <keety/pkg/manifest.hpp>
+#include <keety/pkg/script_runner.hpp>
 #include <keety/pkg/source_spec.hpp>
 #include <keety/pkg/workspace.hpp>
 #include <keety/version.hpp>
@@ -31,13 +32,15 @@ void printHelp(std::ostream& out) {
         << "  update, up [<name>]                  Update locked git dependencies to latest ref\n"
         << "  list, ls [--tree]                    List installed packages\n"
         << "  run, r <script> [-- <args...>]       Run a custom script defined in pedigree.json\n"
-        << "  build [<file>]                       Compile the application entry point\n"
-        << "  test                                 Execute the project test suite\n\n"
+        << "  build [<file>] [-- <args...>]        Compile the application entry point\n"
+        << "  test, t [-- <args...>]               Execute the project test suite\n\n"
         << "Options:\n"
         << "  -V, --version                        Display kattery version\n"
         << "  -h, --help                           Display this help message\n"
         << "  --cwd <dir>                          Set the working directory\n"
         << "  -w, --workspace <name>               Target a specific workspace member\n"
+        << "  --workspaces                         Run command in all workspace members\n"
+        << "  --keep-going                         Continue executing remaining workspace members on error\n"
         << "  -D, --dev                            Add as a development dependency\n"
         << "  --frozen                             Fail if pedigree.lock is out of date\n"
         << "  --production                         Skip installing devDependencies\n"
@@ -343,6 +346,229 @@ int handleList(
     return 0;
 }
 
+int handleRun(
+    const std::filesystem::path& cwd,
+    const std::vector<std::string>& positional,
+    const std::vector<std::string>& forwardedArgs,
+    const std::optional<std::string>& workspaceMember,
+    bool runWorkspaces,
+    bool keepGoing,
+    bool captureOutput,
+    std::ostream& out,
+    std::ostream& err
+) {
+    Workspace ws = Workspace::discover(cwd);
+
+    const Manifest* targetManifest = &ws.rootManifest;
+    std::filesystem::path targetDir = ws.rootDir;
+
+    if (workspaceMember.has_value()) {
+        const auto* m = ws.findMember(*workspaceMember);
+        if (!m) {
+            throw PkgError(
+                ErrorCode::WorkspaceMemberMissing,
+                "workspace member '" + *workspaceMember + "' not found in workspace"
+            );
+        }
+        targetManifest = &m->manifest;
+        targetDir = m->directory;
+    } else if (const auto* m = ws.findMemberByPath(cwd)) {
+        targetManifest = &m->manifest;
+        targetDir = m->directory;
+    }
+
+    if (positional.empty()) {
+        if (targetManifest->scripts.empty()) {
+            out << "No scripts defined in pedigree.json\n";
+        } else {
+            out << "Available scripts:\n";
+            for (const auto& [name, cmd] : targetManifest->scripts) {
+                out << "  - " << name << ": " << cmd << "\n";
+            }
+        }
+        return 0;
+    }
+
+    const std::string& scriptName = positional[0];
+    std::vector<std::string> extraArgs;
+    for (size_t i = 1; i < positional.size(); ++i) {
+        extraArgs.push_back(positional[i]);
+    }
+    for (const auto& a : forwardedArgs) {
+        extraArgs.push_back(a);
+    }
+
+    if (runWorkspaces) {
+        if (!ws.hasMembers()) {
+            return ScriptRunner::runScript(
+                ws.rootManifest, ws.rootDir, scriptName, extraArgs, captureOutput, out, err
+            );
+        }
+
+        int lastFailure = 0;
+        bool foundAny = false;
+        for (const auto& m : ws.members) {
+            auto it = m.manifest.scripts.find(scriptName);
+            if (it != m.manifest.scripts.end()) {
+                foundAny = true;
+                out << "> " << m.name << ": " << scriptName << "\n";
+                int code = ScriptRunner::runScript(
+                    m.manifest, m.directory, scriptName, extraArgs, captureOutput, out, err
+                );
+                if (code != 0) {
+                    lastFailure = code;
+                    if (!keepGoing) {
+                        return code;
+                    }
+                }
+            }
+        }
+
+        if (!foundAny) {
+            err << "error: script '" << scriptName << "' not found in any workspace member\n";
+            return 127;
+        }
+        return lastFailure;
+    }
+
+    return ScriptRunner::runScript(
+        *targetManifest, targetDir, scriptName, extraArgs, captureOutput, out, err
+    );
+}
+
+int handleBuild(
+    const std::filesystem::path& cwd,
+    const std::vector<std::string>& positional,
+    const std::vector<std::string>& forwardedArgs,
+    const std::optional<std::string>& workspaceMember,
+    bool captureOutput,
+    std::ostream& out,
+    std::ostream& err
+) {
+    auto keetyExe = ScriptRunner::locateKeetyExecutable();
+    if (!keetyExe.has_value()) {
+        throw PkgError(
+            ErrorCode::ScriptExecutionFailed,
+            "keety executable not found",
+            "Ensure 'keety' is installed and in your PATH"
+        );
+    }
+
+    Workspace ws = Workspace::discover(cwd);
+    const Manifest* targetManifest = &ws.rootManifest;
+    std::filesystem::path targetDir = ws.rootDir;
+
+    if (workspaceMember.has_value()) {
+        const auto* m = ws.findMember(*workspaceMember);
+        if (!m) {
+            throw PkgError(
+                ErrorCode::WorkspaceMemberMissing,
+                "workspace member '" + *workspaceMember + "' not found in workspace"
+            );
+        }
+        targetManifest = &m->manifest;
+        targetDir = m->directory;
+    } else if (const auto* m = ws.findMemberByPath(cwd)) {
+        targetManifest = &m->manifest;
+        targetDir = m->directory;
+    }
+
+    ScriptRunner::checkKeetyVersionConstraint(*targetManifest, err);
+
+    std::string entryFile;
+    if (!positional.empty()) {
+        entryFile = positional[0];
+    } else if (!targetManifest->entry.empty()) {
+        entryFile = targetManifest->entry;
+    } else {
+        entryFile = "src/main.keet";
+    }
+
+    std::vector<std::string> argv = {keetyExe->string(), "build", entryFile};
+    for (size_t i = 1; i < positional.size(); ++i) {
+        argv.push_back(positional[i]);
+    }
+    for (const auto& a : forwardedArgs) {
+        argv.push_back(a);
+    }
+
+    ProcessOptions popt;
+    popt.argv = std::move(argv);
+    popt.cwd = targetDir;
+    popt.captureOutput = captureOutput;
+    ScriptRunner::injectKeetyPath(popt.env, keetyExe->parent_path());
+
+    ProcessResult pres = ProcessRunner::run(popt);
+    if (captureOutput) {
+        out << pres.stdoutText;
+        err << pres.stderrText;
+    }
+    return pres.exitCode;
+}
+
+int handleTest(
+    const std::filesystem::path& cwd,
+    const std::vector<std::string>& positional,
+    const std::vector<std::string>& forwardedArgs,
+    const std::optional<std::string>& workspaceMember,
+    bool runWorkspaces,
+    bool keepGoing,
+    bool captureOutput,
+    std::ostream& out,
+    std::ostream& err
+) {
+    Workspace ws = Workspace::discover(cwd);
+
+    if (runWorkspaces) {
+        if (!ws.hasMembers()) {
+            if (ws.rootManifest.scripts.find("test") == ws.rootManifest.scripts.end()) {
+                throw PkgError(
+                    ErrorCode::TestScriptNotDefined,
+                    "no 'test' script defined in pedigree.json",
+                    "Add a \"test\" script to the \"scripts\" section of pedigree.json"
+                );
+            }
+            std::vector<std::string> pos = {"test"};
+            pos.insert(pos.end(), positional.begin(), positional.end());
+            return handleRun(cwd, pos, forwardedArgs, workspaceMember, false, keepGoing, captureOutput, out, err);
+        }
+
+        std::vector<std::string> pos = {"test"};
+        pos.insert(pos.end(), positional.begin(), positional.end());
+        return handleRun(cwd, pos, forwardedArgs, workspaceMember, true, keepGoing, captureOutput, out, err);
+    }
+
+    const Manifest* targetManifest = &ws.rootManifest;
+    std::filesystem::path targetDir = ws.rootDir;
+
+    if (workspaceMember.has_value()) {
+        const auto* m = ws.findMember(*workspaceMember);
+        if (!m) {
+            throw PkgError(
+                ErrorCode::WorkspaceMemberMissing,
+                "workspace member '" + *workspaceMember + "' not found in workspace"
+            );
+        }
+        targetManifest = &m->manifest;
+        targetDir = m->directory;
+    } else if (const auto* m = ws.findMemberByPath(cwd)) {
+        targetManifest = &m->manifest;
+        targetDir = m->directory;
+    }
+
+    if (targetManifest->scripts.find("test") == targetManifest->scripts.end()) {
+        throw PkgError(
+            ErrorCode::TestScriptNotDefined,
+            "no 'test' script defined in pedigree.json",
+            "Add a \"test\" script to the \"scripts\" section of pedigree.json, e.g. \"test\": \"keety test\""
+        );
+    }
+
+    std::vector<std::string> pos = {"test"};
+    pos.insert(pos.end(), positional.begin(), positional.end());
+    return handleRun(cwd, pos, forwardedArgs, workspaceMember, false, keepGoing, captureOutput, out, err);
+}
+
 } // namespace
 
 int Cli::run(int argc, char* argv[], std::ostream& out, std::ostream& err) {
@@ -363,14 +589,22 @@ int Cli::run(const std::vector<std::string>& args, std::ostream& out, std::ostre
     bool verbose = false;
     bool isDev = false;
     bool tree = false;
-    (void)production;
-    (void)verbose;
+    bool runWorkspaces = false;
+    bool keepGoing = false;
 
     std::string command;
     std::vector<std::string> positional;
+    std::vector<std::string> forwardedArgs;
 
     for (size_t i = 0; i < args.size(); ++i) {
         const auto& arg = args[i];
+
+        if (arg == "--") {
+            for (size_t j = i + 1; j < args.size(); ++j) {
+                forwardedArgs.push_back(args[j]);
+            }
+            break;
+        }
 
         if (arg == "-h" || arg == "--help" || arg == "help") {
             printHelp(out);
@@ -395,6 +629,14 @@ int Cli::run(const std::vector<std::string>& args, std::ostream& out, std::ostre
                 return 1;
             }
             workspaceMember = args[++i];
+            continue;
+        }
+        if (arg == "--workspaces") {
+            runWorkspaces = true;
+            continue;
+        }
+        if (arg == "--keep-going") {
+            keepGoing = true;
             continue;
         }
         if (arg == "--name") {
@@ -441,6 +683,8 @@ int Cli::run(const std::vector<std::string>& args, std::ostream& out, std::ostre
         return 0;
     }
 
+    bool captureOutput = (&out != &std::cout || &err != &std::cerr);
+
     try {
         if (command == "init") {
             return handleInit(cwd, positional, explicitName, out);
@@ -460,9 +704,14 @@ int Cli::run(const std::vector<std::string>& args, std::ostream& out, std::ostre
         if (command == "list" || command == "ls") {
             return handleList(cwd, tree, out);
         }
-        if (command == "run" || command == "r" || command == "build" || command == "test" || command == "t") {
-            out << "kattery: script commands ('" << command << "') will be enabled in Phase 4.\n";
-            return 0;
+        if (command == "run" || command == "r") {
+            return handleRun(cwd, positional, forwardedArgs, workspaceMember, runWorkspaces, keepGoing, captureOutput, out, err);
+        }
+        if (command == "build") {
+            return handleBuild(cwd, positional, forwardedArgs, workspaceMember, captureOutput, out, err);
+        }
+        if (command == "test" || command == "t") {
+            return handleTest(cwd, positional, forwardedArgs, workspaceMember, runWorkspaces, keepGoing, captureOutput, out, err);
         }
 
         throw PkgError(
@@ -478,5 +727,6 @@ int Cli::run(const std::vector<std::string>& args, std::ostream& out, std::ostre
         return 1;
     }
 }
+
 
 } // namespace keety::pkg

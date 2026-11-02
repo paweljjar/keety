@@ -33,6 +33,7 @@ add_library(keety_core STATIC
     driver/toolchain_detector.cpp
     driver/toolchain_driver.cpp
     driver/cli_driver.cpp
+    driver/project_root.cpp
 )
 
 target_include_directories(keety_core PUBLIC
@@ -76,6 +77,7 @@ add_library(kattery_core STATIC
     pkg/fetcher.cpp
     pkg/graph.cpp
     pkg/installer.cpp
+    pkg/script_runner.cpp
     pkg/cli.cpp
 )
 

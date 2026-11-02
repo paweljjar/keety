@@ -88,6 +88,9 @@ add_executable(keety_unit_tests
     unit/test_kattery_cli_add_remove.cpp
     unit/test_kattery_cli_install.cpp
     unit/test_kattery_workspaces.cpp
+    unit/test_driver_project_root.cpp
+    unit/test_kattery_run.cpp
+    conformance/test_conformance_package_import.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE
