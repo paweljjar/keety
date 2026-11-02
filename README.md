@@ -291,8 +291,9 @@ keety/
 
 ## Documentation
 
-Detailed specifications are available in the [`documentation/`](documentation/) directory:
+Detailed specifications and roadmaps are available across the repository:
 
+- [Keety Project Roadmap](ROADMAP.md) — Strategic engineering roadmap, release milestones, and feature backlog.
 - [The KeetScript Language Specification](documentation/The%20KeetScript%20Language%20Specification.md) — Complete EBNF grammar, type system, memory model, and execution semantics.
 - [Keety Compiler Architecture Specification](documentation/Keety%20Compiler%20Architecture%20Specification.md) — Deep dive into the 6-stage pipeline, KeetIR optimization passes, and C++20 emission templates.
 - [KeetScript Conformance Test Suite and Benchmark Specification](documentation/KeetScript%20Conformance%20Test%20Suite%20and%20Benchmark%20Specification.md) — Validation test cases and benchmark methodology.
