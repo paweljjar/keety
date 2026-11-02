@@ -230,6 +230,8 @@ private:
     TypePtr checkTimeDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope);
     TypePtr checkJsonMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope);
     TypePtr checkJsonDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope);
+    TypePtr checkNetMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope);
+    TypePtr checkNetDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope);
 };
 
 } // namespace keety::typechecker
