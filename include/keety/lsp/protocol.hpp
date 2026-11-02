@@ -123,6 +123,21 @@ struct Diagnostic {
     JsonValue toJson() const;
 };
 
+struct Location {
+    std::string uri;
+    Range range;
+
+    JsonValue toJson() const;
+    static Location fromJson(const JsonValue& j);
+};
+
+struct TextDocumentPositionParams {
+    TextDocumentIdentifier textDocument;
+    Position position;
+
+    static TextDocumentPositionParams fromJson(const JsonValue& j);
+};
+
 struct PublishDiagnosticsParams {
     std::string uri;
     std::optional<int32_t> version;

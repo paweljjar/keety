@@ -94,6 +94,7 @@ add_executable(keety_unit_tests
     unit/test_lsp_protocol.cpp
     unit/test_lsp_server.cpp
     unit/test_lsp_diagnostics.cpp
+    unit/test_lsp_definition.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE

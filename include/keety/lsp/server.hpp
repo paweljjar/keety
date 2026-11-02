@@ -47,6 +47,9 @@ private:
     void handleDidChange(const JsonValue& params);
     void handleDidClose(const JsonValue& params);
 
+    // Language feature handlers
+    JsonValue handleDefinition(const JsonValue& params);
+
     void publishDiagnostics(const std::string& uri, int32_t version);
 
     Transport transport_;

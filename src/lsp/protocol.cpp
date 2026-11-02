@@ -136,6 +136,39 @@ JsonValue Diagnostic::toJson() const {
     return JsonValue(std::move(obj));
 }
 
+JsonValue Location::toJson() const {
+    JsonValue::Object obj;
+    obj["uri"] = JsonValue(uri);
+    obj["range"] = range.toJson();
+    return JsonValue(std::move(obj));
+}
+
+Location Location::fromJson(const JsonValue& j) {
+    Location loc;
+    if (auto* obj = asObject(j)) {
+        if (auto* u = findField(*obj, "uri"); u && u->is_string()) {
+            loc.uri = std::get<std::string>(u->value);
+        }
+        if (auto* r = findField(*obj, "range")) {
+            loc.range = Range::fromJson(*r);
+        }
+    }
+    return loc;
+}
+
+TextDocumentPositionParams TextDocumentPositionParams::fromJson(const JsonValue& j) {
+    TextDocumentPositionParams p;
+    if (auto* obj = asObject(j)) {
+        if (auto* docNode = findField(*obj, "textDocument")) {
+            p.textDocument = TextDocumentIdentifier::fromJson(*docNode);
+        }
+        if (auto* posNode = findField(*obj, "position")) {
+            p.position = Position::fromJson(*posNode);
+        }
+    }
+    return p;
+}
+
 JsonValue PublishDiagnosticsParams::toJson() const {
     JsonValue::Object obj;
     obj["uri"] = JsonValue(uri);

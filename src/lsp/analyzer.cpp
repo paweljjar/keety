@@ -186,4 +186,182 @@ std::vector<Diagnostic> Analyzer::analyze(const Document& doc) {
     return lspDiagnostics;
 }
 
+std::optional<Location> Analyzer::findDefinition(
+    const Document& doc,
+    Position pos,
+    const DocumentManager* docManager
+) {
+    auto byteOffsetOpt = doc.positionToOffset(pos);
+    if (!byteOffsetOpt.has_value()) {
+        return std::nullopt;
+    }
+    size_t targetOffset = *byteOffsetOpt;
+
+    diag::SourceManager sm;
+    std::string pathStr = uriToPath(doc.uri());
+    diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
+
+    lexer::Lexer lexer(fileId, doc.text());
+    auto tokens = lexer.tokenizeAll();
+
+    // Find token under cursor
+    const lexer::Token* targetTok = nullptr;
+    for (const auto& tok : tokens) {
+        if (targetOffset >= tok.span.start.offset && targetOffset <= tok.span.end.offset) {
+            targetTok = &tok;
+            break;
+        }
+    }
+
+    if (!targetTok) {
+        return std::nullopt;
+    }
+
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+
+    // 1. Check if clicking on an import path (e.g. StringLiteral "./aaaa")
+    if (targetTok->is(lexer::TokenKind::StringLiteral)) {
+        std::string rawPath = std::string(targetTok->lexeme);
+        if (rawPath.size() >= 2 && (rawPath.front() == '"' || rawPath.front() == '\'')) {
+            rawPath = rawPath.substr(1, rawPath.size() - 2);
+        }
+
+        std::filesystem::path projectRoot = driver::findProjectRoot(fsPath);
+        resolver::ModulePathResolver pathResolver(projectRoot);
+        auto resolved = pathResolver.resolve(fsPath, rawPath, targetTok->span);
+
+        if (resolved.has_value() && !resolved->isStandardLibrary()) {
+            std::string destUri = "file://" + resolved->canonicalPath.generic_string();
+            Range targetRange{Position{0, 0}, Position{0, 0}};
+
+            // If the target document is already loaded, we can provide a 0-0 range
+            if (docManager && docManager->hasDocument(destUri)) {
+                auto destDoc = docManager->getDocument(destUri);
+                if (destDoc.has_value()) {
+                    targetRange = Range{Position{0, 0}, Position{0, 0}};
+                }
+            }
+            return Location{destUri, targetRange};
+        }
+    }
+
+    // 2. Identifier Go-to-Definition
+    if (!targetTok->is(lexer::TokenKind::Identifier)) {
+        return std::nullopt;
+    }
+
+    std::string ident = std::string(targetTok->lexeme);
+
+    // Parse AST to query declaration spans
+    diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+    lexer::Lexer pLexer(fileId, doc.text());
+    parser::Parser parser(pLexer, &emitter);
+    auto ast = parser.parseModule(moduleName);
+
+    // 2a. Check if identifier is an imported package or module (e.g. `import math_utils;`)
+    for (const auto& decl : ast.declarations) {
+        if (!decl) continue;
+        if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+            // Check selective symbols
+            for (const auto& sym : imp->getSymbols()) {
+                if (sym.getEffectiveName() == ident) {
+                    // Jumps to the import declaration
+                    return Location{doc.uri(), spanToRange(doc, sym.span.isValid() ? sym.span : imp->getSpan())};
+                }
+            }
+
+            // Check namespace or bare import
+            std::string modAlias = imp->getModuleAlias();
+            std::string modPath = imp->getModulePath();
+            if (modAlias == ident || modPath == ident) {
+                std::filesystem::path projectRoot = driver::findProjectRoot(fsPath);
+                resolver::ModulePathResolver pathResolver(projectRoot);
+                auto resolved = pathResolver.resolve(fsPath, modPath, imp->getSpan());
+                if (resolved.has_value() && !resolved->isStandardLibrary()) {
+                    std::string destUri = "file://" + resolved->canonicalPath.generic_string();
+                    return Location{destUri, Range{Position{0, 0}, Position{0, 0}}};
+                }
+            }
+        }
+    }
+
+    // 2b. Check local parameters within function enclosing cursor
+    for (const auto& decl : ast.declarations) {
+        if (!decl) continue;
+        if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+            diag::SourceSpan fnSpan = fnDecl->getSpan();
+            if (targetOffset >= fnSpan.start.offset && targetOffset <= fnSpan.end.offset) {
+                // Inside this function! Check its parameters first
+                for (const auto& param : fnDecl->getParams()) {
+                    if (param.name == ident) {
+                        return Location{doc.uri(), spanToRange(doc, param.span)};
+                    }
+                }
+            }
+        } else if (const auto* classDecl = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+            for (const auto& method : classDecl->getMethods()) {
+                if (!method) continue;
+                diag::SourceSpan mSpan = method->getSpan();
+                if (targetOffset >= mSpan.start.offset && targetOffset <= mSpan.end.offset) {
+                    for (const auto& param : method->getParams()) {
+                        if (param.name == ident) {
+                            return Location{doc.uri(), spanToRange(doc, param.span)};
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2c. Check top-level declarations (functions, variables, constants, classes, enums)
+    for (const auto& decl : ast.declarations) {
+        if (!decl) continue;
+        if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+            if (fnDecl->getName() == ident) {
+                return Location{doc.uri(), spanToRange(doc, fnDecl->getSpan())};
+            }
+        } else if (const auto* varDecl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+            if (varDecl->getName() == ident) {
+                return Location{doc.uri(), spanToRange(doc, varDecl->getSpan())};
+            }
+        } else if (const auto* constDecl = dynamic_cast<const ast::ConstDecl*>(decl.get())) {
+            if (constDecl->getName() == ident) {
+                return Location{doc.uri(), spanToRange(doc, constDecl->getSpan())};
+            }
+        } else if (const auto* defDecl = dynamic_cast<const ast::DefineDecl*>(decl.get())) {
+            if (defDecl->getName() == ident) {
+                return Location{doc.uri(), spanToRange(doc, defDecl->getSpan())};
+            }
+        } else if (const auto* classDecl = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+            if (classDecl->getName() == ident) {
+                return Location{doc.uri(), spanToRange(doc, classDecl->getSpan())};
+            }
+            // Check class fields
+            for (const auto& field : classDecl->getFields()) {
+                if (field.name == ident) {
+                    return Location{doc.uri(), spanToRange(doc, field.span)};
+                }
+            }
+            // Check class methods
+            for (const auto& method : classDecl->getMethods()) {
+                if (method && method->getName() == ident) {
+                    return Location{doc.uri(), spanToRange(doc, method->getSpan())};
+                }
+            }
+        } else if (const auto* enumDecl = dynamic_cast<const ast::EnumDecl*>(decl.get())) {
+            if (enumDecl->getName() == ident) {
+                return Location{doc.uri(), spanToRange(doc, enumDecl->getSpan())};
+            }
+            for (const auto& member : enumDecl->getMembers()) {
+                if (member.name == ident) {
+                    return Location{doc.uri(), spanToRange(doc, member.span)};
+                }
+            }
+        }
+    }
+
+    return std::nullopt;
+}
+
 } // namespace keety::lsp

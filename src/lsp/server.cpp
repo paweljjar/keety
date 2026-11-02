@@ -81,6 +81,9 @@ std::optional<std::string> Server::handleRawMessage(const std::string& rawJson) 
             if (method == "initialize") {
                 auto res = handleInitialize(params);
                 return JsonRpcResponse::makeResult(id, res).serialize();
+            } else if (method == "textDocument/definition") {
+                auto res = handleDefinition(params);
+                return JsonRpcResponse::makeResult(id, res).serialize();
             } else if (method == "shutdown") {
                 auto res = handleShutdown();
                 return JsonRpcResponse::makeResult(id, res).serialize();
@@ -162,6 +165,12 @@ void Server::handleRequest(const RequestId& id, const std::string& method, const
         return;
     }
 
+    if (method == "textDocument/definition") {
+        auto res = handleDefinition(params);
+        transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
+        return;
+    }
+
     auto resp = JsonRpcResponse::makeError(id, JsonRpcErrorCode::MethodNotFound, "method not found: " + method);
     transport_.writeMessage(resp.serialize());
 }
@@ -202,7 +211,7 @@ JsonValue Server::handleInitialize(const JsonValue& /*params*/) {
     sync["change"] = JsonValue(int64_t(1)); // 1 = Full sync
     caps["textDocumentSync"] = JsonValue(std::move(sync));
 
-    caps["definitionProvider"] = JsonValue(false);
+    caps["definitionProvider"] = JsonValue(true);
     caps["hoverProvider"] = JsonValue(false);
     caps["completionProvider"] = JsonValue(std::monostate{});
     caps["documentSymbolProvider"] = JsonValue(false);
@@ -276,6 +285,19 @@ void Server::handleDidClose(const JsonValue& params) {
             transport_.writeMessage(notice.serialize());
         }
     }
+}
+
+JsonValue Server::handleDefinition(const JsonValue& params) {
+    auto p = TextDocumentPositionParams::fromJson(params);
+    auto docOpt = docManager_.getDocument(p.textDocument.uri);
+    if (!docOpt.has_value()) {
+        return JsonValue(std::monostate{});
+    }
+    auto locOpt = analyzer_.findDefinition(*docOpt, p.position, &docManager_);
+    if (!locOpt.has_value()) {
+        return JsonValue(std::monostate{});
+    }
+    return locOpt->toJson();
 }
 
 void Server::publishDiagnostics(const std::string& uri, int32_t version) {

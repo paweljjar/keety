@@ -15,6 +15,9 @@ public:
 
     /// Runs single-file in-memory analysis and returns LSP diagnostics.
     std::vector<Diagnostic> analyze(const Document& doc);
+
+    /// Locates the declaration location for the symbol under position (Go-to-Definition).
+    std::optional<Location> findDefinition(const Document& doc, Position pos, const DocumentManager* docManager = nullptr);
 };
 
 } // namespace keety::lsp
