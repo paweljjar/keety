@@ -84,6 +84,9 @@ std::optional<std::string> Server::handleRawMessage(const std::string& rawJson) 
             } else if (method == "textDocument/definition") {
                 auto res = handleDefinition(params);
                 return JsonRpcResponse::makeResult(id, res).serialize();
+            } else if (method == "textDocument/hover") {
+                auto res = handleHover(params);
+                return JsonRpcResponse::makeResult(id, res).serialize();
             } else if (method == "shutdown") {
                 auto res = handleShutdown();
                 return JsonRpcResponse::makeResult(id, res).serialize();
@@ -171,6 +174,12 @@ void Server::handleRequest(const RequestId& id, const std::string& method, const
         return;
     }
 
+    if (method == "textDocument/hover") {
+        auto res = handleHover(params);
+        transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
+        return;
+    }
+
     auto resp = JsonRpcResponse::makeError(id, JsonRpcErrorCode::MethodNotFound, "method not found: " + method);
     transport_.writeMessage(resp.serialize());
 }
@@ -212,7 +221,7 @@ JsonValue Server::handleInitialize(const JsonValue& /*params*/) {
     caps["textDocumentSync"] = JsonValue(std::move(sync));
 
     caps["definitionProvider"] = JsonValue(true);
-    caps["hoverProvider"] = JsonValue(false);
+    caps["hoverProvider"] = JsonValue(true);
     caps["completionProvider"] = JsonValue(std::monostate{});
     caps["documentSymbolProvider"] = JsonValue(false);
 
@@ -298,6 +307,19 @@ JsonValue Server::handleDefinition(const JsonValue& params) {
         return JsonValue(std::monostate{});
     }
     return locOpt->toJson();
+}
+
+JsonValue Server::handleHover(const JsonValue& params) {
+    auto p = TextDocumentPositionParams::fromJson(params);
+    auto docOpt = docManager_.getDocument(p.textDocument.uri);
+    if (!docOpt.has_value()) {
+        return JsonValue(std::monostate{});
+    }
+    auto hoverOpt = analyzer_.getHover(*docOpt, p.position, &docManager_);
+    if (!hoverOpt.has_value()) {
+        return JsonValue(std::monostate{});
+    }
+    return hoverOpt->toJson();
 }
 
 void Server::publishDiagnostics(const std::string& uri, int32_t version) {

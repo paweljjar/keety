@@ -49,6 +49,7 @@ private:
 
     // Language feature handlers
     JsonValue handleDefinition(const JsonValue& params);
+    JsonValue handleHover(const JsonValue& params);
 
     void publishDiagnostics(const std::string& uri, int32_t version);
 

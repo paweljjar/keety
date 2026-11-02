@@ -91,7 +91,7 @@ TEST_CASE("Analyzer findDefinition resolves symbols and declarations", "[lsp][de
         REQUIRE(locMethod->range.start.line == 2);
 
         // Cursor on field 'x' in line 1
-        auto locField = analyzer.findDefinition(doc, Position{1, 9});
+        auto locField = analyzer.findDefinition(doc, Position{1, 8});
         REQUIRE(locField.has_value());
         REQUIRE(locField->range.start.line == 1);
     }

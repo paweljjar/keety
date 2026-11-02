@@ -131,6 +131,22 @@ struct Location {
     static Location fromJson(const JsonValue& j);
 };
 
+struct MarkupContent {
+    std::string kind = "markdown";
+    std::string value;
+
+    JsonValue toJson() const;
+    static MarkupContent fromJson(const JsonValue& j);
+};
+
+struct Hover {
+    MarkupContent contents;
+    std::optional<Range> range;
+
+    JsonValue toJson() const;
+    static Hover fromJson(const JsonValue& j);
+};
+
 struct TextDocumentPositionParams {
     TextDocumentIdentifier textDocument;
     Position position;

@@ -156,6 +156,48 @@ Location Location::fromJson(const JsonValue& j) {
     return loc;
 }
 
+JsonValue MarkupContent::toJson() const {
+    JsonValue::Object obj;
+    obj["kind"] = JsonValue(kind);
+    obj["value"] = JsonValue(value);
+    return JsonValue(std::move(obj));
+}
+
+MarkupContent MarkupContent::fromJson(const JsonValue& j) {
+    MarkupContent mc;
+    if (auto* obj = asObject(j)) {
+        if (auto* k = findField(*obj, "kind"); k && k->is_string()) {
+            mc.kind = std::get<std::string>(k->value);
+        }
+        if (auto* v = findField(*obj, "value"); v && v->is_string()) {
+            mc.value = std::get<std::string>(v->value);
+        }
+    }
+    return mc;
+}
+
+JsonValue Hover::toJson() const {
+    JsonValue::Object obj;
+    obj["contents"] = contents.toJson();
+    if (range.has_value()) {
+        obj["range"] = range->toJson();
+    }
+    return JsonValue(std::move(obj));
+}
+
+Hover Hover::fromJson(const JsonValue& j) {
+    Hover h;
+    if (auto* obj = asObject(j)) {
+        if (auto* c = findField(*obj, "contents")) {
+            h.contents = MarkupContent::fromJson(*c);
+        }
+        if (auto* r = findField(*obj, "range")) {
+            h.range = Range::fromJson(*r);
+        }
+    }
+    return h;
+}
+
 TextDocumentPositionParams TextDocumentPositionParams::fromJson(const JsonValue& j) {
     TextDocumentPositionParams p;
     if (auto* obj = asObject(j)) {
