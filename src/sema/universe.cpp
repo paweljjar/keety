@@ -104,7 +104,8 @@ bool isStdlibModule(std::string_view name) noexcept {
            name == "sys" || name == "std.sys" || name == "keet.sys" ||
            name == "math" || name == "std.math" || name == "keet.math" ||
            name == "time" || name == "std.time" || name == "keet.time" ||
-           name == "json" || name == "std.json" || name == "keet.json";
+           name == "json" || name == "std.json" || name == "keet.json" ||
+           name == "net" || name == "std.net" || name == "keet.net";
 }
 
 void populateIoModuleScope(Scope& ioScope) {
@@ -416,6 +417,68 @@ void populateJsonModuleScope(Scope& jsonScope) {
     makeFn("writeFile");
 }
 
+void populateNetModuleScope(Scope& netScope) {
+    diag::SourceSpan span{};
+
+    auto makeFn = [&](const char* name) {
+        auto sym = std::make_shared<Symbol>(name, SymbolKind::Function, span);
+        sym->setExported(true);
+        sym->setConst(true);
+        netScope.define(sym, false);
+    };
+
+    // URL Parsing, Encoding & Query String Utilities
+    makeFn("urlEncode");
+    makeFn("urlDecode");
+    makeFn("parseUrl");
+    makeFn("urlScheme");
+    makeFn("urlHost");
+    makeFn("urlPort");
+    makeFn("urlPath");
+    makeFn("urlQuery");
+    makeFn("buildQuery");
+    makeFn("parseQuery");
+
+    // DNS Resolution & IP Address Utilities
+    makeFn("resolveHost");
+    makeFn("resolveIpv4");
+    makeFn("isIpv4");
+    makeFn("isIpv6");
+    makeFn("isIp");
+    makeFn("isLoopback");
+    makeFn("hostname");
+
+    // HTTP/1.1 & HTTPS Client
+    makeFn("get");
+    makeFn("getStatus");
+    makeFn("post");
+    makeFn("postJson");
+    makeFn("put");
+    makeFn("deleteReq");
+    makeFn("request");
+    makeFn("download");
+
+    // Handle-Based TCP Sockets
+    makeFn("tcpConnect");
+    makeFn("tcpConnectTimeout");
+    makeFn("tcpListen");
+    makeFn("tcpAccept");
+    makeFn("tcpLocalPort");
+    makeFn("tcpPeerAddr");
+    makeFn("tcpSend");
+    makeFn("tcpRecv");
+    makeFn("tcpRecvLine");
+    makeFn("tcpSetTimeout");
+    makeFn("tcpClose");
+
+    // Handle-Based UDP Sockets
+    makeFn("udpBind");
+    makeFn("udpLocalPort");
+    makeFn("udpSendTo");
+    makeFn("udpRecvFrom");
+    makeFn("udpClose");
+}
+
 std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, const std::shared_ptr<Scope>& universe) {
     auto scope = std::make_shared<Scope>(ScopeKind::Module, universe);
     if (moduleName == "io" || moduleName == "std.io" || moduleName == "keet.io") {
@@ -430,6 +493,8 @@ std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, cons
         populateTimeModuleScope(*scope);
     } else if (moduleName == "json" || moduleName == "std.json" || moduleName == "keet.json") {
         populateJsonModuleScope(*scope);
+    } else if (moduleName == "net" || moduleName == "std.net" || moduleName == "keet.net") {
+        populateNetModuleScope(*scope);
     }
     return scope;
 }

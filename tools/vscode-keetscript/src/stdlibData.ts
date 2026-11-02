@@ -970,6 +970,299 @@ export const STDLIB_MODULES: Record<string, StdlibModule> = {
         snippet: 'writeFile(${1:path}, ${2:text}, ${3:2})'
       }
     }
+  },
+  net: {
+    name: 'net',
+    doc: 'Networking suite: RFC 3986 URL & query parsing, DNS/IP utilities, HTTP/1.1 & HTTPS client, and handle-based TCP/UDP sockets.',
+    members: {
+      urlEncode: {
+        name: 'urlEncode',
+        kind: 'function',
+        signature: 'fn urlEncode(text: string): string',
+        doc: 'Percent-encodes text according to RFC 3986 unreserved characters.',
+        snippet: 'urlEncode(${1:text})'
+      },
+      urlDecode: {
+        name: 'urlDecode',
+        kind: 'function',
+        signature: 'fn urlDecode(text: string): string',
+        doc: 'Decodes RFC 3986 percent-encoded sequences (%XX) and + spaces.',
+        snippet: 'urlDecode(${1:text})'
+      },
+      parseUrl: {
+        name: 'parseUrl',
+        kind: 'function',
+        signature: 'fn parseUrl(url: string): map<string, string>',
+        doc: 'Parses url into keys "scheme", "host", "port", "path", "query", and "fragment".',
+        snippet: 'parseUrl(${1:url})'
+      },
+      urlScheme: {
+        name: 'urlScheme',
+        kind: 'function',
+        signature: 'fn urlScheme(url: string): string',
+        doc: 'Extracts the lowercase scheme ("http", "https", etc.) from url.',
+        snippet: 'urlScheme(${1:url})'
+      },
+      urlHost: {
+        name: 'urlHost',
+        kind: 'function',
+        signature: 'fn urlHost(url: string): string',
+        doc: 'Extracts the host or unbracketed IPv6 address from url.',
+        snippet: 'urlHost(${1:url})'
+      },
+      urlPort: {
+        name: 'urlPort',
+        kind: 'function',
+        signature: 'fn urlPort(url: string): int',
+        doc: 'Returns explicit port from url, or default 80 (http), 443 (https), or 0.',
+        snippet: 'urlPort(${1:url})'
+      },
+      urlPath: {
+        name: 'urlPath',
+        kind: 'function',
+        signature: 'fn urlPath(url: string): string',
+        doc: 'Extracts the path component from url (defaults to "/").',
+        snippet: 'urlPath(${1:url})'
+      },
+      urlQuery: {
+        name: 'urlQuery',
+        kind: 'function',
+        signature: 'fn urlQuery(url: string): string',
+        doc: 'Extracts the query string (without leading ?) from url.',
+        snippet: 'urlQuery(${1:url})'
+      },
+      buildQuery: {
+        name: 'buildQuery',
+        kind: 'function',
+        signature: 'fn buildQuery(params: map<string, string>): string',
+        doc: 'Serializes params into a sorted, URL-encoded k1=v1&k2=v2 query string.',
+        snippet: 'buildQuery(${1:params})'
+      },
+      parseQuery: {
+        name: 'parseQuery',
+        kind: 'function',
+        signature: 'fn parseQuery(query: string): map<string, string>',
+        doc: 'Parses a query string into a decoded map<string, string>.',
+        snippet: 'parseQuery(${1:query})'
+      },
+      resolveHost: {
+        name: 'resolveHost',
+        kind: 'function',
+        signature: 'fn resolveHost(host: string): array<string>',
+        doc: 'Resolves host via DNS into a list of IPv4 and IPv6 addresses.',
+        snippet: 'resolveHost("${1:localhost}")'
+      },
+      resolveIpv4: {
+        name: 'resolveIpv4',
+        kind: 'function',
+        signature: 'fn resolveIpv4(host: string): string',
+        doc: 'Resolves host to its first IPv4 address string.',
+        snippet: 'resolveIpv4("${1:localhost}")'
+      },
+      isIpv4: {
+        name: 'isIpv4',
+        kind: 'function',
+        signature: 'fn isIpv4(addr: string): bool',
+        doc: 'Returns true if addr is a valid dotted-quad IPv4 address.',
+        snippet: 'isIpv4(${1:addr})'
+      },
+      isIpv6: {
+        name: 'isIpv6',
+        kind: 'function',
+        signature: 'fn isIpv6(addr: string): bool',
+        doc: 'Returns true if addr is a valid IPv6 address.',
+        snippet: 'isIpv6(${1:addr})'
+      },
+      isIp: {
+        name: 'isIp',
+        kind: 'function',
+        signature: 'fn isIp(addr: string): bool',
+        doc: 'Returns true if addr is either a valid IPv4 or IPv6 address.',
+        snippet: 'isIp(${1:addr})'
+      },
+      isLoopback: {
+        name: 'isLoopback',
+        kind: 'function',
+        signature: 'fn isLoopback(addr: string): bool',
+        doc: 'Returns true if addr is "localhost", 127.0.0.0/8, or ::1.',
+        snippet: 'isLoopback(${1:addr})'
+      },
+      hostname: {
+        name: 'hostname',
+        kind: 'function',
+        signature: 'fn hostname(): string',
+        doc: 'Returns the local machine network hostname.',
+        snippet: 'hostname()'
+      },
+      get: {
+        name: 'get',
+        kind: 'function',
+        signature: 'fn get(url: string): string',
+        doc: 'Performs an HTTP/HTTPS GET request and returns the response body.',
+        snippet: 'get("${1:http://example.com}")'
+      },
+      getStatus: {
+        name: 'getStatus',
+        kind: 'function',
+        signature: 'fn getStatus(url: string): int',
+        doc: 'Performs an HTTP/HTTPS GET request and returns the HTTP status code.',
+        snippet: 'getStatus("${1:http://example.com}")'
+      },
+      post: {
+        name: 'post',
+        kind: 'function',
+        signature: 'fn post(url: string, body: string, contentType: string): string',
+        doc: 'Performs an HTTP/HTTPS POST request and returns the response body.',
+        snippet: 'post(${1:url}, ${2:body}, "${3:text/plain}")'
+      },
+      postJson: {
+        name: 'postJson',
+        kind: 'function',
+        signature: 'fn postJson(url: string, jsonBody: string): string',
+        doc: 'Performs an HTTP/HTTPS POST request with Content-Type: application/json.',
+        snippet: 'postJson(${1:url}, ${2:jsonBody})'
+      },
+      put: {
+        name: 'put',
+        kind: 'function',
+        signature: 'fn put(url: string, body: string, contentType: string): string',
+        doc: 'Performs an HTTP/HTTPS PUT request and returns the response body.',
+        snippet: 'put(${1:url}, ${2:body}, "${3:application/json}")'
+      },
+      deleteReq: {
+        name: 'deleteReq',
+        kind: 'function',
+        signature: 'fn deleteReq(url: string): string',
+        doc: 'Performs an HTTP/HTTPS DELETE request and returns the response body.',
+        snippet: 'deleteReq(${1:url})'
+      },
+      request: {
+        name: 'request',
+        kind: 'function',
+        signature: 'fn request(method: string, url: string, headers: map<string, string>, body: string, timeoutMs: int): string',
+        doc: 'Executes a customizable HTTP/HTTPS request and returns a JSON response envelope.',
+        snippet: 'request("${1:GET}", ${2:url}, ${3:headers}, ${4:""}, ${5:5000})'
+      },
+      download: {
+        name: 'download',
+        kind: 'function',
+        signature: 'fn download(url: string, destPath: string): bool',
+        doc: 'Downloads url to destPath and returns true if HTTP status is 200..299.',
+        snippet: 'download(${1:url}, ${2:destPath})'
+      },
+      tcpConnect: {
+        name: 'tcpConnect',
+        kind: 'function',
+        signature: 'fn tcpConnect(host: string, port: int): int',
+        doc: 'Opens a TCP connection to host:port and returns a stream socket handle.',
+        snippet: 'tcpConnect("${1:127.0.0.1}", ${2:8080})'
+      },
+      tcpConnectTimeout: {
+        name: 'tcpConnectTimeout',
+        kind: 'function',
+        signature: 'fn tcpConnectTimeout(host: string, port: int, timeoutMs: int): int',
+        doc: 'Opens a TCP connection to host:port with an explicit timeout in milliseconds.',
+        snippet: 'tcpConnectTimeout("${1:127.0.0.1}", ${2:8080}, ${3:3000})'
+      },
+      tcpListen: {
+        name: 'tcpListen',
+        kind: 'function',
+        signature: 'fn tcpListen(host: string, port: int, backlog: int): int',
+        doc: 'Binds and listens on host:port and returns a TCP listener handle.',
+        snippet: 'tcpListen("${1:127.0.0.1}", ${2:0}, ${3:16})'
+      },
+      tcpAccept: {
+        name: 'tcpAccept',
+        kind: 'function',
+        signature: 'fn tcpAccept(listenerHandle: int): int',
+        doc: 'Accepts an incoming connection on listenerHandle and returns a stream socket handle.',
+        snippet: 'tcpAccept(${1:listenerHandle})'
+      },
+      tcpLocalPort: {
+        name: 'tcpLocalPort',
+        kind: 'function',
+        signature: 'fn tcpLocalPort(handle: int): int',
+        doc: 'Returns the bound local port number of a TCP listener or stream handle.',
+        snippet: 'tcpLocalPort(${1:handle})'
+      },
+      tcpPeerAddr: {
+        name: 'tcpPeerAddr',
+        kind: 'function',
+        signature: 'fn tcpPeerAddr(handle: int): string',
+        doc: 'Returns the remote peer address formatted as "ip:port".',
+        snippet: 'tcpPeerAddr(${1:handle})'
+      },
+      tcpSend: {
+        name: 'tcpSend',
+        kind: 'function',
+        signature: 'fn tcpSend(handle: int, data: string): int',
+        doc: 'Sends all bytes of data over the TCP stream and returns total bytes sent.',
+        snippet: 'tcpSend(${1:handle}, ${2:data})'
+      },
+      tcpRecv: {
+        name: 'tcpRecv',
+        kind: 'function',
+        signature: 'fn tcpRecv(handle: int, maxBytes: int): string',
+        doc: 'Reads up to maxBytes from the TCP stream.',
+        snippet: 'tcpRecv(${1:handle}, ${2:4096})'
+      },
+      tcpRecvLine: {
+        name: 'tcpRecvLine',
+        kind: 'function',
+        signature: 'fn tcpRecvLine(handle: int, maxBytes: int): string',
+        doc: 'Reads a line up to \\n (stripping trailing \\r\\n or \\n) up to maxBytes.',
+        snippet: 'tcpRecvLine(${1:handle}, ${2:4096})'
+      },
+      tcpSetTimeout: {
+        name: 'tcpSetTimeout',
+        kind: 'function',
+        signature: 'fn tcpSetTimeout(handle: int, timeoutMs: int): void',
+        doc: 'Sets send and receive timeouts on handle in milliseconds.',
+        snippet: 'tcpSetTimeout(${1:handle}, ${2:3000})'
+      },
+      tcpClose: {
+        name: 'tcpClose',
+        kind: 'function',
+        signature: 'fn tcpClose(handle: int): void',
+        doc: 'Closes the TCP socket handle and removes it from the registry.',
+        snippet: 'tcpClose(${1:handle})'
+      },
+      udpBind: {
+        name: 'udpBind',
+        kind: 'function',
+        signature: 'fn udpBind(host: string, port: int): int',
+        doc: 'Binds a UDP socket on host:port and returns a UDP handle.',
+        snippet: 'udpBind("${1:127.0.0.1}", ${2:0})'
+      },
+      udpLocalPort: {
+        name: 'udpLocalPort',
+        kind: 'function',
+        signature: 'fn udpLocalPort(handle: int): int',
+        doc: 'Returns the bound local port number of the UDP socket handle.',
+        snippet: 'udpLocalPort(${1:handle})'
+      },
+      udpSendTo: {
+        name: 'udpSendTo',
+        kind: 'function',
+        signature: 'fn udpSendTo(handle: int, host: string, port: int, data: string): int',
+        doc: 'Sends datagram data to host:port and returns bytes transmitted.',
+        snippet: 'udpSendTo(${1:handle}, "${2:127.0.0.1}", ${3:port}, ${4:data})'
+      },
+      udpRecvFrom: {
+        name: 'udpRecvFrom',
+        kind: 'function',
+        signature: 'fn udpRecvFrom(handle: int, maxBytes: int): string',
+        doc: 'Receives a datagram up to maxBytes and returns JSON {"data":"...","host":"...","port":...}.',
+        snippet: 'udpRecvFrom(${1:handle}, ${2:1024})'
+      },
+      udpClose: {
+        name: 'udpClose',
+        kind: 'function',
+        signature: 'fn udpClose(handle: int): void',
+        doc: 'Closes the UDP socket handle.',
+        snippet: 'udpClose(${1:handle})'
+      }
+    }
   }
 };
 

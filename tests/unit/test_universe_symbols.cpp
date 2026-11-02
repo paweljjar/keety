@@ -187,3 +187,32 @@ TEST_CASE("Standard library json module scope population", "[sema][universe][jso
     CHECK(jsonScope->lookupCurrent("get_string") == nullptr);
 }
 
+TEST_CASE("Standard library net module scope population", "[sema][universe][net]") {
+    auto universe = Scope::createUniverse();
+    REQUIRE(universe != nullptr);
+
+    CHECK(isStdlibModule("net"));
+    auto netScope = createStdlibModuleScope("net", universe);
+    REQUIRE(netScope != nullptr);
+
+    const std::vector<std::string> expectedFunctions = {
+        "urlEncode", "urlDecode", "parseUrl", "urlScheme", "urlHost", "urlPort", "urlPath", "urlQuery", "buildQuery", "parseQuery",
+        "resolveHost", "resolveIpv4", "isIpv4", "isIpv6", "isIp", "isLoopback", "hostname",
+        "get", "getStatus", "post", "postJson", "put", "deleteReq", "request", "download",
+        "tcpConnect", "tcpConnectTimeout", "tcpListen", "tcpAccept", "tcpLocalPort", "tcpPeerAddr", "tcpSend", "tcpRecv", "tcpRecvLine", "tcpSetTimeout", "tcpClose",
+        "udpBind", "udpLocalPort", "udpSendTo", "udpRecvFrom", "udpClose"
+    };
+
+    CHECK(netScope->size() == expectedFunctions.size());
+    for (const auto& fnName : expectedFunctions) {
+        auto sym = netScope->lookupCurrent(fnName);
+        REQUIRE(sym != nullptr);
+        CHECK(sym->getName() == fnName);
+        CHECK(sym->getKind() == SymbolKind::Function);
+        CHECK(sym->isExported());
+    }
+
+    CHECK(netScope->lookupCurrent("url_encode") == nullptr);
+    CHECK(netScope->lookupCurrent("tcp_connect") == nullptr);
+}
+

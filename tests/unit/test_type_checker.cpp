@@ -3497,6 +3497,143 @@ TEST_CASE("Standard json module type checking and semantic validation", "[typech
     }
 }
 
+TEST_CASE("Standard net module type checking and semantic validation", "[typechecker][net]") {
+    SECTION("Valid net module member calls across all 41 functions") {
+        ParseResult res(
+            "import net;\n"
+            "fn run(hdrs: map<string, string>): int {\n"
+            "    let enc: string = net.urlEncode(\"hello world\");\n"
+            "    let dec: string = net.urlDecode(enc);\n"
+            "    let parts: map<string, string> = net.parseUrl(\"https://example.com:8443/v1?x=1\");\n"
+            "    let sch: string = net.urlScheme(\"https://example.com\");\n"
+            "    let hst: string = net.urlHost(\"https://example.com\");\n"
+            "    let prt: int = net.urlPort(\"https://example.com:8443\");\n"
+            "    let pth: string = net.urlPath(\"https://example.com/v1\");\n"
+            "    let qry: string = net.urlQuery(\"https://example.com?x=1\");\n"
+            "    let bq: string = net.buildQuery(hdrs);\n"
+            "    let pq: map<string, string> = net.parseQuery(bq);\n"
+            "    let addrs: array<string> = net.resolveHost(\"localhost\");\n"
+            "    let ip4: string = net.resolveIpv4(\"localhost\");\n"
+            "    let v4: bool = net.isIpv4(\"127.0.0.1\");\n"
+            "    let v6: bool = net.isIpv6(\"::1\");\n"
+            "    let vip: bool = net.isIp(\"127.0.0.1\");\n"
+            "    let loop: bool = net.isLoopback(\"127.0.0.1\");\n"
+            "    let hn: string = net.hostname();\n"
+            "    let g_body: string = net.get(\"http://example.com\");\n"
+            "    let g_code: int = net.getStatus(\"http://example.com\");\n"
+            "    let p_body: string = net.post(\"http://example.com\", \"a=1\", \"text/plain\");\n"
+            "    let pj_body: string = net.postJson(\"http://example.com\", \"{}\");\n"
+            "    let put_body: string = net.put(\"http://example.com\", \"{}\", \"application/json\");\n"
+            "    let del_body: string = net.deleteReq(\"http://example.com\");\n"
+            "    let req_json: string = net.request(\"GET\", \"http://example.com\", hdrs, \"\", 5000);\n"
+            "    let dl_ok: bool = net.download(\"http://example.com/file\", \"/tmp/out\");\n"
+            "    let s_conn: int = net.tcpConnect(\"127.0.0.1\", 8080);\n"
+            "    let s_conn_t: int = net.tcpConnectTimeout(\"127.0.0.1\", 8080, 1000);\n"
+            "    let s_lst: int = net.tcpListen(\"127.0.0.1\", 0, 16);\n"
+            "    let s_acc: int = net.tcpAccept(s_lst);\n"
+            "    let s_lport: int = net.tcpLocalPort(s_lst);\n"
+            "    let s_peer: string = net.tcpPeerAddr(s_acc);\n"
+            "    let s_sent: int = net.tcpSend(s_acc, \"hi\");\n"
+            "    let s_recv: string = net.tcpRecv(s_acc, 1024);\n"
+            "    let s_line: string = net.tcpRecvLine(s_acc, 1024);\n"
+            "    net.tcpSetTimeout(s_acc, 2000);\n"
+            "    net.tcpClose(s_acc);\n"
+            "    let u_sock: int = net.udpBind(\"127.0.0.1\", 0);\n"
+            "    let u_lport: int = net.udpLocalPort(u_sock);\n"
+            "    let u_sent: int = net.udpSendTo(u_sock, \"127.0.0.1\", u_lport, \"pkt\");\n"
+            "    let u_pkt: string = net.udpRecvFrom(u_sock, 512);\n"
+            "    net.udpClose(u_sock);\n"
+            "    return prt + g_code + s_lport + u_lport;\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Valid selective import and aliased import for net") {
+        ParseResult res(
+            "import net as n;\n"
+            "from \"net\" import urlEncode, urlPort, isIpv4;\n"
+            "fn run(): int {\n"
+            "    let e: string = urlEncode(\"a b\");\n"
+            "    let d: string = n.urlDecode(e);\n"
+            "    let ok: bool = isIpv4(\"127.0.0.1\");\n"
+            "    if (ok) {\n"
+            "        return urlPort(\"http://localhost:8080\");\n"
+            "    }\n"
+            "    return 0;\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Valid net call with zonk fallback expression") {
+        ParseResult res(
+            "import net;\n"
+            "fn fetchSafe(url: string): string {\n"
+            "    let body: string = net.get(url) zonk \"offline\";\n"
+            "    return body;\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Strict Zero-Coercion: reject float passed to tcpConnect port with E3002") {
+        ParseResult res(
+            "import net;\n"
+            "fn test_coercion(): void {\n"
+            "    let h: int = net.tcpConnect(\"127.0.0.1\", 8080.0);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ImplicitTypeWidening));
+    }
+
+    SECTION("Reject wrong map type in net.buildQuery with E3003") {
+        ParseResult res(
+            "import net;\n"
+            "fn test_invalid(m: map<string, int>): void {\n"
+            "    let q: string = net.buildQuery(m);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Reject unknown member on net with E3011") {
+        ParseResult res(
+            "import net;\n"
+            "fn test_invalid(): void {\n"
+            "    let s = net.nonExistentNetHelper(\"http://example.com\");\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::InvalidMemberAccess));
+    }
+
+    SECTION("Reject snake_case member on net with E3011") {
+        ParseResult res(
+            "import net;\n"
+            "fn test_invalid(): void {\n"
+            "    let s = net.url_encode(\"hello\");\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::InvalidMemberAccess));
+    }
+
+    SECTION("Reject importing non-exported symbol from net with E1005") {
+        ParseResult res(
+            "from \"net\" import unknownNetSymbol;\n"
+            "fn test_invalid(): void {}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::SymbolNotExported));
+    }
+}
+
 
 
 

@@ -1,0 +1,144 @@
+import net;
+import net as n;
+import json;
+import io;
+from "net" import urlEncode, urlDecode, isIpv4, isLoopback;
+
+fn main(): int {
+    io.println("Running KeetScript net conformance tests...");
+
+    // 1. URL Encoding & Decoding (qualified, aliased, and selective imports)
+    let raw_text: string = "keety net & json!";
+    let encoded: string = urlEncode(raw_text);
+    if (encoded != "keety%20net%20%26%20json%21") {
+        return 1;
+    }
+    if (urlDecode(encoded) != raw_text) {
+        return 2;
+    }
+
+    // 2. URL Parsing & Component Extractors
+    let url: string = "https://api.keetscript.dev:8443/v2/search?q=compiler&sort=asc#top";
+    if (net.urlScheme(url) != "https") {
+        return 3;
+    }
+    if (n.urlHost(url) != "api.keetscript.dev") {
+        return 4;
+    }
+    if (net.urlPort(url) != 8443) {
+        return 5;
+    }
+    if (net.urlPath(url) != "/v2/search") {
+        return 6;
+    }
+    if (net.urlQuery(url) != "q=compiler&sort=asc") {
+        return 7;
+    }
+    let parts: map<string, string> = net.parseUrl(url);
+    if (parts["fragment"] != "top" || parts["port"] != "8443") {
+        return 8;
+    }
+
+    // 3. Query String Builder & Parser
+    let q_params: map<string, string> = net.parseQuery("?page=1&tag=c%2B%2B20");
+    if (q_params["page"] != "1" || q_params["tag"] != "c++20") {
+        return 9;
+    }
+    let rebuilt: string = net.buildQuery(q_params);
+    if (rebuilt != "page=1&tag=c%2B%2B20") {
+        return 10;
+    }
+
+    // 4. IP Validation, Loopback & Hostname
+    if (!isIpv4("127.0.0.1") || isIpv4("999.0.0.1")) {
+        return 11;
+    }
+    if (!net.isIpv6("::1") || net.isIpv6("127.0.0.1")) {
+        return 12;
+    }
+    if (!net.isIp("127.0.0.1") || !net.isIp("::1") || net.isIp("not-an-ip")) {
+        return 13;
+    }
+    if (!isLoopback("127.0.0.1") || !isLoopback("::1") || !isLoopback("localhost") || isLoopback("8.8.8.8")) {
+        return 14;
+    }
+    let hname: string = net.hostname();
+    if (hname == "") {
+        return 15;
+    }
+    let resolved_ip: string = net.resolveIpv4("127.0.0.1");
+    if (resolved_ip != "127.0.0.1") {
+        return 16;
+    }
+    let resolved_all: array<string> = net.resolveHost("127.0.0.1");
+    if (resolved_all[0] != "127.0.0.1") {
+        return 17;
+    }
+
+    // 5. Zonk Error Recovery on Invalid URLs & Unreachable Ports
+    let bad_port: int = net.urlPort("not_a_valid_url") zonk -1;
+    if (bad_port != -1) {
+        return 18;
+    }
+    let bad_decode: string = net.urlDecode("%GG") zonk "fallback";
+    if (bad_decode != "fallback") {
+        return 19;
+    }
+
+    // 6. Handle-Based TCP Loopback (Non-Blocking Kernel Queue Handshake)
+    let listener: int = net.tcpListen("127.0.0.1", 0, 8);
+    let tcp_port: int = net.tcpLocalPort(listener);
+    if (tcp_port <= 0) {
+        return 20;
+    }
+    let client: int = net.tcpConnectTimeout("127.0.0.1", tcp_port, 3000);
+    let server_conn: int = net.tcpAccept(listener);
+    net.tcpSetTimeout(client, 3000);
+    net.tcpSetTimeout(server_conn, 3000);
+
+    let sent_bytes: int = net.tcpSend(client, "HELLO_TCP\r\nWORLD");
+    if (sent_bytes != 16) {
+        return 22;
+    }
+    let line: string = net.tcpRecvLine(server_conn, 256);
+    if (line != "HELLO_TCP") {
+        return 23;
+    }
+    let rem: string = net.tcpRecv(server_conn, 256);
+    if (rem != "WORLD") {
+        return 24;
+    }
+    let peer: string = net.tcpPeerAddr(server_conn);
+    if (peer == "") {
+        return 25;
+    }
+
+    net.tcpClose(client);
+    net.tcpClose(server_conn);
+    net.tcpClose(listener);
+
+    // 7. Handle-Based UDP Loopback + JSON Metadata Composition
+    let u_recv: int = net.udpBind("127.0.0.1", 0);
+    let u_send: int = net.udpBind("127.0.0.1", 0);
+    let u_port: int = net.udpLocalPort(u_recv);
+    let u_send_port: int = net.udpLocalPort(u_send);
+    if (u_port <= 0 || u_send_port <= 0) {
+        return 28;
+    }
+    let u_bytes: int = net.udpSendTo(u_send, "127.0.0.1", u_port, "KEET_UDP_DATAGRAM");
+    if (u_bytes != 17) {
+        return 29;
+    }
+    let pkt_json: string = net.udpRecvFrom(u_recv, 512);
+    if (json.getString(pkt_json, "data") != "KEET_UDP_DATAGRAM") {
+        return 30;
+    }
+    if (json.getString(pkt_json, "host") != "127.0.0.1" || json.getInt(pkt_json, "port") != u_send_port) {
+        return 31;
+    }
+    net.udpClose(u_send);
+    net.udpClose(u_recv);
+
+    io.println("All KeetScript net conformance tests passed successfully!");
+    return 0;
+}

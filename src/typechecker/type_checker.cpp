@@ -53,6 +53,15 @@ const std::vector<std::string> kJsonCandidates = {
     "stringify", "format", "minify", "escape", "unescape", "readFile", "writeFile"
 };
 
+const std::vector<std::string> kNetCandidates = {
+    "urlEncode", "urlDecode", "parseUrl", "urlScheme", "urlHost", "urlPort", "urlPath", "urlQuery", "buildQuery", "parseQuery",
+    "resolveHost", "resolveIpv4", "isIpv4", "isIpv6", "isIp", "isLoopback", "hostname",
+    "get", "getStatus", "post", "postJson", "put", "deleteReq", "request", "download",
+    "tcpConnect", "tcpConnectTimeout", "tcpListen", "tcpAccept", "tcpLocalPort", "tcpPeerAddr",
+    "tcpSend", "tcpRecv", "tcpRecvLine", "tcpSetTimeout", "tcpClose",
+    "udpBind", "udpLocalPort", "udpSendTo", "udpRecvFrom", "udpClose"
+};
+
 const std::vector<std::string> kColorCandidates = {
     "Default", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White", "Gray"
 };
@@ -3693,6 +3702,506 @@ TypePtr TypeChecker::checkJsonDirectCall(const ast::IdentExpr* callee, const ast
     return Type::unknownType();
 }
 
+TypePtr TypeChecker::checkNetMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!member || !call) return Type::unknownType();
+    const std::string& name = member->getMemberName();
+
+    auto checkArgCount = [&](size_t expected) -> bool {
+        if (call->getArgs().size() != expected) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function 'net." + name + "' expects " + std::to_string(expected) +
+                    (expected == 1 ? " argument" : " arguments") + ", but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "wrong argument count"));
+            }
+            hasErrors_ = true;
+            return false;
+        }
+        return true;
+    };
+
+    auto checkStringArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::stringType());
+                if (aType && !aType->isString()) {
+                    reportTypeMismatch(Type::stringType(), aType, arg.value->getSpan(), "net." + name + " " + argName + " argument");
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkIntArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::intType());
+                if (aType && !aType->isInt()) {
+                    if (aType->isFloat()) {
+                        reportImplicitWidening(aType, Type::intType(), arg.value->getSpan(), "net." + name + " " + argName + " argument");
+                    } else {
+                        reportTypeMismatch(Type::intType(), aType, arg.value->getSpan(), "net." + name + " " + argName + " argument");
+                    }
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkStringMapArg = [&](size_t idx, const char* argName) -> TypePtr {
+        auto expectedMap = Type::map(Type::stringType(), Type::stringType());
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, expectedMap);
+                if (aType && !aType->equals(*expectedMap)) {
+                    reportTypeMismatch(expectedMap, aType, arg.value->getSpan(), "net." + name + " " + argName + " argument");
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    // 1. URL & Query String Utilities
+    if (name == "urlEncode" || name == "urlDecode") {
+        if (checkArgCount(1)) checkStringArg(0, "text");
+        return Type::stringType();
+    }
+    if (name == "parseUrl") {
+        if (checkArgCount(1)) checkStringArg(0, "url");
+        return Type::map(Type::stringType(), Type::stringType());
+    }
+    if (name == "urlScheme" || name == "urlHost" || name == "urlPath" || name == "urlQuery") {
+        if (checkArgCount(1)) checkStringArg(0, "url");
+        return Type::stringType();
+    }
+    if (name == "urlPort") {
+        if (checkArgCount(1)) checkStringArg(0, "url");
+        return Type::intType();
+    }
+    if (name == "buildQuery") {
+        if (checkArgCount(1)) checkStringMapArg(0, "params");
+        return Type::stringType();
+    }
+    if (name == "parseQuery") {
+        if (checkArgCount(1)) checkStringArg(0, "query");
+        return Type::map(Type::stringType(), Type::stringType());
+    }
+
+    // 2. DNS & IP Address Utilities
+    if (name == "resolveHost") {
+        if (checkArgCount(1)) checkStringArg(0, "host");
+        return Type::array(Type::stringType());
+    }
+    if (name == "resolveIpv4") {
+        if (checkArgCount(1)) checkStringArg(0, "host");
+        return Type::stringType();
+    }
+    if (name == "isIpv4" || name == "isIpv6" || name == "isIp" || name == "isLoopback") {
+        if (checkArgCount(1)) checkStringArg(0, "addr");
+        return Type::boolType();
+    }
+    if (name == "hostname") {
+        checkArgCount(0);
+        return Type::stringType();
+    }
+
+    // 3. HTTP/1.1 & HTTPS Client
+    if (name == "get" || name == "deleteReq") {
+        if (checkArgCount(1)) checkStringArg(0, "url");
+        return Type::stringType();
+    }
+    if (name == "getStatus") {
+        if (checkArgCount(1)) checkStringArg(0, "url");
+        return Type::intType();
+    }
+    if (name == "post" || name == "put") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "url");
+            checkStringArg(1, "body");
+            checkStringArg(2, "contentType");
+        }
+        return Type::stringType();
+    }
+    if (name == "postJson") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "url");
+            checkStringArg(1, "jsonBody");
+        }
+        return Type::stringType();
+    }
+    if (name == "request") {
+        if (checkArgCount(5)) {
+            checkStringArg(0, "method");
+            checkStringArg(1, "url");
+            checkStringMapArg(2, "headers");
+            checkStringArg(3, "body");
+            checkIntArg(4, "timeoutMs");
+        }
+        return Type::stringType();
+    }
+    if (name == "download") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "url");
+            checkStringArg(1, "destPath");
+        }
+        return Type::boolType();
+    }
+
+    // 4. TCP Stream Sockets (Handle-Based)
+    if (name == "tcpConnect") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "host");
+            checkIntArg(1, "port");
+        }
+        return Type::intType();
+    }
+    if (name == "tcpConnectTimeout") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "host");
+            checkIntArg(1, "port");
+            checkIntArg(2, "timeoutMs");
+        }
+        return Type::intType();
+    }
+    if (name == "tcpListen") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "host");
+            checkIntArg(1, "port");
+            checkIntArg(2, "backlog");
+        }
+        return Type::intType();
+    }
+    if (name == "tcpAccept") {
+        if (checkArgCount(1)) checkIntArg(0, "serverHandle");
+        return Type::intType();
+    }
+    if (name == "tcpLocalPort") {
+        if (checkArgCount(1)) checkIntArg(0, "handle");
+        return Type::intType();
+    }
+    if (name == "tcpPeerAddr") {
+        if (checkArgCount(1)) checkIntArg(0, "handle");
+        return Type::stringType();
+    }
+    if (name == "tcpSend") {
+        if (checkArgCount(2)) {
+            checkIntArg(0, "handle");
+            checkStringArg(1, "data");
+        }
+        return Type::intType();
+    }
+    if (name == "tcpRecv" || name == "tcpRecvLine") {
+        if (checkArgCount(2)) {
+            checkIntArg(0, "handle");
+            checkIntArg(1, "maxBytes");
+        }
+        return Type::stringType();
+    }
+    if (name == "tcpSetTimeout") {
+        if (checkArgCount(2)) {
+            checkIntArg(0, "handle");
+            checkIntArg(1, "timeoutMs");
+        }
+        return Type::voidType();
+    }
+    if (name == "tcpClose") {
+        if (checkArgCount(1)) checkIntArg(0, "handle");
+        return Type::voidType();
+    }
+
+    // 5. UDP Datagram Sockets (Handle-Based)
+    if (name == "udpBind") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "host");
+            checkIntArg(1, "port");
+        }
+        return Type::intType();
+    }
+    if (name == "udpLocalPort") {
+        if (checkArgCount(1)) checkIntArg(0, "handle");
+        return Type::intType();
+    }
+    if (name == "udpSendTo") {
+        if (checkArgCount(4)) {
+            checkIntArg(0, "handle");
+            checkStringArg(1, "host");
+            checkIntArg(2, "port");
+            checkStringArg(3, "data");
+        }
+        return Type::intType();
+    }
+    if (name == "udpRecvFrom") {
+        if (checkArgCount(2)) {
+            checkIntArg(0, "handle");
+            checkIntArg(1, "maxBytes");
+        }
+        return Type::stringType();
+    }
+    if (name == "udpClose") {
+        if (checkArgCount(1)) checkIntArg(0, "handle");
+        return Type::voidType();
+    }
+
+    if (emitter_) {
+        auto d = diag::Diagnostic::makeError(
+            diag::ErrorCode::InvalidMemberAccess,
+            "module 'net' has no member named '" + name + "'",
+            member->getSpan().start).withLabel(member->getSpan(), "unknown member");
+        attachMemberSuggestions(d, name, kNetCandidates);
+        emitter_->report(d);
+    }
+    hasErrors_ = true;
+    return Type::unknownType();
+}
+
+TypePtr TypeChecker::checkNetDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!callee || !call) return Type::unknownType();
+    const std::string& name = callee->getName();
+
+    auto checkArgCount = [&](size_t expected) -> bool {
+        if (call->getArgs().size() != expected) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function '" + name + "' expects " + std::to_string(expected) +
+                    (expected == 1 ? " argument" : " arguments") + ", but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "wrong argument count"));
+            }
+            hasErrors_ = true;
+            return false;
+        }
+        return true;
+    };
+
+    auto checkStringArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::stringType());
+                if (aType && !aType->isString()) {
+                    reportTypeMismatch(Type::stringType(), aType, arg.value->getSpan(), name + " " + argName + " argument");
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkIntArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::intType());
+                if (aType && !aType->isInt()) {
+                    if (aType->isFloat()) {
+                        reportImplicitWidening(aType, Type::intType(), arg.value->getSpan(), name + " " + argName + " argument");
+                    } else {
+                        reportTypeMismatch(Type::intType(), aType, arg.value->getSpan(), name + " " + argName + " argument");
+                    }
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkStringMapArg = [&](size_t idx, const char* argName) -> TypePtr {
+        auto expectedMap = Type::map(Type::stringType(), Type::stringType());
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, expectedMap);
+                if (aType && !aType->equals(*expectedMap)) {
+                    reportTypeMismatch(expectedMap, aType, arg.value->getSpan(), name + " " + argName + " argument");
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    if (name == "urlEncode" || name == "urlDecode") {
+        if (checkArgCount(1)) checkStringArg(0, "text");
+        return Type::stringType();
+    }
+    if (name == "parseUrl") {
+        if (checkArgCount(1)) checkStringArg(0, "url");
+        return Type::map(Type::stringType(), Type::stringType());
+    }
+    if (name == "urlScheme" || name == "urlHost" || name == "urlPath" || name == "urlQuery") {
+        if (checkArgCount(1)) checkStringArg(0, "url");
+        return Type::stringType();
+    }
+    if (name == "urlPort") {
+        if (checkArgCount(1)) checkStringArg(0, "url");
+        return Type::intType();
+    }
+    if (name == "buildQuery") {
+        if (checkArgCount(1)) checkStringMapArg(0, "params");
+        return Type::stringType();
+    }
+    if (name == "parseQuery") {
+        if (checkArgCount(1)) checkStringArg(0, "query");
+        return Type::map(Type::stringType(), Type::stringType());
+    }
+    if (name == "resolveHost") {
+        if (checkArgCount(1)) checkStringArg(0, "host");
+        return Type::array(Type::stringType());
+    }
+    if (name == "resolveIpv4") {
+        if (checkArgCount(1)) checkStringArg(0, "host");
+        return Type::stringType();
+    }
+    if (name == "isIpv4" || name == "isIpv6" || name == "isIp" || name == "isLoopback") {
+        if (checkArgCount(1)) checkStringArg(0, "addr");
+        return Type::boolType();
+    }
+    if (name == "hostname") {
+        checkArgCount(0);
+        return Type::stringType();
+    }
+    if (name == "get" || name == "deleteReq") {
+        if (checkArgCount(1)) checkStringArg(0, "url");
+        return Type::stringType();
+    }
+    if (name == "getStatus") {
+        if (checkArgCount(1)) checkStringArg(0, "url");
+        return Type::intType();
+    }
+    if (name == "post" || name == "put") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "url");
+            checkStringArg(1, "body");
+            checkStringArg(2, "contentType");
+        }
+        return Type::stringType();
+    }
+    if (name == "postJson") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "url");
+            checkStringArg(1, "jsonBody");
+        }
+        return Type::stringType();
+    }
+    if (name == "request") {
+        if (checkArgCount(5)) {
+            checkStringArg(0, "method");
+            checkStringArg(1, "url");
+            checkStringMapArg(2, "headers");
+            checkStringArg(3, "body");
+            checkIntArg(4, "timeoutMs");
+        }
+        return Type::stringType();
+    }
+    if (name == "download") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "url");
+            checkStringArg(1, "destPath");
+        }
+        return Type::boolType();
+    }
+    if (name == "tcpConnect") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "host");
+            checkIntArg(1, "port");
+        }
+        return Type::intType();
+    }
+    if (name == "tcpConnectTimeout") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "host");
+            checkIntArg(1, "port");
+            checkIntArg(2, "timeoutMs");
+        }
+        return Type::intType();
+    }
+    if (name == "tcpListen") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "host");
+            checkIntArg(1, "port");
+            checkIntArg(2, "backlog");
+        }
+        return Type::intType();
+    }
+    if (name == "tcpAccept") {
+        if (checkArgCount(1)) checkIntArg(0, "serverHandle");
+        return Type::intType();
+    }
+    if (name == "tcpLocalPort") {
+        if (checkArgCount(1)) checkIntArg(0, "handle");
+        return Type::intType();
+    }
+    if (name == "tcpPeerAddr") {
+        if (checkArgCount(1)) checkIntArg(0, "handle");
+        return Type::stringType();
+    }
+    if (name == "tcpSend") {
+        if (checkArgCount(2)) {
+            checkIntArg(0, "handle");
+            checkStringArg(1, "data");
+        }
+        return Type::intType();
+    }
+    if (name == "tcpRecv" || name == "tcpRecvLine") {
+        if (checkArgCount(2)) {
+            checkIntArg(0, "handle");
+            checkIntArg(1, "maxBytes");
+        }
+        return Type::stringType();
+    }
+    if (name == "tcpSetTimeout") {
+        if (checkArgCount(2)) {
+            checkIntArg(0, "handle");
+            checkIntArg(1, "timeoutMs");
+        }
+        return Type::voidType();
+    }
+    if (name == "tcpClose") {
+        if (checkArgCount(1)) checkIntArg(0, "handle");
+        return Type::voidType();
+    }
+    if (name == "udpBind") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "host");
+            checkIntArg(1, "port");
+        }
+        return Type::intType();
+    }
+    if (name == "udpLocalPort") {
+        if (checkArgCount(1)) checkIntArg(0, "handle");
+        return Type::intType();
+    }
+    if (name == "udpSendTo") {
+        if (checkArgCount(4)) {
+            checkIntArg(0, "handle");
+            checkStringArg(1, "host");
+            checkIntArg(2, "port");
+            checkStringArg(3, "data");
+        }
+        return Type::intType();
+    }
+    if (name == "udpRecvFrom") {
+        if (checkArgCount(2)) {
+            checkIntArg(0, "handle");
+            checkIntArg(1, "maxBytes");
+        }
+        return Type::stringType();
+    }
+    if (name == "udpClose") {
+        if (checkArgCount(1)) checkIntArg(0, "handle");
+        return Type::voidType();
+    }
+
+    return Type::unknownType();
+}
+
 bool TypeChecker::checkZeroCoercion(const parser::ModuleAST& module, sema::Scope* rootScope) {
     return checkTypes(module, rootScope);
 }
@@ -3939,6 +4448,46 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                                     "symbol '" + symItem.originalName + "' is not exported by module 'json'",
                                     symItem.span.start).withLabel(symItem.span, "symbol not exported");
                                 attachMemberSuggestions(d, symItem.originalName, kJsonCandidates);
+                                emitter_->report(d);
+                            }
+                            hasErrors_ = true;
+                        }
+                    }
+                }
+            } else if (modPath == "net" || modPath == "std.net" || modPath == "keet.net") {
+                if (importDecl->getSymbols().empty()) {
+                    std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "net";
+                    if (!targetScope->lookupCurrent(boundName)) {
+                        auto modSym = std::make_shared<sema::Symbol>(boundName, sema::SymbolKind::Module, importDecl->getSpan());
+                        modSym->setExported(importDecl->isReExported());
+                        auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, modSym, emitter_);
+                        if (!res.success) hasErrors_ = true;
+                    }
+                } else {
+                    auto netScope = sema::createStdlibModuleScope("net");
+                    for (const auto& symItem : importDecl->getSymbols()) {
+                        auto exportedSym = netScope->lookupCurrent(symItem.originalName);
+                        if (exportedSym) {
+                            std::string importAsName = symItem.getEffectiveName();
+                            if (!targetScope->lookupCurrent(importAsName)) {
+                                auto importedSym = std::make_shared<sema::Symbol>(
+                                    importAsName, exportedSym->getKind(), symItem.span
+                                );
+                                importedSym->setExported(importDecl->isReExported());
+                                importedSym->setIsType(exportedSym->isType());
+                                if (exportedSym->isConstant()) {
+                                    importedSym->setConst(true);
+                                }
+                                auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, importedSym, emitter_);
+                                if (!res.success) hasErrors_ = true;
+                            }
+                        } else {
+                            if (emitter_) {
+                                auto d = diag::Diagnostic::makeError(
+                                    diag::ErrorCode::SymbolNotExported,
+                                    "symbol '" + symItem.originalName + "' is not exported by module 'net'",
+                                    symItem.span.start).withLabel(symItem.span, "symbol not exported");
+                                attachMemberSuggestions(d, symItem.originalName, kNetCandidates);
                                 emitter_->report(d);
                             }
                             hasErrors_ = true;
@@ -4985,6 +5534,21 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     }
                     return checkJsonMemberCall(member, call, scope);
                 }
+                if (objIdent->getName() == "net" || (sym && sym->isModule() && sym->getName() == "net")) {
+                    if (!sym) {
+                        if (emitter_) {
+                            auto d = diag::Diagnostic::makeError(
+                                diag::ErrorCode::UndeclaredIdentifier,
+                                "undeclared identifier '" + objIdent->getName() + "'",
+                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                            d.withHelp("add 'import net;' at the top of the file");
+                            emitter_->report(d);
+                        }
+                        hasErrors_ = true;
+                        return Type::unknownType();
+                    }
+                    return checkNetMemberCall(member, call, scope);
+                }
             }
 
             auto objType = member->getObject() ? inferType(*member->getObject(), scope) : Type::unknownType();
@@ -5223,6 +5787,19 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     name == "removeKey" || name == "stringify" || name == "format" || name == "minify" ||
                     name == "escape" || name == "unescape" || name == "readFile" || name == "writeFile") {
                     return checkJsonDirectCall(calleeIdent, call, scope);
+                }
+                if (name == "urlEncode" || name == "urlDecode" || name == "parseUrl" || name == "urlScheme" ||
+                    name == "urlHost" || name == "urlPort" || name == "urlPath" || name == "urlQuery" ||
+                    name == "buildQuery" || name == "parseQuery" || name == "resolveHost" || name == "resolveIpv4" ||
+                    name == "isIpv4" || name == "isIpv6" || name == "isIp" || name == "isLoopback" ||
+                    name == "hostname" || name == "get" || name == "getStatus" || name == "post" ||
+                    name == "postJson" || name == "put" || name == "deleteReq" || name == "request" ||
+                    name == "download" || name == "tcpConnect" || name == "tcpConnectTimeout" || name == "tcpListen" ||
+                    name == "tcpAccept" || name == "tcpLocalPort" || name == "tcpPeerAddr" || name == "tcpSend" ||
+                    name == "tcpRecv" || name == "tcpRecvLine" || name == "tcpSetTimeout" || name == "tcpClose" ||
+                    name == "udpBind" || name == "udpLocalPort" || name == "udpSendTo" || name == "udpRecvFrom" ||
+                    name == "udpClose") {
+                    return checkNetDirectCall(calleeIdent, call, scope);
                 }
             }
             const ast::FnDecl* fnDecl = nullptr;
@@ -5869,6 +6446,99 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                         "module 'json' has no member '" + member->getMemberName() + "'",
                         member->getSpan().start).withLabel(member->getSpan(), "unknown module member");
                     attachMemberSuggestions(d, member->getMemberName(), kJsonCandidates);
+                    emitter_->report(d);
+                }
+                hasErrors_ = true;
+                return Type::unknownType();
+            }
+            if (objIdent->getName() == "net" || (sym && sym->isModule() && sym->getName() == "net")) {
+                if (!sym) {
+                    if (emitter_) {
+                        auto d = diag::Diagnostic::makeError(
+                            diag::ErrorCode::UndeclaredIdentifier,
+                            "undeclared identifier '" + objIdent->getName() + "'",
+                            objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                        d.withHelp("add 'import net;' at the top of the file");
+                        emitter_->report(d);
+                    }
+                    hasErrors_ = true;
+                    return Type::unknownType();
+                }
+                const std::string& mName = member->getMemberName();
+                if (mName == "hostname") {
+                    return Type::function({}, Type::stringType(), false);
+                }
+                if (mName == "urlEncode" || mName == "urlDecode" || mName == "urlScheme" ||
+                    mName == "urlHost" || mName == "urlPath" || mName == "urlQuery" ||
+                    mName == "resolveIpv4" || mName == "get" || mName == "deleteReq") {
+                    return Type::function({Type::stringType()}, Type::stringType(), false);
+                }
+                if (mName == "parseUrl" || mName == "parseQuery") {
+                    return Type::function({Type::stringType()}, Type::map(Type::stringType(), Type::stringType()), false);
+                }
+                if (mName == "urlPort" || mName == "getStatus") {
+                    return Type::function({Type::stringType()}, Type::intType(), false);
+                }
+                if (mName == "buildQuery") {
+                    return Type::function({Type::map(Type::stringType(), Type::stringType())}, Type::stringType(), false);
+                }
+                if (mName == "resolveHost") {
+                    return Type::function({Type::stringType()}, Type::array(Type::stringType()), false);
+                }
+                if (mName == "isIpv4" || mName == "isIpv6" || mName == "isIp" || mName == "isLoopback") {
+                    return Type::function({Type::stringType()}, Type::boolType(), false);
+                }
+                if (mName == "post") {
+                    return Type::function({Type::stringType(), Type::stringType(), Type::stringType()}, Type::stringType(), false);
+                }
+                if (mName == "postJson" || mName == "put") {
+                    return Type::function({Type::stringType(), Type::stringType()}, Type::stringType(), false);
+                }
+                if (mName == "request") {
+                    return Type::function({
+                        Type::stringType(),
+                        Type::stringType(),
+                        Type::map(Type::stringType(), Type::stringType()),
+                        Type::stringType(),
+                        Type::intType()
+                    }, Type::stringType(), false);
+                }
+                if (mName == "download") {
+                    return Type::function({Type::stringType(), Type::stringType()}, Type::boolType(), false);
+                }
+                if (mName == "tcpConnect" || mName == "tcpListen" || mName == "udpBind") {
+                    return Type::function({Type::stringType(), Type::intType()}, Type::intType(), false);
+                }
+                if (mName == "tcpConnectTimeout") {
+                    return Type::function({Type::stringType(), Type::intType(), Type::intType()}, Type::intType(), false);
+                }
+                if (mName == "tcpAccept" || mName == "tcpLocalPort" || mName == "udpLocalPort") {
+                    return Type::function({Type::intType()}, Type::intType(), false);
+                }
+                if (mName == "tcpPeerAddr" || mName == "tcpRecvLine") {
+                    return Type::function({Type::intType()}, Type::stringType(), false);
+                }
+                if (mName == "tcpSend") {
+                    return Type::function({Type::intType(), Type::stringType()}, Type::intType(), false);
+                }
+                if (mName == "tcpRecv" || mName == "udpRecvFrom") {
+                    return Type::function({Type::intType(), Type::intType()}, Type::stringType(), false);
+                }
+                if (mName == "tcpSetTimeout") {
+                    return Type::function({Type::intType(), Type::intType()}, Type::boolType(), false);
+                }
+                if (mName == "tcpClose" || mName == "udpClose") {
+                    return Type::function({Type::intType()}, Type::boolType(), false);
+                }
+                if (mName == "udpSendTo") {
+                    return Type::function({Type::intType(), Type::stringType(), Type::intType(), Type::stringType()}, Type::intType(), false);
+                }
+                if (emitter_) {
+                    auto d = diag::Diagnostic::makeError(
+                        diag::ErrorCode::InvalidMemberAccess,
+                        "module 'net' has no member '" + member->getMemberName() + "'",
+                        member->getSpan().start).withLabel(member->getSpan(), "unknown module member");
+                    attachMemberSuggestions(d, member->getMemberName(), kNetCandidates);
                     emitter_->report(d);
                 }
                 hasErrors_ = true;

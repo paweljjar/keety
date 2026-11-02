@@ -40,6 +40,9 @@ std::unique_ptr<Module> AstLowerer::lower_module(const parser::ModuleAST& module
     has_json_import_ = false;
     json_aliases_.clear();
     imported_json_symbols_.clear();
+    has_net_import_ = false;
+    net_aliases_.clear();
+    imported_net_symbols_.clear();
 
     for (const auto& decl : module_ast.declarations) {
         if (!decl) continue;
@@ -91,6 +94,14 @@ std::unique_ptr<Module> AstLowerer::lower_module(const parser::ModuleAST& module
                 }
                 for (const auto& s : imp->getSymbols()) {
                     imported_json_symbols_.insert(s.getEffectiveName());
+                }
+            } else if (p == "net" || p == "std.net" || p == "keet.net") {
+                has_net_import_ = true;
+                if (!imp->getModuleAlias().empty()) {
+                    net_aliases_.insert(imp->getModuleAlias());
+                }
+                for (const auto& s : imp->getSymbols()) {
+                    imported_net_symbols_.insert(s.getEffectiveName());
                 }
             }
         } else if (const auto* var_decl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
@@ -863,6 +874,12 @@ Operand AstLowerer::lower_call_expr(const ast::CallExpr& expr) {
                 emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
                 return dest;
             }
+            if (obj_id->getName() == "net" || net_aliases_.count(obj_id->getName())) {
+                const std::string& m_name = member->getMemberName();
+                std::string callee_name = "@keet.net." + m_name;
+                emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
+                return dest;
+            }
         }
         Operand receiver = lower_expression(*member->getObject());
         emit(std::make_unique<MethodCallInst>(dest, receiver, member->getMemberName(), std::move(args)));
@@ -962,6 +979,22 @@ Operand AstLowerer::lower_call_expr(const ast::CallExpr& expr) {
             name == "removeKey" || name == "stringify" || name == "format" || name == "minify" ||
             name == "escape" || name == "unescape" || name == "readFile" || name == "writeFile")) {
             std::string callee_name = "@keet.json." + name;
+            emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
+            return dest;
+        }
+        if (has_net_import_ && (imported_net_symbols_.count(name) ||
+            name == "urlEncode" || name == "urlDecode" || name == "parseUrl" || name == "urlScheme" ||
+            name == "urlHost" || name == "urlPort" || name == "urlPath" || name == "urlQuery" ||
+            name == "buildQuery" || name == "parseQuery" || name == "resolveHost" || name == "resolveIpv4" ||
+            name == "isIpv4" || name == "isIpv6" || name == "isIp" || name == "isLoopback" ||
+            name == "hostname" || name == "get" || name == "getStatus" || name == "post" ||
+            name == "postJson" || name == "put" || name == "deleteReq" || name == "request" ||
+            name == "download" || name == "tcpConnect" || name == "tcpConnectTimeout" || name == "tcpListen" ||
+            name == "tcpAccept" || name == "tcpLocalPort" || name == "tcpPeerAddr" || name == "tcpSend" ||
+            name == "tcpRecv" || name == "tcpRecvLine" || name == "tcpSetTimeout" || name == "tcpClose" ||
+            name == "udpBind" || name == "udpLocalPort" || name == "udpSendTo" || name == "udpRecvFrom" ||
+            name == "udpClose")) {
+            std::string callee_name = "@keet.net." + name;
             emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
             return dest;
         }
