@@ -186,7 +186,11 @@ SourceSpec SourceSpec::parse(std::string_view raw, std::string_view context) {
 
     SourceSpec spec;
     spec.kind = SourceKind::Git;
-    spec.url = std::string(urlPart);
+    std::string normUrl(urlPart);
+    if (normUrl.rfind("file://", 0) == 0) {
+        std::replace(normUrl.begin(), normUrl.end(), '\\', '/');
+    }
+    spec.url = std::move(normUrl);
     if (!refPart.empty()) {
         spec.ref = std::string(refPart);
     }

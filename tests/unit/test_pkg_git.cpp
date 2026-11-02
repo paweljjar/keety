@@ -48,7 +48,7 @@ struct LocalGitRepo {
         (void)ProcessRunner::run({"git", "-C", temp.path.string(), "add", "."});
         (void)ProcessRunner::run({"git", "-C", temp.path.string(), "commit", "-m", "Initial commit"});
         (void)ProcessRunner::run({"git", "-C", temp.path.string(), "tag", "v1.0.0"});
-        repoUrl = "file://" + temp.path.string();
+        repoUrl = "file://" + temp.path.generic_string();
     }
 };
 
