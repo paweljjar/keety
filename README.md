@@ -163,7 +163,7 @@ flowchart TD
 
 1. **Lexer (`keety::lexer`):** UTF-8 maximal-munch tokenizer with context-sensitive disambiguation for blank identifiers (`_`), generic `<TypeArgs>`, nested closing brackets (`>>`), and recursive `${...}` template string interpolation.
 2. **Parser (`keety::parser`):** Recursive descent + Pratt expression parser producing a strongly typed AST with exact `SourceSpan` tracking.
-3. **Module Resolver (`keety::resolver`):** Resolves standard library (`io`, `fs`, `sys`, `math`, `time`), `keet_modules/`, and relative imports into a dependency graph, detects cycles via Tarjan's SCC algorithm, and computes topological initialization order.
+3. **Module Resolver (`keety::resolver`):** Resolves standard library (`io`, `fs`, `sys`, `math`, `time`, `json`), `keet_modules/`, and relative imports into a dependency graph, detects cycles via Tarjan's SCC algorithm, and computes topological initialization order.
 4. **Semantic Analyzer & Type Checker (`keety::sema`, `keety::typechecker`):** Enforces strict no-shadowing, exported `const`-view rules, union algebra normalization, flow-sensitive type narrowing with mutation invalidation, and the 5 `mut` borrow-checking rules.
 5. **KeetIR & Optimization Passes (`keety::ir`):** Lowers the AST into basic-block intermediate representation and runs static optimization passes:
     - *Const-Ref Promotion:* Promotes unmutated by-value parameters to `const T&`.
@@ -176,7 +176,7 @@ flowchart TD
 
 ## Standard Library
 
-KeetScript ships with a header-only C++20 runtime (`runtime/keet/`) and five built-in standard library modules:
+KeetScript ships with a header-only C++20 runtime (`runtime/keet/`) and six built-in standard library modules:
 
 | Module | Import | Capabilities |
 | :--- | :--- | :--- |
@@ -185,6 +185,7 @@ KeetScript ships with a header-only C++20 runtime (`runtime/keet/`) and five bui
 | **`sys`** | `import sys;` | Command-line arguments (`args`), environment variables (`getEnv`, `getEnvOr`, `setEnv`, `unsetEnv`, `hasEnv`), process exit, and platform metadata |
 | **`math`** | `import math;` | Constants (`PI`, `E`, `TAU`), trigonometry, logarithms, rounding, and clamping utilities |
 | **`time`** | `import time;` | Monotonic high-resolution timers (`nowNs`, `nowMs`), wall-clock timestamps, and thread sleep (`sleepMs`) |
+| **`json`** | `import json;` | RFC 8259 JSON validation, dot-path queries (`getString`, `getInt`, `getBool`, `*Or`), collection parsers, immutable builders, and polymorphic `stringify` |
 
 ---
 

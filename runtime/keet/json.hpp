@@ -1103,9 +1103,9 @@ template <typename T> inline constexpr bool is_deep_copy_ptr_v = is_deep_copy_pt
     return result;
 }
 
-/// Parses a homogeneous JSON array of booleans into array<bool> (std::vector<keet::BoolByte>).
+/// Parses a homogeneous JSON array of booleans into array<bool> (std::vector<bool>).
 /// Throws keet::error("JsonError", ...) if not an array or if any element is not a boolean.
-[[nodiscard]] inline std::vector<keet::BoolByte> parseBoolArray(const std::string& text) {
+[[nodiscard]] inline std::vector<bool> parseBoolArray(const std::string& text) {
     detail::Parser p(text);
     detail::JsonNode root = p.parse_document();
     if (!root.is_array()) {
@@ -1115,7 +1115,7 @@ template <typename T> inline constexpr bool is_deep_copy_ptr_v = is_deep_copy_pt
         );
     }
     const auto& arr = std::get<detail::JsonNode::Array>(root.value);
-    std::vector<keet::BoolByte> result;
+    std::vector<bool> result;
     result.reserve(arr.size());
     for (size_t i = 0; i < arr.size(); ++i) {
         if (!arr[i].is_bool()) {
@@ -1124,7 +1124,7 @@ template <typename T> inline constexpr bool is_deep_copy_ptr_v = is_deep_copy_pt
                 "parseBoolArray: element at index " + std::to_string(i) + " is not a boolean"
             );
         }
-        result.emplace_back(std::get<bool>(arr[i].value));
+        result.push_back(std::get<bool>(arr[i].value));
     }
     return result;
 }
@@ -1279,8 +1279,9 @@ template <typename T>
     using DecayT = std::decay_t<T>;
     if constexpr (std::is_same_v<DecayT, std::monostate> || std::is_same_v<DecayT, std::nullptr_t>) {
         return "null";
-    } else if constexpr (std::is_same_v<DecayT, bool>) {
-        return value ? "true" : "false";
+    } else if constexpr (std::is_same_v<DecayT, bool> || std::is_same_v<DecayT, std::vector<bool>::reference> ||
+                         std::is_same_v<DecayT, std::vector<bool>::const_reference>) {
+        return static_cast<bool>(value) ? "true" : "false";
     } else if constexpr (std::is_same_v<DecayT, keet::BoolByte>) {
         return static_cast<bool>(value) ? "true" : "false";
     } else if constexpr (std::is_same_v<DecayT, char>) {
@@ -1312,7 +1313,11 @@ template <typename T>
         std::string out = "[";
         for (size_t i = 0; i < value.size(); ++i) {
             if (i > 0) out.push_back(',');
-            out += stringify(value[i]);
+            if constexpr (std::is_same_v<DecayT, std::vector<bool>>) {
+                out += static_cast<bool>(value[i]) ? "true" : "false";
+            } else {
+                out += stringify(value[i]);
+            }
         }
         out.push_back(']');
         return out;

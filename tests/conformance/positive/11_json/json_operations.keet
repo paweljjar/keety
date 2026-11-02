@@ -1,0 +1,168 @@
+import json;
+import json as j;
+import io;
+import fs;
+from "json" import getString, getIntOr, stringify;
+
+fn main(): int {
+    io.println("Running KeetScript json conformance tests...");
+
+    // 1. Validation & Type Inspection
+    let sample: string = "{\"server\":{\"host\":\"127.0.0.1\",\"port\":8080,\"tls\":true,\"ratio\":0.75,\"cert\":null},\"users\":[{\"name\":\"Alice\",\"score\":100},{\"name\":\"Bob\",\"score\":85}]}";
+    if (!json.isValid(sample)) {
+        return 1;
+    }
+    if (json.isValid("{broken_json")) {
+        return 2;
+    }
+    if (json.typeOf(sample) != "object") {
+        return 3;
+    }
+    if (!json.isObject(sample)) {
+        return 4;
+    }
+    if (json.isArray(sample)) {
+        return 5;
+    }
+    if (json.size(sample) != 2) {
+        return 6;
+    }
+    let top_keys: array<string> = json.keys(sample);
+    if (top_keys[0] != "server" || top_keys[1] != "users") {
+        return 7;
+    }
+
+    // 2. Dot-path extraction & *Or fallback helpers
+    if (!json.hasKey(sample, "server.host") || json.hasKey(sample, "server.missing")) {
+        return 8;
+    }
+    if (!json.isNull(sample, "server.cert") || json.isNull(sample, "server.host")) {
+        return 9;
+    }
+    if (getString(sample, "server.host") != "127.0.0.1") {
+        return 10;
+    }
+    if (json.getInt(sample, "server.port") != 8080) {
+        return 11;
+    }
+    if (!json.getBool(sample, "server.tls")) {
+        return 12;
+    }
+    let ratio: float = json.getFloat(sample, "server.ratio");
+    if (ratio < 0.74 || ratio > 0.76) {
+        return 13;
+    }
+    if (json.getString(sample, "users.0.name") != "Alice") {
+        return 14;
+    }
+    if (json.getInt(sample, "users.1.score") != 85) {
+        return 15;
+    }
+    if (json.getStringOr(sample, "server.missing", "fallback") != "fallback") {
+        return 16;
+    }
+    if (getIntOr(sample, "server.missing", 9000) != 9000) {
+        return 17;
+    }
+    if (json.getBoolOr(sample, "server.missing", false) != false) {
+        return 18;
+    }
+    let fallback_f: float = json.getFloatOr(sample, "server.missing", 2.5);
+    if (fallback_f < 2.49 || fallback_f > 2.51) {
+        return 19;
+    }
+
+    // 3. Zonk error recovery on missing key or malformed JSON
+    let bad_port: int = json.getInt(sample, "server.nonexistent") zonk -1;
+    if (bad_port != -1) {
+        return 20;
+    }
+    let bad_parse: int = json.size("{not_valid") zonk -2;
+    if (bad_parse != -2) {
+        return 21;
+    }
+
+    // 4. Immutable Object & Array Builders (via both json and alias j)
+    let built: string = j.emptyObject();
+    built = j.setString(built, "app.name", "keety");
+    built = json.setInt(built, "app.version", 1);
+    built = json.setFloat(built, "app.load", 0.5);
+    built = json.setBool(built, "app.production", true);
+    built = json.setNull(built, "app.legacy");
+    built = json.setRaw(built, "app.tags", "[\"compiler\",\"cpp20\"]");
+
+    if (json.getString(built, "app.name") != "keety") {
+        return 22;
+    }
+    if (json.getInt(built, "app.version") != 1) {
+        return 23;
+    }
+    if (json.getString(built, "app.tags.1") != "cpp20") {
+        return 24;
+    }
+    built = json.removeKey(built, "app.legacy");
+    if (json.hasKey(built, "app.legacy")) {
+        return 25;
+    }
+
+    // 5. Typed Collection Parsers
+    let nums: array<int> = json.parseIntArray("[10, 20, 30]");
+    if (nums[0] + nums[1] + nums[2] != 60) {
+        return 26;
+    }
+    let flags: array<bool> = json.parseBoolArray("[true, false, true]");
+    if (!flags[0] || flags[1] || !flags[2]) {
+        return 27;
+    }
+    let floats: array<float> = json.parseFloatArray("[1.5, 2.5]");
+    if (floats[0] + floats[1] < 3.99 || floats[0] + floats[1] > 4.01) {
+        return 28;
+    }
+    let str_map: map<string, string> = json.parseMap("{\"k1\":\"v1\",\"k2\":\"v2\"}");
+    if (str_map["k1"] != "v1" || str_map["k2"] != "v2") {
+        return 29;
+    }
+
+    // 6. Polymorphic json.stringify
+    if (stringify(42) != "42") {
+        return 30;
+    }
+    if (json.stringify(true) != "true") {
+        return 31;
+    }
+    if (json.stringify("hi") != "\"hi\"") {
+        return 32;
+    }
+    if (json.stringify(nums) != "[10,20,30]") {
+        return 33;
+    }
+    let maybe_text: string | null = null;
+    if (json.stringify(maybe_text) != "null") {
+        return 34;
+    }
+
+    // 7. Formatting, Minification, Escaping & File I/O
+    let pretty: string = json.format(built, 2);
+    let minified: string = json.minify(pretty);
+    if (minified != built) {
+        return 35;
+    }
+    let escaped: string = json.escape("a\"b");
+    if (json.unescape(escaped) != "a\"b") {
+        return 36;
+    }
+
+    let tmp_file: string = fs.join(fs.cwd(), "temp_json_conformance_test.json");
+    let wrote: bool = json.writeFile(tmp_file, built, 2);
+    if (!wrote) {
+        return 37;
+    }
+    let loaded: string = json.readFile(tmp_file);
+    fs.remove(tmp_file);
+    if (loaded != built) {
+        return 38;
+    }
+
+    io.println("All KeetScript json conformance tests passed successfully!");
+    return 0;
+}

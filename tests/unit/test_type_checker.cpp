@@ -3350,5 +3350,153 @@ TEST_CASE("Standard time module type checking and semantic validation", "[typech
     }
 }
 
+TEST_CASE("Standard json module type checking and semantic validation", "[typechecker][json]") {
+    SECTION("Valid json module member calls, builders, and polymorphic stringify") {
+        ParseResult res(
+            "import json;\n"
+            "fn run(): int {\n"
+            "    let obj: string = json.emptyObject();\n"
+            "    let arr_empty: string = json.emptyArray();\n"
+            "    let u1: string = json.setString(obj, \"server.host\", \"localhost\");\n"
+            "    let u2: string = json.setInt(u1, \"server.port\", 8080);\n"
+            "    let u3: string = json.setFloat(u2, \"server.timeout\", 1.5);\n"
+            "    let u4: string = json.setBool(u3, \"server.tls\", true);\n"
+            "    let u5: string = json.setNull(u4, \"server.cert\");\n"
+            "    let u6: string = json.setRaw(u5, \"tags\", \"[\\\"api\\\",\\\"v1\\\"]\");\n"
+            "    let u7: string = json.removeKey(u6, \"server.cert\");\n"
+            "    let valid: bool = json.isValid(u7);\n"
+            "    let kind: string = json.typeOf(u7);\n"
+            "    let is_obj: bool = json.isObject(u7);\n"
+            "    let is_arr: bool = json.isArray(arr_empty);\n"
+            "    let sz: int = json.size(u7);\n"
+            "    let ks: array<string> = json.keys(u7);\n"
+            "    let hk: bool = json.hasKey(u7, \"server.host\");\n"
+            "    let inull: bool = json.isNull(u7, \"server.cert\");\n"
+            "    let host: string = json.getString(u7, \"server.host\");\n"
+            "    let port: int = json.getInt(u7, \"server.port\");\n"
+            "    let timeout: float = json.getFloat(u7, \"server.timeout\");\n"
+            "    let tls: bool = json.getBool(u7, \"server.tls\");\n"
+            "    let tags: array<string> = json.getArray(u7, \"tags\");\n"
+            "    let srv: string = json.getObject(u7, \"server\");\n"
+            "    let host_or: string = json.getStringOr(u7, \"missing\", \"default\");\n"
+            "    let port_or: int = json.getIntOr(u7, \"missing\", 80);\n"
+            "    let timeout_or: float = json.getFloatOr(u7, \"missing\", 0.5);\n"
+            "    let tls_or: bool = json.getBoolOr(u7, \"missing\", false);\n"
+            "    let mp: map<string, string> = json.parseMap(srv);\n"
+            "    let sa: array<string> = json.parseArray(\"[\\\"a\\\"]\");\n"
+            "    let ia: array<int> = json.parseIntArray(\"[1, 2]\");\n"
+            "    let fa: array<float> = json.parseFloatArray(\"[1.0, 2.5]\");\n"
+            "    let ba: array<bool> = json.parseBoolArray(\"[true, false]\");\n"
+            "    let s_int: string = json.stringify(42);\n"
+            "    let s_arr: string = json.stringify(ia);\n"
+            "    let s_map: string = json.stringify(mp);\n"
+            "    let u_val: int | string | null = \"ok\";\n"
+            "    let s_union: string = json.stringify(u_val);\n"
+            "    let pretty: string = json.format(u7, 2);\n"
+            "    let mini: string = json.minify(pretty);\n"
+            "    let esc: string = json.escape(\"hello\");\n"
+            "    let unesc: string = json.unescape(esc);\n"
+            "    let wf: bool = json.writeFile(\"/tmp/test.json\", mini, 2);\n"
+            "    let rf: string = json.readFile(\"/tmp/test.json\");\n"
+            "    return port + sz;\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Valid selective import and aliased import for json") {
+        ParseResult res(
+            "import json as j;\n"
+            "from \"json\" import getString, getIntOr, stringify;\n"
+            "fn run(): string {\n"
+            "    let doc: string = j.setString(j.emptyObject(), \"name\", \"keet\");\n"
+            "    let name: string = getString(doc, \"name\");\n"
+            "    let count: int = getIntOr(doc, \"count\", 10);\n"
+            "    return stringify(count) + name;\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Valid json call with zonk fallback expression") {
+        ParseResult res(
+            "import json;\n"
+            "fn run_safe(raw: string): int {\n"
+            "    let port: int = json.getInt(raw, \"server.port\") zonk 3000;\n"
+            "    return port;\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Strict Zero-Coercion: reject int passed to setFloat with E3002") {
+        ParseResult res(
+            "import json;\n"
+            "fn test_coercion(): void {\n"
+            "    let s: string = json.setFloat(\"{}\", \"pi\", 3);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ImplicitTypeWidening));
+    }
+
+    SECTION("Strict Zero-Coercion: reject float passed to format indent with E3002") {
+        ParseResult res(
+            "import json;\n"
+            "fn test_coercion(): void {\n"
+            "    let s: string = json.format(\"{}\", 2.0);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::ImplicitTypeWidening));
+    }
+
+    SECTION("Reject non-string key map in json.stringify with E3003") {
+        ParseResult res(
+            "import json;\n"
+            "fn test_invalid(m: map<int, string>): void {\n"
+            "    let s: string = json.stringify(m);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Reject unknown member on json with E3011") {
+        ParseResult res(
+            "import json;\n"
+            "fn test_invalid(): void {\n"
+            "    let s = json.nonExistentJsonHelper(\"{}\");\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::InvalidMemberAccess));
+    }
+
+    SECTION("Reject snake_case member on json with E3011") {
+        ParseResult res(
+            "import json;\n"
+            "fn test_invalid(): void {\n"
+            "    let s = json.get_string(\"{}\", \"a\");\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::InvalidMemberAccess));
+    }
+
+    SECTION("Reject importing non-exported symbol from json with E1005") {
+        ParseResult res(
+            "from \"json\" import unknownJsonSymbol;\n"
+            "fn test_invalid(): void {}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::SymbolNotExported));
+    }
+}
+
+
 
 
