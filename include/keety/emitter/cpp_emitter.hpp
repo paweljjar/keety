@@ -156,6 +156,9 @@ private:
     bool has_json_import_{false};
     std::unordered_set<std::string> json_aliases_{};
     std::unordered_set<std::string> imported_json_symbols_{};
+    bool has_net_import_{false};
+    std::unordered_set<std::string> net_aliases_{};
+    std::unordered_set<std::string> imported_net_symbols_{};
 };
 
 } // namespace keety::emitter

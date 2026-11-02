@@ -215,6 +215,15 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                 for (const auto& s : imp->getSymbols()) {
                     imported_json_symbols_.insert(s.getEffectiveName());
                 }
+            } else if (p == "net" || p == "std.net" || p == "keet.net") {
+                has_net_import_ = true;
+                add_standard_header("<keet/runtime.hpp>");
+                if (!imp->getModuleAlias().empty()) {
+                    net_aliases_.insert(imp->getModuleAlias());
+                }
+                for (const auto& s : imp->getSymbols()) {
+                    imported_net_symbols_.insert(s.getEffectiveName());
+                }
             }
         }
     }
@@ -480,6 +489,9 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             if (obj_id->getName() == "json" || json_aliases_.count(obj_id->getName())) {
                 return "::keet::json::" + mem->getMemberName();
             }
+            if (obj_id->getName() == "net" || net_aliases_.count(obj_id->getName())) {
+                return "::keet::net::" + mem->getMemberName();
+            }
         }
         if (const auto* obj_mem = dynamic_cast<const ast::MemberExpr*>(mem->getObject())) {
             if (const auto* root_id = dynamic_cast<const ast::IdentExpr*>(obj_mem->getObject())) {
@@ -571,6 +583,9 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             }
             if (obj_s == "json" || json_aliases_.count(obj_s)) {
                 return "::keet::json::" + m_name + "(" + args_str + ")";
+            }
+            if (obj_s == "net" || net_aliases_.count(obj_s)) {
+                return "::keet::net::" + m_name + "(" + args_str + ")";
             }
             // Container member mapping
             if (m_name == "push") {
@@ -708,6 +723,20 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
                 name == "removeKey" || name == "stringify" || name == "format" || name == "minify" ||
                 name == "escape" || name == "unescape" || name == "readFile" || name == "writeFile")) {
                 return "::keet::json::" + name + "(" + args_str + ")";
+            }
+            if (has_net_import_ && (imported_net_symbols_.count(name) ||
+                name == "urlEncode" || name == "urlDecode" || name == "parseUrl" || name == "urlScheme" ||
+                name == "urlHost" || name == "urlPort" || name == "urlPath" || name == "urlQuery" ||
+                name == "buildQuery" || name == "parseQuery" || name == "resolveHost" || name == "resolveIpv4" ||
+                name == "isIpv4" || name == "isIpv6" || name == "isIp" || name == "isLoopback" ||
+                name == "hostname" || name == "get" || name == "getStatus" || name == "post" ||
+                name == "postJson" || name == "put" || name == "deleteReq" || name == "request" ||
+                name == "download" || name == "tcpConnect" || name == "tcpConnectTimeout" || name == "tcpListen" ||
+                name == "tcpAccept" || name == "tcpLocalPort" || name == "tcpPeerAddr" || name == "tcpSend" ||
+                name == "tcpRecv" || name == "tcpRecvLine" || name == "tcpSetTimeout" || name == "tcpClose" ||
+                name == "udpBind" || name == "udpLocalPort" || name == "udpSendTo" || name == "udpRecvFrom" ||
+                name == "udpClose")) {
+                return "::keet::net::" + name + "(" + args_str + ")";
             }
         }
 
@@ -1324,6 +1353,9 @@ std::string CppEmitter::translate_ir_function(const ir::Function& fn) const {
                 } else if (callee.rfind("keet.json.", 0) == 0) {
                     std::string func_name = callee.substr(10);
                     call_expr = "::keet::json::" + func_name + "(";
+                } else if (callee.rfind("keet.net.", 0) == 0) {
+                    std::string func_name = callee.substr(9);
+                    call_expr = "::keet::net::" + func_name + "(";
                 } else {
                     call_expr = callee + "(";
                 }
