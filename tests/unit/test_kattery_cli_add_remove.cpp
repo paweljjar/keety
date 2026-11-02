@@ -70,6 +70,12 @@ TEST_CASE("Cli: kattery init", "[kattery][cli]") {
         REQUIRE(m.entry == "src/main.keet");
         REQUIRE(m.scripts.find("start") != m.scripts.end());
         REQUIRE(m.scripts.at("start") == "keety run src/main.keet --output-dir build");
+
+        REQUIRE(fs::exists(temp.path / ".gitignore"));
+        std::ifstream ifs(temp.path / ".gitignore");
+        std::string gitignoreContent((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+        REQUIRE(gitignoreContent.find("build/") != std::string::npos);
+        REQUIRE(gitignoreContent.find("keet_modules/") != std::string::npos);
     }
 
     SECTION("Scaffold with explicit --name") {

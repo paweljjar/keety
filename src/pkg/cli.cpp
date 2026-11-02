@@ -108,6 +108,7 @@ int handleInit(
     if (!std::filesystem::exists(gitignorePath, ec)) {
         std::ofstream gitignore(gitignorePath);
         gitignore << "# KeetScript package and build artifacts\n"
+                  << "build/\n"
                   << "keet_modules/\n"
                   << ".keety_build/\n";
     }
