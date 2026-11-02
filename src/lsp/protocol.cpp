@@ -106,6 +106,50 @@ TextDocumentContentChangeEvent TextDocumentContentChangeEvent::fromJson(const Js
     return ev;
 }
 
+JsonValue DiagnosticRelatedInformation::toJson() const {
+    JsonValue::Object obj;
+    JsonValue::Object loc;
+    loc["uri"] = JsonValue(uri);
+    loc["range"] = range.toJson();
+    obj["location"] = JsonValue(std::move(loc));
+    obj["message"] = JsonValue(message);
+    return JsonValue(std::move(obj));
+}
+
+JsonValue Diagnostic::toJson() const {
+    JsonValue::Object obj;
+    obj["range"] = range.toJson();
+    obj["severity"] = JsonValue(static_cast<int64_t>(severity));
+    if (!code.empty()) {
+        obj["code"] = JsonValue(code);
+    }
+    obj["source"] = JsonValue(source);
+    obj["message"] = JsonValue(message);
+
+    if (!relatedInformation.empty()) {
+        JsonValue::Array relArr;
+        for (const auto& rel : relatedInformation) {
+            relArr.push_back(rel.toJson());
+        }
+        obj["relatedInformation"] = JsonValue(std::move(relArr));
+    }
+    return JsonValue(std::move(obj));
+}
+
+JsonValue PublishDiagnosticsParams::toJson() const {
+    JsonValue::Object obj;
+    obj["uri"] = JsonValue(uri);
+    if (version.has_value()) {
+        obj["version"] = JsonValue(static_cast<int64_t>(*version));
+    }
+    JsonValue::Array diagArr;
+    for (const auto& d : diagnostics) {
+        diagArr.push_back(d.toJson());
+    }
+    obj["diagnostics"] = JsonValue(std::move(diagArr));
+    return JsonValue(std::move(obj));
+}
+
 std::string JsonRpcResponse::serialize() const {
     JsonValue::Object obj;
     obj["jsonrpc"] = JsonValue(std::string("2.0"));

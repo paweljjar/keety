@@ -97,6 +97,40 @@ struct TextDocumentContentChangeEvent {
     static TextDocumentContentChangeEvent fromJson(const JsonValue& j);
 };
 
+enum class DiagnosticSeverity : int {
+    Error = 1,
+    Warning = 2,
+    Information = 3,
+    Hint = 4,
+};
+
+struct DiagnosticRelatedInformation {
+    std::string uri;
+    Range range;
+    std::string message;
+
+    JsonValue toJson() const;
+};
+
+struct Diagnostic {
+    Range range;
+    DiagnosticSeverity severity = DiagnosticSeverity::Error;
+    std::string code;
+    std::string source = "keety";
+    std::string message;
+    std::vector<DiagnosticRelatedInformation> relatedInformation;
+
+    JsonValue toJson() const;
+};
+
+struct PublishDiagnosticsParams {
+    std::string uri;
+    std::optional<int32_t> version;
+    std::vector<Diagnostic> diagnostics;
+
+    JsonValue toJson() const;
+};
+
 // Outgoing JSON-RPC message
 struct JsonRpcResponse {
     std::optional<RequestId> id;

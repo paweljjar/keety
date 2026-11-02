@@ -237,6 +237,7 @@ void Server::handleDidOpen(const JsonValue& params) {
         if (auto* docNode = findField(*obj, "textDocument")) {
             auto item = TextDocumentItem::fromJson(*docNode);
             docManager_.openDocument(item);
+            publishDiagnostics(item.uri, item.version);
         }
     }
 }
@@ -254,6 +255,7 @@ void Server::handleDidChange(const JsonValue& params) {
                 // Under Full Sync (1), the last element contains the full updated text
                 auto lastChange = TextDocumentContentChangeEvent::fromJson(arr.back());
                 docManager_.updateDocument(docId.uri, version, lastChange.text);
+                publishDiagnostics(docId.uri, version);
             }
         }
     }
@@ -264,8 +266,35 @@ void Server::handleDidClose(const JsonValue& params) {
         if (auto* docNode = findField(*obj, "textDocument")) {
             auto docId = TextDocumentIdentifier::fromJson(*docNode);
             docManager_.closeDocument(docId.uri);
+
+            // Clear diagnostics for closed document
+            PublishDiagnosticsParams clearParams;
+            clearParams.uri = docId.uri;
+            JsonRpcNotification notice;
+            notice.method = "textDocument/publishDiagnostics";
+            notice.params = clearParams.toJson();
+            transport_.writeMessage(notice.serialize());
         }
     }
+}
+
+void Server::publishDiagnostics(const std::string& uri, int32_t version) {
+    auto docOpt = docManager_.getDocument(uri);
+    if (!docOpt.has_value()) {
+        return;
+    }
+
+    auto diags = analyzer_.analyze(*docOpt);
+
+    PublishDiagnosticsParams publishParams;
+    publishParams.uri = uri;
+    publishParams.version = version;
+    publishParams.diagnostics = std::move(diags);
+
+    JsonRpcNotification notice;
+    notice.method = "textDocument/publishDiagnostics";
+    notice.params = publishParams.toJson();
+    transport_.writeMessage(notice.serialize());
 }
 
 } // namespace keety::lsp

@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 
+#include <keety/lsp/analyzer.hpp>
 #include <keety/lsp/document.hpp>
 #include <keety/lsp/protocol.hpp>
 #include <keety/lsp/transport.hpp>
@@ -46,8 +47,11 @@ private:
     void handleDidChange(const JsonValue& params);
     void handleDidClose(const JsonValue& params);
 
+    void publishDiagnostics(const std::string& uri, int32_t version);
+
     Transport transport_;
     DocumentManager docManager_;
+    Analyzer analyzer_;
 
     bool initialized_ = false;
     bool shutdownReceived_ = false;

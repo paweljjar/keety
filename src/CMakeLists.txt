@@ -112,6 +112,7 @@ add_library(keet_lsp_core STATIC
     lsp/protocol.cpp
     lsp/transport.cpp
     lsp/document.cpp
+    lsp/analyzer.cpp
     lsp/server.cpp
 )
 

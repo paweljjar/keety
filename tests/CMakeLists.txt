@@ -93,6 +93,7 @@ add_executable(keety_unit_tests
     conformance/test_conformance_package_import.cpp
     unit/test_lsp_protocol.cpp
     unit/test_lsp_server.cpp
+    unit/test_lsp_diagnostics.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE
