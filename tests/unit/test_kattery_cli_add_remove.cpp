@@ -69,6 +69,7 @@ TEST_CASE("Cli: kattery init", "[kattery][cli]") {
         REQUIRE(m.version == "0.1.0");
         REQUIRE(m.entry == "src/main.keet");
         REQUIRE(m.scripts.find("start") != m.scripts.end());
+        REQUIRE(m.scripts.at("start") == "keety run src/main.keet --output-dir build");
     }
 
     SECTION("Scaffold with explicit --name") {

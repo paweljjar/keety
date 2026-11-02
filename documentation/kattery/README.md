@@ -203,7 +203,7 @@ The `pedigree.json` file defines project metadata, dependencies, and build scrip
     "test-runner": "git+https://github.com/keetscript/test-runner.git#main"
   },
   "scripts": {
-    "start": "keety run src/main.keet",
+    "start": "keety run src/main.keet --output-dir build",
     "test": "keety test",
     "build": "keety build src/main.keet -O3"
   },

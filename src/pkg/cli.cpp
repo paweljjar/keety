@@ -100,7 +100,7 @@ int handleInit(
     m.name = name;
     m.version = "0.1.0";
     m.entry = "src/main.keet";
-    m.scripts["start"] = "keety run src/main.keet";
+    m.scripts["start"] = "keety run src/main.keet --output-dir build";
 
     m.save(manifestPath);
 
