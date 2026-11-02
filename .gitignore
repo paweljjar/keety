@@ -19,6 +19,7 @@ bin/
 *.so
 *.dylib
 *.dll
+*.exe
 *.log
 
 # KeetScript compilation & package artifacts
