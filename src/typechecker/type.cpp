@@ -1,6 +1,7 @@
 #include <keety/typechecker/type.hpp>
 
 #include <algorithm>
+#include <functional>
 #include <sstream>
 
 namespace keety::typechecker {
