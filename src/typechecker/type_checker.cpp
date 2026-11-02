@@ -44,9 +44,43 @@ const std::vector<std::string> kTimeCandidates = {
     "US_PER_MS", "US_PER_SEC", "MS_PER_SEC", "SEC_PER_MIN", "SEC_PER_HOUR", "SEC_PER_DAY"
 };
 
+const std::vector<std::string> kJsonCandidates = {
+    "isValid", "typeOf", "isObject", "isArray", "size", "keys",
+    "hasKey", "isNull", "getString", "getInt", "getFloat", "getBool", "getArray", "getObject",
+    "getStringOr", "getIntOr", "getFloatOr", "getBoolOr",
+    "parseMap", "parseArray", "parseIntArray", "parseFloatArray", "parseBoolArray",
+    "emptyObject", "emptyArray", "setString", "setInt", "setFloat", "setBool", "setNull", "setRaw", "removeKey",
+    "stringify", "format", "minify", "escape", "unescape", "readFile", "writeFile"
+};
+
 const std::vector<std::string> kColorCandidates = {
     "Default", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White", "Gray"
 };
+
+bool isJsonSerializableType(const TypePtr& t) {
+    if (!t) return false;
+    if (t->isUnknown()) return true;
+    if (t->isInt() || t->isFloat() || t->isBool() || t->isChar() || t->isString() || t->isNull()) {
+        return true;
+    }
+    if (t->isArray()) {
+        const auto* arr = dynamic_cast<const ArrayType*>(t.get());
+        return arr && isJsonSerializableType(arr->getElementType());
+    }
+    if (t->isMap()) {
+        const auto* m = dynamic_cast<const MapType*>(t.get());
+        return m && m->getKeyType() && m->getKeyType()->isString() && isJsonSerializableType(m->getValueType());
+    }
+    if (t->isUnion()) {
+        const auto* u = dynamic_cast<const UnionType*>(t.get());
+        if (!u || u->getVariants().empty()) return false;
+        for (const auto& v : u->getVariants()) {
+            if (!isJsonSerializableType(v)) return false;
+        }
+        return true;
+    }
+    return false;
+}
 
 bool typeContainsNull(const TypePtr& t) {
     if (!t) return false;
@@ -3081,6 +3115,584 @@ TypePtr TypeChecker::checkTimeDirectCall(const ast::IdentExpr* callee, const ast
     return Type::unknownType();
 }
 
+TypePtr TypeChecker::checkJsonMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!member || !call) return Type::unknownType();
+    const std::string& name = member->getMemberName();
+
+    auto checkArgCount = [&](size_t expected) -> bool {
+        if (call->getArgs().size() != expected) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function 'json." + name + "' expects " + std::to_string(expected) +
+                    (expected == 1 ? " argument" : " arguments") + ", but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "wrong argument count"));
+            }
+            hasErrors_ = true;
+            return false;
+        }
+        return true;
+    };
+
+    auto checkStringArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::stringType());
+                if (aType && !aType->isString()) {
+                    reportTypeMismatch(Type::stringType(), aType, arg.value->getSpan(), "json." + name + " " + argName + " argument");
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkIntArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::intType());
+                if (aType && !aType->isInt()) {
+                    if (aType->isFloat()) {
+                        reportImplicitWidening(aType, Type::intType(), arg.value->getSpan(), "json." + name + " " + argName + " argument");
+                    } else {
+                        reportTypeMismatch(Type::intType(), aType, arg.value->getSpan(), "json." + name + " " + argName + " argument");
+                    }
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkFloatArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::floatType());
+                if (aType && !aType->isFloat()) {
+                    if (aType->isInt()) {
+                        reportImplicitWidening(aType, Type::floatType(), arg.value->getSpan(), "json." + name + " " + argName + " argument");
+                    } else {
+                        reportTypeMismatch(Type::floatType(), aType, arg.value->getSpan(), "json." + name + " " + argName + " argument");
+                    }
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkBoolArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::boolType());
+                if (aType && !aType->isBool()) {
+                    reportTypeMismatch(Type::boolType(), aType, arg.value->getSpan(), "json." + name + " " + argName + " argument");
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    // 0-argument string builders
+    if (name == "emptyObject" || name == "emptyArray") {
+        checkArgCount(0);
+        return Type::stringType();
+    }
+
+    // 1-argument string -> bool predicates
+    if (name == "isValid" || name == "isObject" || name == "isArray") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "text");
+        }
+        return Type::boolType();
+    }
+
+    // 1-argument string -> string
+    if (name == "typeOf" || name == "minify" || name == "escape" || name == "unescape" || name == "readFile") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, name == "readFile" ? "path" : "text");
+        }
+        return Type::stringType();
+    }
+
+    // 1-argument string -> int
+    if (name == "size") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "text");
+        }
+        return Type::intType();
+    }
+
+    // 1-argument string -> array<string>
+    if (name == "keys" || name == "parseArray") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "text");
+        }
+        return Type::array(Type::stringType());
+    }
+
+    // 1-argument string -> map<string, string>
+    if (name == "parseMap") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "text");
+        }
+        return Type::map(Type::stringType(), Type::stringType());
+    }
+
+    // Typed array parsers
+    if (name == "parseIntArray") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "text");
+        }
+        return Type::array(Type::intType());
+    }
+    if (name == "parseFloatArray") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "text");
+        }
+        return Type::array(Type::floatType());
+    }
+    if (name == "parseBoolArray") {
+        if (checkArgCount(1)) {
+            checkStringArg(0, "text");
+        }
+        return Type::array(Type::boolType());
+    }
+
+    // 2-argument (text: string, path: string) -> bool
+    if (name == "hasKey" || name == "isNull") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+        }
+        return Type::boolType();
+    }
+
+    // 2-argument (text: string, path: string) -> string
+    if (name == "getString" || name == "getObject" || name == "setNull" || name == "removeKey") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+        }
+        return Type::stringType();
+    }
+
+    // 2-argument (text: string, path: string) -> int / float / bool / array<string>
+    if (name == "getInt") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+        }
+        return Type::intType();
+    }
+    if (name == "getFloat") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+        }
+        return Type::floatType();
+    }
+    if (name == "getBool") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+        }
+        return Type::boolType();
+    }
+    if (name == "getArray") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+        }
+        return Type::array(Type::stringType());
+    }
+
+    // 3-argument *Or fallback extractors
+    if (name == "getStringOr") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+            checkStringArg(2, "defaultVal");
+        }
+        return Type::stringType();
+    }
+    if (name == "getIntOr") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+            checkIntArg(2, "defaultVal");
+        }
+        return Type::intType();
+    }
+    if (name == "getFloatOr") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+            checkFloatArg(2, "defaultVal");
+        }
+        return Type::floatType();
+    }
+    if (name == "getBoolOr") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+            checkBoolArg(2, "defaultVal");
+        }
+        return Type::boolType();
+    }
+
+    // 3-argument set* mutation builders
+    if (name == "setString" || name == "setRaw") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+            checkStringArg(2, name == "setRaw" ? "rawJson" : "value");
+        }
+        return Type::stringType();
+    }
+    if (name == "setInt") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+            checkIntArg(2, "value");
+        }
+        return Type::stringType();
+    }
+    if (name == "setFloat") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+            checkFloatArg(2, "value");
+        }
+        return Type::stringType();
+    }
+    if (name == "setBool") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+            checkBoolArg(2, "value");
+        }
+        return Type::stringType();
+    }
+
+    // format(text: string, indent: int): string
+    if (name == "format") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "text");
+            checkIntArg(1, "indent");
+        }
+        return Type::stringType();
+    }
+
+    // writeFile(path: string, text: string, indent: int): bool
+    if (name == "writeFile") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "path");
+            checkStringArg(1, "text");
+            checkIntArg(2, "indent");
+        }
+        return Type::boolType();
+    }
+
+    // Polymorphic stringify(value: Any): string
+    if (name == "stringify") {
+        if (checkArgCount(1)) {
+            const auto& arg = call->getArgs()[0];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope);
+                if (aType && !isJsonSerializableType(aType)) {
+                    if (emitter_) {
+                        emitter_->report(diag::Diagnostic::makeError(
+                            diag::ErrorCode::TypeMismatch,
+                            "cannot serialize value of type '" + aType->toString() + "' to JSON in 'json.stringify'",
+                            arg.value->getSpan().start).withLabel(arg.value->getSpan(), "unsupported type for json.stringify"));
+                    }
+                    hasErrors_ = true;
+                }
+            }
+        }
+        return Type::stringType();
+    }
+
+    if (emitter_) {
+        auto d = diag::Diagnostic::makeError(
+            diag::ErrorCode::InvalidMemberAccess,
+            "module 'json' has no member named '" + name + "'",
+            member->getSpan().start).withLabel(member->getSpan(), "unknown member");
+        attachMemberSuggestions(d, name, kJsonCandidates);
+        emitter_->report(d);
+    }
+    hasErrors_ = true;
+    return Type::unknownType();
+}
+
+TypePtr TypeChecker::checkJsonDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!callee || !call) return Type::unknownType();
+    const std::string& name = callee->getName();
+
+    auto checkArgCount = [&](size_t expected) -> bool {
+        if (call->getArgs().size() != expected) {
+            if (emitter_) {
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function '" + name + "' expects " + std::to_string(expected) +
+                    (expected == 1 ? " argument" : " arguments") + ", but got " + std::to_string(call->getArgs().size()),
+                    call->getSpan().start).withLabel(call->getSpan(), "wrong argument count"));
+            }
+            hasErrors_ = true;
+            return false;
+        }
+        return true;
+    };
+
+    auto checkStringArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::stringType());
+                if (aType && !aType->isString()) {
+                    reportTypeMismatch(Type::stringType(), aType, arg.value->getSpan(), name + " " + argName + " argument");
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkIntArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::intType());
+                if (aType && !aType->isInt()) {
+                    if (aType->isFloat()) {
+                        reportImplicitWidening(aType, Type::intType(), arg.value->getSpan(), name + " " + argName + " argument");
+                    } else {
+                        reportTypeMismatch(Type::intType(), aType, arg.value->getSpan(), name + " " + argName + " argument");
+                    }
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkFloatArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::floatType());
+                if (aType && !aType->isFloat()) {
+                    if (aType->isInt()) {
+                        reportImplicitWidening(aType, Type::floatType(), arg.value->getSpan(), name + " " + argName + " argument");
+                    } else {
+                        reportTypeMismatch(Type::floatType(), aType, arg.value->getSpan(), name + " " + argName + " argument");
+                    }
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkBoolArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::boolType());
+                if (aType && !aType->isBool()) {
+                    reportTypeMismatch(Type::boolType(), aType, arg.value->getSpan(), name + " " + argName + " argument");
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    if (name == "emptyObject" || name == "emptyArray") {
+        checkArgCount(0);
+        return Type::stringType();
+    }
+    if (name == "isValid" || name == "isObject" || name == "isArray") {
+        if (checkArgCount(1)) checkStringArg(0, "text");
+        return Type::boolType();
+    }
+    if (name == "typeOf" || name == "minify" || name == "escape" || name == "unescape" || name == "readFile") {
+        if (checkArgCount(1)) checkStringArg(0, name == "readFile" ? "path" : "text");
+        return Type::stringType();
+    }
+    if (name == "size") {
+        if (checkArgCount(1)) checkStringArg(0, "text");
+        return Type::intType();
+    }
+    if (name == "keys" || name == "parseArray") {
+        if (checkArgCount(1)) checkStringArg(0, "text");
+        return Type::array(Type::stringType());
+    }
+    if (name == "parseMap") {
+        if (checkArgCount(1)) checkStringArg(0, "text");
+        return Type::map(Type::stringType(), Type::stringType());
+    }
+    if (name == "parseIntArray") {
+        if (checkArgCount(1)) checkStringArg(0, "text");
+        return Type::array(Type::intType());
+    }
+    if (name == "parseFloatArray") {
+        if (checkArgCount(1)) checkStringArg(0, "text");
+        return Type::array(Type::floatType());
+    }
+    if (name == "parseBoolArray") {
+        if (checkArgCount(1)) checkStringArg(0, "text");
+        return Type::array(Type::boolType());
+    }
+    if (name == "hasKey" || name == "isNull") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+        }
+        return Type::boolType();
+    }
+    if (name == "getString" || name == "getObject" || name == "setNull" || name == "removeKey") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+        }
+        return Type::stringType();
+    }
+    if (name == "getInt") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+        }
+        return Type::intType();
+    }
+    if (name == "getFloat") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+        }
+        return Type::floatType();
+    }
+    if (name == "getBool") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+        }
+        return Type::boolType();
+    }
+    if (name == "getArray") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+        }
+        return Type::array(Type::stringType());
+    }
+    if (name == "getStringOr") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+            checkStringArg(2, "defaultVal");
+        }
+        return Type::stringType();
+    }
+    if (name == "getIntOr") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+            checkIntArg(2, "defaultVal");
+        }
+        return Type::intType();
+    }
+    if (name == "getFloatOr") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+            checkFloatArg(2, "defaultVal");
+        }
+        return Type::floatType();
+    }
+    if (name == "getBoolOr") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+            checkBoolArg(2, "defaultVal");
+        }
+        return Type::boolType();
+    }
+    if (name == "setString" || name == "setRaw") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+            checkStringArg(2, name == "setRaw" ? "rawJson" : "value");
+        }
+        return Type::stringType();
+    }
+    if (name == "setInt") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+            checkIntArg(2, "value");
+        }
+        return Type::stringType();
+    }
+    if (name == "setFloat") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+            checkFloatArg(2, "value");
+        }
+        return Type::stringType();
+    }
+    if (name == "setBool") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "text");
+            checkStringArg(1, "path");
+            checkBoolArg(2, "value");
+        }
+        return Type::stringType();
+    }
+    if (name == "format") {
+        if (checkArgCount(2)) {
+            checkStringArg(0, "text");
+            checkIntArg(1, "indent");
+        }
+        return Type::stringType();
+    }
+    if (name == "writeFile") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "path");
+            checkStringArg(1, "text");
+            checkIntArg(2, "indent");
+        }
+        return Type::boolType();
+    }
+    if (name == "stringify") {
+        if (checkArgCount(1)) {
+            const auto& arg = call->getArgs()[0];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope);
+                if (aType && !isJsonSerializableType(aType)) {
+                    if (emitter_) {
+                        emitter_->report(diag::Diagnostic::makeError(
+                            diag::ErrorCode::TypeMismatch,
+                            "cannot serialize value of type '" + aType->toString() + "' to JSON in 'stringify'",
+                            arg.value->getSpan().start).withLabel(arg.value->getSpan(), "unsupported type for stringify"));
+                    }
+                    hasErrors_ = true;
+                }
+            }
+        }
+        return Type::stringType();
+    }
+
+    return Type::unknownType();
+}
+
 bool TypeChecker::checkZeroCoercion(const parser::ModuleAST& module, sema::Scope* rootScope) {
     return checkTypes(module, rootScope);
 }
@@ -3287,6 +3899,46 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                                     "symbol '" + symItem.originalName + "' is not exported by module 'time'",
                                     symItem.span.start).withLabel(symItem.span, "symbol not exported");
                                 attachMemberSuggestions(d, symItem.originalName, kTimeCandidates);
+                                emitter_->report(d);
+                            }
+                            hasErrors_ = true;
+                        }
+                    }
+                }
+            } else if (modPath == "json" || modPath == "std.json" || modPath == "keet.json") {
+                if (importDecl->getSymbols().empty()) {
+                    std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "json";
+                    if (!targetScope->lookupCurrent(boundName)) {
+                        auto modSym = std::make_shared<sema::Symbol>(boundName, sema::SymbolKind::Module, importDecl->getSpan());
+                        modSym->setExported(importDecl->isReExported());
+                        auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, modSym, emitter_);
+                        if (!res.success) hasErrors_ = true;
+                    }
+                } else {
+                    auto jsonScope = sema::createStdlibModuleScope("json");
+                    for (const auto& symItem : importDecl->getSymbols()) {
+                        auto exportedSym = jsonScope->lookupCurrent(symItem.originalName);
+                        if (exportedSym) {
+                            std::string importAsName = symItem.getEffectiveName();
+                            if (!targetScope->lookupCurrent(importAsName)) {
+                                auto importedSym = std::make_shared<sema::Symbol>(
+                                    importAsName, exportedSym->getKind(), symItem.span
+                                );
+                                importedSym->setExported(importDecl->isReExported());
+                                importedSym->setIsType(exportedSym->isType());
+                                if (exportedSym->isConstant()) {
+                                    importedSym->setConst(true);
+                                }
+                                auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, importedSym, emitter_);
+                                if (!res.success) hasErrors_ = true;
+                            }
+                        } else {
+                            if (emitter_) {
+                                auto d = diag::Diagnostic::makeError(
+                                    diag::ErrorCode::SymbolNotExported,
+                                    "symbol '" + symItem.originalName + "' is not exported by module 'json'",
+                                    symItem.span.start).withLabel(symItem.span, "symbol not exported");
+                                attachMemberSuggestions(d, symItem.originalName, kJsonCandidates);
                                 emitter_->report(d);
                             }
                             hasErrors_ = true;
@@ -4318,6 +4970,21 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     }
                     return checkTimeMemberCall(member, call, scope);
                 }
+                if (objIdent->getName() == "json" || (sym && sym->isModule() && sym->getName() == "json")) {
+                    if (!sym) {
+                        if (emitter_) {
+                            auto d = diag::Diagnostic::makeError(
+                                diag::ErrorCode::UndeclaredIdentifier,
+                                "undeclared identifier '" + objIdent->getName() + "'",
+                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                            d.withHelp("add 'import json;' at the top of the file");
+                            emitter_->report(d);
+                        }
+                        hasErrors_ = true;
+                        return Type::unknownType();
+                    }
+                    return checkJsonMemberCall(member, call, scope);
+                }
             }
 
             auto objType = member->getObject() ? inferType(*member->getObject(), scope) : Type::unknownType();
@@ -4544,6 +5211,18 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     name == "monthUtc" || name == "dayUtc" || name == "hourUtc" ||
                     name == "minuteUtc" || name == "secondUtc") {
                     return checkTimeDirectCall(calleeIdent, call, scope);
+                }
+                if (name == "isValid" || name == "typeOf" || name == "isObject" || name == "isArray" ||
+                    name == "size" || name == "keys" || name == "hasKey" || name == "isNull" ||
+                    name == "getString" || name == "getInt" || name == "getFloat" || name == "getBool" ||
+                    name == "getArray" || name == "getObject" || name == "getStringOr" || name == "getIntOr" ||
+                    name == "getFloatOr" || name == "getBoolOr" || name == "parseMap" || name == "parseArray" ||
+                    name == "parseIntArray" || name == "parseFloatArray" || name == "parseBoolArray" ||
+                    name == "emptyObject" || name == "emptyArray" || name == "setString" || name == "setInt" ||
+                    name == "setFloat" || name == "setBool" || name == "setNull" || name == "setRaw" ||
+                    name == "removeKey" || name == "stringify" || name == "format" || name == "minify" ||
+                    name == "escape" || name == "unescape" || name == "readFile" || name == "writeFile") {
+                    return checkJsonDirectCall(calleeIdent, call, scope);
                 }
             }
             const ast::FnDecl* fnDecl = nullptr;
@@ -5090,6 +5769,106 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                         "module 'time' has no member '" + member->getMemberName() + "'",
                         member->getSpan().start).withLabel(member->getSpan(), "unknown module member");
                     attachMemberSuggestions(d, member->getMemberName(), kTimeCandidates);
+                    emitter_->report(d);
+                }
+                hasErrors_ = true;
+                return Type::unknownType();
+            }
+            if (objIdent->getName() == "json" || (sym && sym->isModule() && sym->getName() == "json")) {
+                if (!sym) {
+                    if (emitter_) {
+                        auto d = diag::Diagnostic::makeError(
+                            diag::ErrorCode::UndeclaredIdentifier,
+                            "undeclared identifier '" + objIdent->getName() + "'",
+                            objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                        d.withHelp("add 'import json;' at the top of the file");
+                        emitter_->report(d);
+                    }
+                    hasErrors_ = true;
+                    return Type::unknownType();
+                }
+                const std::string& mName = member->getMemberName();
+                if (mName == "emptyObject" || mName == "emptyArray") {
+                    return Type::function({}, Type::stringType(), false);
+                }
+                if (mName == "isValid" || mName == "isObject" || mName == "isArray") {
+                    return Type::function({Type::stringType()}, Type::boolType(), false);
+                }
+                if (mName == "typeOf" || mName == "minify" || mName == "escape" || mName == "unescape" || mName == "readFile") {
+                    return Type::function({Type::stringType()}, Type::stringType(), false);
+                }
+                if (mName == "size") {
+                    return Type::function({Type::stringType()}, Type::intType(), false);
+                }
+                if (mName == "keys" || mName == "parseArray") {
+                    return Type::function({Type::stringType()}, Type::array(Type::stringType()), false);
+                }
+                if (mName == "parseMap") {
+                    return Type::function({Type::stringType()}, Type::map(Type::stringType(), Type::stringType()), false);
+                }
+                if (mName == "parseIntArray") {
+                    return Type::function({Type::stringType()}, Type::array(Type::intType()), false);
+                }
+                if (mName == "parseFloatArray") {
+                    return Type::function({Type::stringType()}, Type::array(Type::floatType()), false);
+                }
+                if (mName == "parseBoolArray") {
+                    return Type::function({Type::stringType()}, Type::array(Type::boolType()), false);
+                }
+                if (mName == "hasKey" || mName == "isNull") {
+                    return Type::function({Type::stringType(), Type::stringType()}, Type::boolType(), false);
+                }
+                if (mName == "getString" || mName == "getObject" || mName == "setNull" || mName == "removeKey") {
+                    return Type::function({Type::stringType(), Type::stringType()}, Type::stringType(), false);
+                }
+                if (mName == "getInt") {
+                    return Type::function({Type::stringType(), Type::stringType()}, Type::intType(), false);
+                }
+                if (mName == "getFloat") {
+                    return Type::function({Type::stringType(), Type::stringType()}, Type::floatType(), false);
+                }
+                if (mName == "getBool") {
+                    return Type::function({Type::stringType(), Type::stringType()}, Type::boolType(), false);
+                }
+                if (mName == "getArray") {
+                    return Type::function({Type::stringType(), Type::stringType()}, Type::array(Type::stringType()), false);
+                }
+                if (mName == "getStringOr" || mName == "setString" || mName == "setRaw") {
+                    return Type::function({Type::stringType(), Type::stringType(), Type::stringType()}, Type::stringType(), false);
+                }
+                if (mName == "getIntOr") {
+                    return Type::function({Type::stringType(), Type::stringType(), Type::intType()}, Type::intType(), false);
+                }
+                if (mName == "getFloatOr") {
+                    return Type::function({Type::stringType(), Type::stringType(), Type::floatType()}, Type::floatType(), false);
+                }
+                if (mName == "getBoolOr") {
+                    return Type::function({Type::stringType(), Type::stringType(), Type::boolType()}, Type::boolType(), false);
+                }
+                if (mName == "setInt") {
+                    return Type::function({Type::stringType(), Type::stringType(), Type::intType()}, Type::stringType(), false);
+                }
+                if (mName == "setFloat") {
+                    return Type::function({Type::stringType(), Type::stringType(), Type::floatType()}, Type::stringType(), false);
+                }
+                if (mName == "setBool") {
+                    return Type::function({Type::stringType(), Type::stringType(), Type::boolType()}, Type::stringType(), false);
+                }
+                if (mName == "format") {
+                    return Type::function({Type::stringType(), Type::intType()}, Type::stringType(), false);
+                }
+                if (mName == "writeFile") {
+                    return Type::function({Type::stringType(), Type::stringType(), Type::intType()}, Type::boolType(), false);
+                }
+                if (mName == "stringify") {
+                    return Type::function({Type::unknownType()}, Type::stringType(), false);
+                }
+                if (emitter_) {
+                    auto d = diag::Diagnostic::makeError(
+                        diag::ErrorCode::InvalidMemberAccess,
+                        "module 'json' has no member '" + member->getMemberName() + "'",
+                        member->getSpan().start).withLabel(member->getSpan(), "unknown module member");
+                    attachMemberSuggestions(d, member->getMemberName(), kJsonCandidates);
                     emitter_->report(d);
                 }
                 hasErrors_ = true;
