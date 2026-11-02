@@ -1253,6 +1253,9 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
 
     LinkOptions link_opts;
     link_opts.kind = BinaryKind::Executable;
+#if defined(_WIN32)
+    link_opts.libraries.push_back("ws2_32");
+#endif
     if (options.verbose) {
         out << "[verbose] Linking " << object_files.size() << " object file(s) into "
             << target_binary.filename().string() << "\n";

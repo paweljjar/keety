@@ -43,6 +43,7 @@ target_include_directories(keety_core PUBLIC
 
 target_link_libraries(keety_core PUBLIC
     keety_warnings
+    $<$<PLATFORM_ID:Windows>:ws2_32>
 )
 
 target_compile_definitions(keety_core PRIVATE
