@@ -31,6 +31,15 @@ std::unique_ptr<Module> AstLowerer::lower_module(const parser::ModuleAST& module
     imported_fs_symbols_.clear();
     has_sys_import_ = false;
     imported_sys_symbols_.clear();
+    has_math_import_ = false;
+    imported_math_symbols_.clear();
+    imported_math_constants_.clear();
+    has_time_import_ = false;
+    imported_time_symbols_.clear();
+    imported_time_constants_.clear();
+    has_json_import_ = false;
+    json_aliases_.clear();
+    imported_json_symbols_.clear();
 
     for (const auto& decl : module_ast.declarations) {
         if (!decl) continue;
@@ -74,6 +83,14 @@ std::unique_ptr<Module> AstLowerer::lower_module(const parser::ModuleAST& module
                     } else {
                         imported_time_symbols_.insert(sym_name);
                     }
+                }
+            } else if (p == "json" || p == "std.json" || p == "keet.json") {
+                has_json_import_ = true;
+                if (!imp->getModuleAlias().empty()) {
+                    json_aliases_.insert(imp->getModuleAlias());
+                }
+                for (const auto& s : imp->getSymbols()) {
+                    imported_json_symbols_.insert(s.getEffectiveName());
                 }
             }
         } else if (const auto* var_decl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
@@ -840,6 +857,12 @@ Operand AstLowerer::lower_call_expr(const ast::CallExpr& expr) {
                 emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
                 return dest;
             }
+            if (obj_id->getName() == "json" || json_aliases_.count(obj_id->getName())) {
+                const std::string& m_name = member->getMemberName();
+                std::string callee_name = "@keet.json." + m_name;
+                emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
+                return dest;
+            }
         }
         Operand receiver = lower_expression(*member->getObject());
         emit(std::make_unique<MethodCallInst>(dest, receiver, member->getMemberName(), std::move(args)));
@@ -924,6 +947,21 @@ Operand AstLowerer::lower_call_expr(const ast::CallExpr& expr) {
             name == "monthUtc" || name == "dayUtc" || name == "hourUtc" ||
             name == "minuteUtc" || name == "secondUtc")) {
             std::string callee_name = "@keet.time." + name;
+            emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
+            return dest;
+        }
+        if (has_json_import_ && (imported_json_symbols_.count(name) ||
+            name == "isValid" || name == "typeOf" || name == "isObject" || name == "isArray" ||
+            name == "size" || name == "keys" || name == "hasKey" || name == "isNull" ||
+            name == "getString" || name == "getInt" || name == "getFloat" || name == "getBool" ||
+            name == "getArray" || name == "getObject" || name == "getStringOr" || name == "getIntOr" ||
+            name == "getFloatOr" || name == "getBoolOr" || name == "parseMap" || name == "parseArray" ||
+            name == "parseIntArray" || name == "parseFloatArray" || name == "parseBoolArray" ||
+            name == "emptyObject" || name == "emptyArray" || name == "setString" || name == "setInt" ||
+            name == "setFloat" || name == "setBool" || name == "setNull" || name == "setRaw" ||
+            name == "removeKey" || name == "stringify" || name == "format" || name == "minify" ||
+            name == "escape" || name == "unescape" || name == "readFile" || name == "writeFile")) {
+            std::string callee_name = "@keet.json." + name;
             emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
             return dest;
         }

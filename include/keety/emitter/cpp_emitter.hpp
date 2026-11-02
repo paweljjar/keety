@@ -153,6 +153,9 @@ private:
     bool has_time_import_{false};
     std::unordered_set<std::string> imported_time_symbols_{};
     std::unordered_set<std::string> imported_time_constants_{};
+    bool has_json_import_{false};
+    std::unordered_set<std::string> json_aliases_{};
+    std::unordered_set<std::string> imported_json_symbols_{};
 };
 
 } // namespace keety::emitter
