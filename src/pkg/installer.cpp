@@ -115,16 +115,16 @@ InstallResult Installer::install(
 
     // 2. Resolve dependency graph
     DependencyGraph graph(gitClient_);
-    std::vector<Manifest> memberManifests;
-    memberManifests.reserve(workspace.members.size());
+    std::vector<std::pair<Manifest, std::filesystem::path>> memberInfos;
+    memberInfos.reserve(workspace.members.size());
     for (const auto& m : workspace.members) {
-        memberManifests.push_back(m.manifest);
+        memberInfos.emplace_back(m.manifest, m.directory);
     }
 
     graph.resolve(
         workspace.rootManifest,
         rootDir,
-        memberManifests,
+        memberInfos,
         existingLock,
         !options.production
     );

@@ -13,7 +13,7 @@ DependencyGraph::DependencyGraph(GitClient* gitClient) : gitClient_(gitClient) {
 void DependencyGraph::resolve(
     const Manifest& rootManifest,
     const std::filesystem::path& rootDir,
-    const std::vector<Manifest>& workspaceMembers,
+    const std::vector<std::pair<Manifest, std::filesystem::path>>& workspaceMembers,
     const std::optional<Lockfile>& existingLock,
     bool includeDevDependencies
 ) {
@@ -30,28 +30,28 @@ void DependencyGraph::resolve(
         }
     }
 
-    // Also collect workspace member dependencies
-    for (const auto& member : workspaceMembers) {
+    // 2. Resolve recursively from root dependencies
+    std::vector<std::string> pathStack;
+    for (const auto& [name, spec] : rootDeps) {
+        pathStack.clear();
+        resolveTransitive(name, spec, "root", rootDir, existingLock, pathStack);
+    }
+
+    // 3. Resolve member dependencies relative to each member's directory
+    for (const auto& [member, memberDir] : workspaceMembers) {
         for (const auto& [name, spec] : member.dependencies) {
-            // Check if member dependency is another workspace member (handled via link, not external pkg)
             bool isWsMember = false;
-            for (const auto& other : workspaceMembers) {
+            for (const auto& [other, _] : workspaceMembers) {
                 if (other.name == name) {
                     isWsMember = true;
                     break;
                 }
             }
             if (!isWsMember) {
-                rootDeps.emplace_back(name, spec);
+                pathStack.clear();
+                resolveTransitive(name, spec, member.name, memberDir, existingLock, pathStack);
             }
         }
-    }
-
-    // 2. Resolve recursively from root dependencies
-    std::vector<std::string> pathStack;
-    for (const auto& [name, spec] : rootDeps) {
-        pathStack.clear();
-        resolveTransitive(name, spec, "root", rootDir, existingLock, pathStack);
     }
 }
 

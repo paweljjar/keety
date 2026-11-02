@@ -76,6 +76,7 @@ add_library(kattery_core STATIC
     pkg/fetcher.cpp
     pkg/graph.cpp
     pkg/installer.cpp
+    pkg/cli.cpp
 )
 
 target_include_directories(kattery_core PUBLIC

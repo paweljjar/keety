@@ -43,6 +43,14 @@ enum class ErrorCode {
     DuplicateWorkspaceMember = 3004, // Two members (or root + member) share a name
     WorkspaceMemberMissing = 3005,   // Listed member has no pedigree.json
     InstallationFailed = 3006,       // File I/O or staging failure during install
+
+    // --- KAT4xxx: CLI / scripts ---
+    UnknownCommand = 4001,           // Unrecognized CLI command
+    MissingArgument = 4002,          // Required CLI argument missing
+    TestScriptNotDefined = 4003,     // 'kattery test' with no 'test' script defined
+    ScriptExecutionFailed = 4004,    // Script returned non-zero exit code
+    PackageAlreadyExists = 4005,     // pedigree.json already exists during 'kattery init'
+    PackageNotFound = 4006,          // Package not declared in pedigree.json during 'kattery remove'
 };
 
 /// Returns the printable code, e.g. `KAT1005`.

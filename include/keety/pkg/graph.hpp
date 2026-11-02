@@ -33,7 +33,7 @@ public:
     void resolve(
         const Manifest& rootManifest,
         const std::filesystem::path& rootDir,
-        const std::vector<Manifest>& workspaceMembers = {},
+        const std::vector<std::pair<Manifest, std::filesystem::path>>& workspaceMembers = {},
         const std::optional<Lockfile>& existingLock = std::nullopt,
         bool includeDevDependencies = true
     );
