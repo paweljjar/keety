@@ -77,10 +77,15 @@ add_executable(keety_unit_tests
     conformance/test_conformance_json.cpp
     conformance/test_conformance_net.cpp
     conformance/test_conformance_negative.cpp
+    unit/test_pkg_source_spec.cpp
+    unit/test_pkg_manifest.cpp
+    unit/test_pkg_lockfile.cpp
+    unit/test_pkg_workspace.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE
     keety_core
+    kattery_core
     keety_warnings
     Catch2::Catch2WithMain
 )
