@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <string>
