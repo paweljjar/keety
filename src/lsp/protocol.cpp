@@ -1,0 +1,168 @@
+#include <keety/lsp/protocol.hpp>
+
+#include <stdexcept>
+
+namespace keety::lsp {
+
+namespace {
+
+const JsonValue::Object* asObject(const JsonValue& j) {
+    if (j.is_object()) {
+        return &std::get<JsonValue::Object>(j.value);
+    }
+    return nullptr;
+}
+
+const JsonValue* findField(const JsonValue::Object& obj, const std::string& key) {
+    auto it = obj.find(key);
+    return (it != obj.end()) ? &it->second : nullptr;
+}
+
+} // namespace
+
+std::string requestIdToString(const RequestId& id) {
+    if (std::holds_alternative<int64_t>(id)) {
+        return std::to_string(std::get<int64_t>(id));
+    }
+    return std::get<std::string>(id);
+}
+
+JsonValue Position::toJson() const {
+    JsonValue::Object obj;
+    obj["line"] = JsonValue(static_cast<int64_t>(line));
+    obj["character"] = JsonValue(static_cast<int64_t>(character));
+    return JsonValue(std::move(obj));
+}
+
+Position Position::fromJson(const JsonValue& j) {
+    Position pos;
+    if (auto* obj = asObject(j)) {
+        if (auto* l = findField(*obj, "line"); l && l->is_int()) {
+            pos.line = static_cast<uint32_t>(std::get<int64_t>(l->value));
+        }
+        if (auto* c = findField(*obj, "character"); c && c->is_int()) {
+            pos.character = static_cast<uint32_t>(std::get<int64_t>(c->value));
+        }
+    }
+    return pos;
+}
+
+JsonValue Range::toJson() const {
+    JsonValue::Object obj;
+    obj["start"] = start.toJson();
+    obj["end"] = end.toJson();
+    return JsonValue(std::move(obj));
+}
+
+Range Range::fromJson(const JsonValue& j) {
+    Range r;
+    if (auto* obj = asObject(j)) {
+        if (auto* s = findField(*obj, "start")) r.start = Position::fromJson(*s);
+        if (auto* e = findField(*obj, "end")) r.end = Position::fromJson(*e);
+    }
+    return r;
+}
+
+TextDocumentItem TextDocumentItem::fromJson(const JsonValue& j) {
+    TextDocumentItem item;
+    if (auto* obj = asObject(j)) {
+        if (auto* u = findField(*obj, "uri"); u && u->is_string()) item.uri = std::get<std::string>(u->value);
+        if (auto* l = findField(*obj, "languageId"); l && l->is_string()) item.languageId = std::get<std::string>(l->value);
+        if (auto* v = findField(*obj, "version"); v && v->is_int()) item.version = static_cast<int32_t>(std::get<int64_t>(v->value));
+        if (auto* t = findField(*obj, "text"); t && t->is_string()) item.text = std::get<std::string>(t->value);
+    }
+    return item;
+}
+
+TextDocumentIdentifier TextDocumentIdentifier::fromJson(const JsonValue& j) {
+    TextDocumentIdentifier id;
+    if (auto* obj = asObject(j)) {
+        if (auto* u = findField(*obj, "uri"); u && u->is_string()) {
+            id.uri = std::get<std::string>(u->value);
+        }
+    }
+    return id;
+}
+
+VersionedTextDocumentIdentifier VersionedTextDocumentIdentifier::fromJson(const JsonValue& j) {
+    VersionedTextDocumentIdentifier id;
+    if (auto* obj = asObject(j)) {
+        if (auto* u = findField(*obj, "uri"); u && u->is_string()) id.uri = std::get<std::string>(u->value);
+        if (auto* v = findField(*obj, "version"); v && v->is_int()) id.version = static_cast<int32_t>(std::get<int64_t>(v->value));
+    }
+    return id;
+}
+
+TextDocumentContentChangeEvent TextDocumentContentChangeEvent::fromJson(const JsonValue& j) {
+    TextDocumentContentChangeEvent ev;
+    if (auto* obj = asObject(j)) {
+        if (auto* r = findField(*obj, "range"); r && !r->is_null()) {
+            ev.range = Range::fromJson(*r);
+        }
+        if (auto* t = findField(*obj, "text"); t && t->is_string()) {
+            ev.text = std::get<std::string>(t->value);
+        }
+    }
+    return ev;
+}
+
+std::string JsonRpcResponse::serialize() const {
+    JsonValue::Object obj;
+    obj["jsonrpc"] = JsonValue(std::string("2.0"));
+
+    if (id.has_value()) {
+        if (std::holds_alternative<int64_t>(*id)) {
+            obj["id"] = JsonValue(std::get<int64_t>(*id));
+        } else {
+            obj["id"] = JsonValue(std::get<std::string>(*id));
+        }
+    } else {
+        obj["id"] = JsonValue(std::monostate{});
+    }
+
+    if (error.has_value()) {
+        obj["error"] = *error;
+    } else if (result.has_value()) {
+        obj["result"] = *result;
+    } else {
+        obj["result"] = JsonValue(std::monostate{});
+    }
+
+    return keet::json::detail::dump_node(JsonValue(std::move(obj)), 0);
+}
+
+JsonRpcResponse JsonRpcResponse::makeResult(RequestId id, JsonValue result) {
+    JsonRpcResponse res;
+    res.id = std::move(id);
+    res.result = std::move(result);
+    return res;
+}
+
+JsonRpcResponse JsonRpcResponse::makeError(
+    std::optional<RequestId> id,
+    JsonRpcErrorCode code,
+    const std::string& message,
+    std::optional<JsonValue> data
+) {
+    JsonRpcResponse res;
+    res.id = std::move(id);
+
+    JsonValue::Object err;
+    err["code"] = JsonValue(static_cast<int64_t>(code));
+    err["message"] = JsonValue(message);
+    if (data.has_value()) {
+        err["data"] = std::move(*data);
+    }
+    res.error = JsonValue(std::move(err));
+    return res;
+}
+
+std::string JsonRpcNotification::serialize() const {
+    JsonValue::Object obj;
+    obj["jsonrpc"] = JsonValue(std::string("2.0"));
+    obj["method"] = JsonValue(method);
+    obj["params"] = params;
+    return keet::json::detail::dump_node(JsonValue(std::move(obj)), 0);
+}
+
+} // namespace keety::lsp
