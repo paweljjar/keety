@@ -12,6 +12,7 @@ Official Visual Studio Code extension providing first-class language support for
 - **🔍 Rich IntelliSense & Autocompletion:** Dot-completions for standard library modules (`io.`, `fs.`, `sys.`, `math.`, `time.`, `json.`, `net.`), built-in types, keywords, and container methods.
 - **📖 Hover Documentation:** Inline type signatures, parameter hints, and Markdown docstrings for built-in functions, constants, and language constructs.
 - **📦 Snippets:** Instant templates for `main`, `fn`, `zonk`, `zonkblock`, `ifnull`, `forin`, `class`, and `import`.
+- **📋 Kattery Manifest Support:** Built-in JSON schema validation and autocomplete for `pedigree.json` package manifests, plus JSON syntax highlighting for `pedigree.lock` files.
 - **▶ Run & Build Buttons:** One-click execution button (▶) in the editor title bar to run `keety run <file>` in the Integrated Terminal.
 
 ---

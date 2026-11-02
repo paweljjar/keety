@@ -224,6 +224,12 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                 for (const auto& s : imp->getSymbols()) {
                     imported_net_symbols_.insert(s.getEffectiveName());
                 }
+            } else {
+                std::string mod_id = !imp->getModuleAlias().empty() ? imp->getModuleAlias() : p;
+                if (mod_id.find('/') != std::string::npos || mod_id.find('\\') != std::string::npos) {
+                    mod_id = std::filesystem::path(mod_id).stem().string();
+                }
+                user_imported_modules_.insert(mod_id);
             }
         }
     }
@@ -524,6 +530,9 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             }
 
             std::string m_name = mem->getMemberName();
+            if (user_imported_modules_.count(obj_s)) {
+                return make_module_namespace(obj_s) + "::" + m_name + "(" + args_str + ")";
+            }
             if (obj_s == "io") {
                 if (m_name == "print" || m_name == "println" || m_name == "eprint" || m_name == "eprintln" ||
                     m_name == "readln" || m_name == "readLine" || m_name == "eof" ||
@@ -1427,7 +1436,11 @@ std::string CppEmitter::emit_namespace_begin() const {
     if (!options_.emit_namespace) {
         return "";
     }
-    return "namespace " + get_namespace_name() + " {\n";
+    std::string res = "namespace " + get_namespace_name() + " {\n";
+    for (const auto& mod : user_imported_modules_) {
+        res += "    using namespace " + make_module_namespace(mod) + ";\n";
+    }
+    return res;
 }
 
 std::string CppEmitter::emit_namespace_end() const {

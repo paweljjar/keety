@@ -1,4 +1,5 @@
 #include <keety/driver/cli_driver.hpp>
+#include <keety/driver/project_root.hpp>
 
 #include <keety/emitter/cpp_emitter.hpp>
 #include <keety/emitter/header_emitter.hpp>
@@ -594,9 +595,7 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
     diag::SourceManager sm;
     diag::DiagnosticEmitter emitter(sm, options.color_mode);
 
-    std::filesystem::path project_root = options.input_file.has_parent_path()
-        ? options.input_file.parent_path()
-        : std::filesystem::current_path();
+    std::filesystem::path project_root = findProjectRoot(options.input_file);
 
     resolver::ModulePathResolver path_resolver(project_root, &emitter);
     resolver::ModuleGraph graph;
@@ -773,9 +772,7 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
     diag::SourceManager sm;
     diag::DiagnosticEmitter emitter(sm, options.color_mode);
 
-    std::filesystem::path project_root = options.input_file.has_parent_path()
-        ? options.input_file.parent_path()
-        : std::filesystem::current_path();
+    std::filesystem::path project_root = findProjectRoot(options.input_file);
 
     resolver::ModulePathResolver path_resolver(project_root, &emitter);
     resolver::ModuleGraph graph;
@@ -995,9 +992,7 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     diag::SourceManager sm;
     diag::DiagnosticEmitter emitter(sm, options.color_mode);
 
-    std::filesystem::path project_root = options.input_file.has_parent_path()
-        ? options.input_file.parent_path()
-        : std::filesystem::current_path();
+    std::filesystem::path project_root = findProjectRoot(options.input_file);
 
     if (options.verbose) {
         out << "[verbose] Project root: " << project_root.string() << "\n";

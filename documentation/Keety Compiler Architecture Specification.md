@@ -84,6 +84,11 @@ KeetScript treats every source file as an autonomous module. Before type checkin
   * Post-order Depth-First Search (DFS) yields the exact topological initialization order. Modules at the leaves (having no downstream project dependencies) are scheduled for initialization before the modules that depend upon them.
 * **Module Deduplication (Single-Instantiation):**
   * When a module is imported across multiple independent compilation units (diamond dependency), `keety` caches the parsed module AST, ensuring that symbol resolution and code generation instantiate the module's state and types exactly once.
+* **Upward Project-Root Discovery (`keety::driver::findProjectRoot`):**
+  * To seamlessly locate packages installed by the `kattery` package manager, `keety` dynamically resolves the project root by walking upward from the entry file:
+    1. The nearest ancestor containing `keet_modules/` (enabling monorepo workspace members to import hoisted root packages).
+    2. The nearest ancestor containing `pedigree.json`.
+    3. The entry file's parent directory (fallback for isolated standalone scripts).
 
 ---
 
@@ -333,4 +338,23 @@ The `keety` binary acts as an integrated language driver:
 * `--opt, -O <0|1|2|3|s>`: Sets the optimization tier for both `keety` IR lowering and the native C++ compiler.
 * `--wrapv`: Enforces 64-bit signed integer two's-complement overflow semantics on GCC/Clang.
 * `--verbose, -v`: Prints detailed stage timings and intermediate invocation commands.
+
+---
+
+## 7. Package Manager Architecture: `kattery`
+
+To keep the AOT compiler focused exclusively on deterministic compilation, code generation, and language semantics, package and dependency management is handled by **`kattery`** (`keety::pkg`):
+
+### Separation of Concerns:
+* **`keety`** (Compiler): Compiles `.keet` sources to C++20 and builds native executables; resolves packages from `keet_modules/` found via `findProjectRoot`. Never reads or modifies `pedigree.json` or `pedigree.lock`.
+* **`kattery`** (Package Manager): Scaffolds projects, manages `pedigree.json`, fetches remote Git mirrors or local path packages, calculates dependency graphs, hoists shared packages, writes deterministic `pedigree.lock` files, and manages workspace links in `keet_modules/`.
+
+### Core Subsystems (`keety::pkg`):
+* **`SourceSpec`**: Parses and round-trips `git+<url>[#<ref>]` and `path:<dir>` specifications with package name validation.
+* **`Manifest` (`pedigree.json`)**: Validates and serializes package configuration, dependency maps, devDependencies, and custom scripts.
+* **`Lockfile` (`pedigree.lock`)**: Stores canonical, lexicographically-ordered records of resolved Git commit SHAs, Git tree integrity hashes, and dependency lists.
+* **`Workspace`**: Discovers monorepo roots and member packages via glob patterns (`packages/*`), ensuring duplicate-free member names.
+* **`DependencyGraph` & `Installer`**: Walks transitive dependencies, detects dependency cycles and conflicting versions, stages checkouts, and performs atomic installations into `keet_modules/` with `.kattery.json` state tracking.
+* **`ScriptRunner`**: Cross-platform shell execution (`/bin/sh -c` on POSIX, `cmd /C` on Windows) with automatic `keety` `PATH` injection and exit-code propagation.
+
 

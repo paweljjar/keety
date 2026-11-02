@@ -33,6 +33,7 @@ add_library(keety_core STATIC
     driver/toolchain_detector.cpp
     driver/toolchain_driver.cpp
     driver/cli_driver.cpp
+    driver/project_root.cpp
 )
 
 target_include_directories(keety_core PUBLIC
@@ -63,3 +64,44 @@ target_link_libraries(keety PRIVATE
 set_target_properties(keety PROPERTIES
     OUTPUT_NAME "keety"
 )
+
+# Package manager library
+add_library(kattery_core STATIC
+    pkg/diagnostics.cpp
+    pkg/source_spec.cpp
+    pkg/manifest.cpp
+    pkg/lockfile.cpp
+    pkg/workspace.cpp
+    pkg/process.cpp
+    pkg/git_client.cpp
+    pkg/fetcher.cpp
+    pkg/graph.cpp
+    pkg/installer.cpp
+    pkg/script_runner.cpp
+    pkg/cli.cpp
+)
+
+target_include_directories(kattery_core PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../runtime>
+    $<INSTALL_INTERFACE:include>
+)
+
+target_link_libraries(kattery_core PUBLIC
+    keety_warnings
+)
+
+# Package manager executable
+add_executable(kattery
+    kattery/main.cpp
+)
+
+target_link_libraries(kattery PRIVATE
+    kattery_core
+    keety_warnings
+)
+
+set_target_properties(kattery PROPERTIES
+    OUTPUT_NAME "kattery"
+)
+

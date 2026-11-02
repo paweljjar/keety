@@ -98,7 +98,9 @@ bool ModuleGraph::buildGraph(const std::filesystem::path& entryFilePath,
         return true;
     }
 
-    std::string modName = canonicalEntry.stem().string();
+    std::string modName = (existing && !existing->moduleName.empty())
+        ? existing->moduleName
+        : canonicalEntry.stem().string();
     auto& node = getOrCreateNode(canonicalStr, modName, ModuleKind::Local, false);
 
     // Read source file content

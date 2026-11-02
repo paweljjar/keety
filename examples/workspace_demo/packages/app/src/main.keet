@@ -1,0 +1,11 @@
+import io;
+import math_utils;
+
+fn main(): void {
+    let x: int = 7;
+    let sq: int = math_utils.square(x);
+    let clamped: int = math_utils.clampInt(150, 0, 100);
+
+    io.println(`[workspace-demo] square(${x.toString()}) = ${sq.toString()}`);
+    io.println(`[workspace-demo] clampInt(150, 0, 100) = ${clamped.toString()}`);
+}

@@ -1,0 +1,67 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "KeetScript Package Manifest (pedigree.json)",
+  "description": "Configuration file for KeetScript projects and packages managed by kattery",
+  "type": "object",
+  "required": [
+    "name",
+    "version"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Unique package name (1-64 lowercase chars, letters, digits, '-', '_'; cannot collide with stdlib modules like io, fs, sys, math, time, json, net)",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "version": {
+      "type": "string",
+      "description": "Semantic versioning string (MAJOR.MINOR.PATCH)",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of the package"
+    },
+    "entry": {
+      "type": "string",
+      "description": "Relative path to the main application entry file (defaults to 'src/main.keet')"
+    },
+    "keety": {
+      "type": "string",
+      "description": "Minimum required compiler version constraint in '>=X.Y.Z' format",
+      "pattern": "^>=(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+    },
+    "dependencies": {
+      "type": "object",
+      "description": "Runtime package dependencies mapping package name to source specification ('git+url[#ref]' or 'path:dir')",
+      "additionalProperties": {
+        "type": "string",
+        "description": "Source specification ('git+https://...#tag', 'git+ssh://...', or 'path:../relative-dir')"
+      }
+    },
+    "devDependencies": {
+      "type": "object",
+      "description": "Development-only package dependencies, skipped during production installs and not inherited by consumers",
+      "additionalProperties": {
+        "type": "string",
+        "description": "Source specification ('git+https://...#tag', 'git+ssh://...', or 'path:../relative-dir')"
+      }
+    },
+    "scripts": {
+      "type": "object",
+      "description": "Named custom shell commands executed via 'kattery run <script>'",
+      "additionalProperties": {
+        "type": "string",
+        "description": "Shell command to execute"
+      }
+    },
+    "workspaces": {
+      "type": "array",
+      "description": "Array of member package directory paths or single-level glob patterns (e.g. ['packages/*', 'apps/cli'])",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": true
+}

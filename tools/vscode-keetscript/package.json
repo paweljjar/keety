@@ -33,6 +33,18 @@
           ".keet"
         ],
         "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "json",
+        "filenames": [
+          "pedigree.lock"
+        ]
+      }
+    ],
+    "jsonValidation": [
+      {
+        "fileMatch": "pedigree.json",
+        "url": "./schemas/pedigree.schema.json"
       }
     ],
     "grammars": [

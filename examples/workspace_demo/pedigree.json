@@ -1,0 +1,12 @@
+{
+  "name": "workspace-demo",
+  "version": "1.0.0",
+  "description": "Multi-package monorepo workspace example managed by kattery",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "start": "kattery run start -w demo-app",
+    "test": "kattery run test --workspaces"
+  }
+}

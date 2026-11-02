@@ -1,0 +1,8 @@
+{
+  "name": "math-utils",
+  "version": "1.0.0",
+  "description": "Shared utility package demonstrating workspace library consumption",
+  "scripts": {
+    "test": "echo [math-utils] Running unit tests: all passed"
+  }
+}

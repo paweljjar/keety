@@ -77,10 +77,25 @@ add_executable(keety_unit_tests
     conformance/test_conformance_json.cpp
     conformance/test_conformance_net.cpp
     conformance/test_conformance_negative.cpp
+    unit/test_pkg_source_spec.cpp
+    unit/test_pkg_manifest.cpp
+    unit/test_pkg_lockfile.cpp
+    unit/test_pkg_workspace.cpp
+    unit/test_pkg_process.cpp
+    unit/test_pkg_git.cpp
+    unit/test_pkg_graph.cpp
+    unit/test_pkg_installer.cpp
+    unit/test_kattery_cli_add_remove.cpp
+    unit/test_kattery_cli_install.cpp
+    unit/test_kattery_workspaces.cpp
+    unit/test_driver_project_root.cpp
+    unit/test_kattery_run.cpp
+    conformance/test_conformance_package_import.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE
     keety_core
+    kattery_core
     keety_warnings
     Catch2::Catch2WithMain
 )

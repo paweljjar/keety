@@ -19,4 +19,9 @@ bin/
 *.so
 *.dylib
 *.dll
+*.exe
 *.log
+
+# KeetScript compilation & package artifacts
+.keety_build/
+keet_modules/
