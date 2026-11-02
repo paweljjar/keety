@@ -251,3 +251,40 @@ TEST_CASE("Parser context-aware error hints and warnings", "[diag][parser]") {
     }
 }
 
+TEST_CASE("Diagnostic emitter JSON serialization", "[diag][json]") {
+    SourceManager sm;
+    auto fid = sm.addBuffer("src/test.keet", "let x = prntln;\n");
+    DiagnosticEmitter emitter(sm, ColorMode::Never);
+
+    SECTION("Empty diagnostics emits empty array") {
+        REQUIRE(emitter.formatJson() == "[]\n");
+    }
+
+    SECTION("Structured JSON output with location, labels, and suggestions") {
+        SourceLocation loc{fid, 8, 1, 9};
+        SourceSpan span{loc, SourceLocation{fid, 14, 1, 15}};
+
+        Diagnostic d = Diagnostic::makeError("E2003", "undeclared identifier 'prntln'", loc);
+        d.withLabel(span, "not found in scope", true);
+        d.withNote("KeetScript requires all identifiers to be declared before use.");
+        d.withHelp("did you mean 'println'?");
+
+        emitter.report(d);
+        REQUIRE(emitter.hasErrors());
+
+        std::string json = emitter.formatJson();
+        REQUIRE(json.front() == '[');
+        REQUIRE(json.find("\"code\": \"E2003\"") != std::string::npos);
+        REQUIRE(json.find("\"severity\": \"error\"") != std::string::npos);
+        REQUIRE(json.find("\"message\": \"undeclared identifier 'prntln'\"") != std::string::npos);
+        REQUIRE(json.find("\"file\": \"src/test.keet\"") != std::string::npos);
+        REQUIRE(json.find("\"line\": 1") != std::string::npos);
+        REQUIRE(json.find("\"column\": 9") != std::string::npos);
+        REQUIRE(json.find("\"message\": \"not found in scope\"") != std::string::npos);
+        REQUIRE(json.find("\"isPrimary\": true") != std::string::npos);
+        REQUIRE(json.find("\"did you mean 'println'?\"") != std::string::npos);
+        REQUIRE(json.find("\"replacement\": \"println\"") != std::string::npos);
+        REQUIRE(json.find("\"title\": \"Change to 'println'\"") != std::string::npos);
+    }
+}
+

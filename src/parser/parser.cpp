@@ -876,6 +876,11 @@ bool Parser::isMissingCallLParen(const ast::Expr* expr) {
         return false;
     }
 
+    // Binary operators can never follow an identifier in a missing-call scenario
+    if (getBinaryPrecedence(nextTok.kind) > 0) {
+        return false;
+    }
+
     // Next token cannot be an operator or delimiter
     switch (nextTok.kind) {
     case lexer::TokenKind::Semicolon:
@@ -906,11 +911,14 @@ bool Parser::isMissingCallLParen(const ast::Expr* expr) {
     case lexer::TokenKind::KwAs:
     case lexer::TokenKind::KwZonk:
     case lexer::TokenKind::Plus:
+    case lexer::TokenKind::Minus:
     case lexer::TokenKind::Star:
     case lexer::TokenKind::Slash:
     case lexer::TokenKind::Percent:
     case lexer::TokenKind::PlusPlus:
     case lexer::TokenKind::MinusMinus:
+    case lexer::TokenKind::Arrow:
+    case lexer::TokenKind::Pipe:
     case lexer::TokenKind::Eof:
         return false;
     default:

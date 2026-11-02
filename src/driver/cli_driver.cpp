@@ -473,6 +473,10 @@ CliOptions CliDriver::parse_args(const std::vector<std::string>& args) {
             options.color_mode = diag::ColorMode::Never;
         } else if (arg == "--color=auto") {
             options.color_mode = diag::ColorMode::Auto;
+        } else if (arg == "--diagnostic-format=json" || arg == "--json-diagnostics") {
+            options.diagnostic_format = DiagnosticFormat::Json;
+        } else if (arg == "--diagnostic-format=human") {
+            options.diagnostic_format = DiagnosticFormat::Human;
         } else if (arg == "--wrapv") {
             options.wrapv = true;
         } else if (arg == "--cpp") {
@@ -558,19 +562,32 @@ void CliDriver::print_help(std::ostream& out) {
         << "  --wrapv                              Enforce two's-complement overflow semantics\n"
         << "  -v, --verbose                        Enable verbose diagnostics and phase timings\n"
         << "  --no-color                           Disable ANSI color escape sequences in output\n"
+        << "  --diagnostic-format <human|json>     Format diagnostics as human-readable terminal text or JSON array\n"
+        << "  --json-diagnostics                   Shorthand for --diagnostic-format=json\n"
         << "  -h, --help                           Display usage documentation\n"
         << "  -V, --version                        Display version number\n";
 }
 
 int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::ostream& err) {
+    const bool is_json = (options.diagnostic_format == DiagnosticFormat::Json);
+
     if (options.input_file.empty()) {
-        err << "error: 'keety check' requires a target input file.\n"
-            << "usage: keety check <file.keet>\n";
+        if (is_json) {
+            out << "[{\"code\":\"E0000\",\"severity\":\"error\",\"message\":\"'keety check' requires a target input file.\"}]\n";
+        } else {
+            err << "error: 'keety check' requires a target input file.\n"
+                << "usage: keety check <file.keet>\n";
+        }
         return 1;
     }
 
     if (!std::filesystem::exists(options.input_file)) {
-        err << "error: input file not found: " << options.input_file.string() << "\n";
+        if (is_json) {
+            out << "[{\"code\":\"E1002\",\"severity\":\"error\",\"message\":\"input file not found: "
+                << options.input_file.string() << "\"}]\n";
+        } else {
+            err << "error: input file not found: " << options.input_file.string() << "\n";
+        }
         return 1;
     }
 
@@ -586,8 +603,12 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
 
     bool graph_ok = graph.buildGraph(options.input_file, sm, path_resolver, &emitter);
     if (!graph_ok || emitter.hasErrors()) {
-        for (const auto& d : emitter.getDiagnostics()) {
-            err << emitter.format(d);
+        if (is_json) {
+            emitter.emitJson(out);
+        } else {
+            for (const auto& d : emitter.getDiagnostics()) {
+                err << emitter.format(d);
+            }
         }
         return 1;
     }
@@ -595,8 +616,12 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
     // Check for circular dependency cycles
     resolver::CycleDetector cycle_detector(graph, &emitter);
     if (!cycle_detector.detectCycles() || emitter.hasErrors()) {
-        for (const auto& d : emitter.getDiagnostics()) {
-            err << emitter.format(d);
+        if (is_json) {
+            emitter.emitJson(out);
+        } else {
+            for (const auto& d : emitter.getDiagnostics()) {
+                err << emitter.format(d);
+            }
         }
         return 1;
     }
@@ -606,7 +631,7 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
     std::filesystem::path canonical_entry = std::filesystem::weakly_canonical(options.input_file);
     auto ordered_nodes = sorter.sortNodes(canonical_entry.string());
 
-    if (options.verbose) {
+    if (options.verbose && !is_json) {
         out << "[verbose] Resolved " << ordered_nodes.size() << " module(s) in dependency order:\n";
         for (size_t i = 0; i < ordered_nodes.size(); ++i) {
             out << "[verbose]   [" << (i + 1) << "] " << ordered_nodes[i]->moduleName << "\n";
@@ -628,7 +653,7 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
             continue;
         }
 
-        if (options.verbose) {
+        if (options.verbose && !is_json) {
             out << "[verbose] Validating semantics and lowering IR: " << node->moduleName << "\n";
         }
 
@@ -672,8 +697,12 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
         module_scopes[node->canonicalPath] = module_scope;
 
         if (emitter.hasErrors()) {
-            for (const auto& d : emitter.getDiagnostics()) {
-                err << emitter.format(d);
+            if (is_json) {
+                emitter.emitJson(out);
+            } else {
+                for (const auto& d : emitter.getDiagnostics()) {
+                    err << emitter.format(d);
+                }
             }
             return 1;
         }
@@ -682,11 +711,20 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
         auto ir_mod = lowerer.lower_module(*node->ast);
 
         if (emitter.hasErrors()) {
-            for (const auto& d : emitter.getDiagnostics()) {
-                err << emitter.format(d);
+            if (is_json) {
+                emitter.emitJson(out);
+            } else {
+                for (const auto& d : emitter.getDiagnostics()) {
+                    err << emitter.format(d);
+                }
             }
             return 1;
         }
+    }
+
+    if (is_json) {
+        emitter.emitJson(out);
+        return emitter.hasErrors() ? 1 : 0;
     }
 
     // Output any warnings

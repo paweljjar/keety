@@ -347,4 +347,228 @@ std::string DiagnosticEmitter::format(const Diagnostic& diag) const {
     return ss.str();
 }
 
+namespace {
+
+std::string escapeJsonString(std::string_view s) {
+    std::string out;
+    out.reserve(s.size() + 16);
+    for (char c : s) {
+        switch (c) {
+        case '\"': out += "\\\""; break;
+        case '\\': out += "\\\\"; break;
+        case '\b': out += "\\b"; break;
+        case '\f': out += "\\f"; break;
+        case '\n': out += "\\n"; break;
+        case '\r': out += "\\r"; break;
+        case '\t': out += "\\t"; break;
+        default:
+            if (static_cast<unsigned char>(c) < 0x20) {
+                char buf[8];
+                std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
+                out += buf;
+            } else {
+                out += c;
+            }
+            break;
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+std::string DiagnosticEmitter::formatJson() const {
+    if (diagnostics_.empty()) {
+        return "[]\n";
+    }
+
+    std::ostringstream ss;
+    ss << "[\n";
+
+    for (size_t i = 0; i < diagnostics_.size(); ++i) {
+        const auto& diag = diagnostics_[i];
+        ss << "  {\n";
+        ss << "    \"code\": \"" << escapeJsonString(diag.code) << "\",\n";
+        ss << "    \"severity\": \"" << severityToString(diag.severity) << "\",\n";
+        ss << "    \"message\": \"" << escapeJsonString(diag.message) << "\",\n";
+
+        // Determine primary location
+        SourceLocation loc = diag.location;
+        if (!loc.isValid() && !diag.labels.empty()) {
+            loc = diag.labels.front().span.start;
+        }
+
+        const SourceBuffer* buffer = loc.isValid() ? sourceManager_.getBuffer(loc.fileId) : nullptr;
+        std::string filePath = buffer ? buffer->getFilePath() : "";
+
+        uint32_t startLine = (loc.line > 0) ? loc.line : (buffer ? buffer->getLocationAtOffset(loc.offset).line : 1);
+        uint32_t startCol = (loc.column > 0) ? loc.column : (buffer ? buffer->getLocationAtOffset(loc.offset).column : 1);
+        uint32_t endLine = startLine;
+        uint32_t endCol = startCol + 1;
+        uint32_t length = 1;
+
+        // If there are labels, find primary label's end location
+        for (const auto& lbl : diag.labels) {
+            if (lbl.isPrimary && lbl.span.isValid()) {
+                const SourceBuffer* lblBuf = sourceManager_.getBuffer(lbl.span.getFileId());
+                if (lblBuf) {
+                    if (filePath.empty()) filePath = lblBuf->getFilePath();
+                    SourceLocation s = (lbl.span.start.line > 0 && lbl.span.start.column > 0)
+                        ? lbl.span.start : lblBuf->getLocationAtOffset(lbl.span.start.offset);
+                    SourceLocation e = (lbl.span.end.line > 0 && lbl.span.end.column > 0)
+                        ? lbl.span.end : lblBuf->getLocationAtOffset(lbl.span.end.offset);
+                    startLine = s.line;
+                    startCol = s.column;
+                    endLine = e.line;
+                    endCol = e.column;
+                    length = lbl.span.length() > 0 ? lbl.span.length() : (endCol > startCol ? endCol - startCol : 1);
+                    break;
+                }
+            }
+        }
+
+        ss << "    \"location\": {\n";
+        ss << "      \"file\": \"" << escapeJsonString(filePath) << "\",\n";
+        ss << "      \"line\": " << startLine << ",\n";
+        ss << "      \"column\": " << startCol << ",\n";
+        ss << "      \"endLine\": " << endLine << ",\n";
+        ss << "      \"endColumn\": " << endCol << ",\n";
+        ss << "      \"offset\": " << loc.offset << ",\n";
+        ss << "      \"length\": " << length << "\n";
+        ss << "    },\n";
+
+        // Labels
+        ss << "    \"labels\": [\n";
+        for (size_t l = 0; l < diag.labels.size(); ++l) {
+            const auto& lbl = diag.labels[l];
+            const SourceBuffer* lblBuf = lbl.span.isValid() ? sourceManager_.getBuffer(lbl.span.getFileId()) : buffer;
+            std::string lblFile = lblBuf ? lblBuf->getFilePath() : filePath;
+            SourceLocation s = lblBuf ? ((lbl.span.start.line > 0 && lbl.span.start.column > 0) ? lbl.span.start : lblBuf->getLocationAtOffset(lbl.span.start.offset)) : loc;
+            SourceLocation e = lblBuf ? ((lbl.span.end.line > 0 && lbl.span.end.column > 0) ? lbl.span.end : lblBuf->getLocationAtOffset(lbl.span.end.offset)) : loc;
+
+            ss << "      {\n";
+            ss << "        \"file\": \"" << escapeJsonString(lblFile) << "\",\n";
+            ss << "        \"line\": " << s.line << ",\n";
+            ss << "        \"column\": " << s.column << ",\n";
+            ss << "        \"endLine\": " << e.line << ",\n";
+            ss << "        \"endColumn\": " << e.column << ",\n";
+            ss << "        \"message\": \"" << escapeJsonString(lbl.message) << "\",\n";
+            ss << "        \"isPrimary\": " << (lbl.isPrimary ? "true" : "false") << "\n";
+            ss << "      }" << (l + 1 < diag.labels.size() ? "," : "") << "\n";
+        }
+        ss << "    ],\n";
+
+        // Notes and Helps
+        std::vector<std::string> notes;
+        std::vector<std::string> helps;
+        for (const auto& f : diag.footers) {
+            if (f.kind == DiagnosticFooter::Kind::Note) {
+                notes.push_back(f.message);
+            } else {
+                helps.push_back(f.message);
+            }
+        }
+
+        ss << "    \"notes\": [";
+        for (size_t n = 0; n < notes.size(); ++n) {
+            ss << (n == 0 ? "\n      \"" : "      \"") << escapeJsonString(notes[n]) << "\"" << (n + 1 < notes.size() ? ",\n" : "\n    ");
+        }
+        ss << "],\n";
+
+        ss << "    \"helps\": [";
+        for (size_t h = 0; h < helps.size(); ++h) {
+            ss << (h == 0 ? "\n      \"" : "      \"") << escapeJsonString(helps[h]) << "\"" << (h + 1 < helps.size() ? ",\n" : "\n    ");
+        }
+        ss << "],\n";
+
+        // Structured Suggestions
+        struct JsonSuggestion {
+            std::string type;
+            std::string file;
+            uint32_t startLine;
+            uint32_t startColumn;
+            uint32_t endLine;
+            uint32_t endColumn;
+            std::string replacement;
+            std::string title;
+        };
+        std::vector<JsonSuggestion> suggestions;
+
+        for (const auto& h : helps) {
+            // Case 1: did you mean 'XYZ'?
+            size_t dymPos = h.find("did you mean '");
+            if (dymPos != std::string::npos) {
+                size_t q1 = dymPos + 14;
+                size_t q2 = h.find('\'', q1);
+                if (q2 != std::string::npos) {
+                    std::string repl = h.substr(q1, q2 - q1);
+                    std::string title = (repl == "==") ? "Change '=' to '=='" : ("Change to '" + repl + "'");
+                    suggestions.push_back(JsonSuggestion{
+                        "replace",
+                        filePath,
+                        startLine,
+                        startCol,
+                        endLine,
+                        endCol,
+                        repl,
+                        title
+                    });
+                }
+            } else if (h.find("add 'import ") != std::string::npos) {
+                size_t q1 = h.find("add '") + 5;
+                size_t q2 = h.find('\'', q1);
+                if (q2 != std::string::npos) {
+                    std::string impStmt = h.substr(q1, q2 - q1) + "\n";
+                    suggestions.push_back(JsonSuggestion{
+                        "insert",
+                        filePath,
+                        1,
+                        1,
+                        1,
+                        1,
+                        impStmt,
+                        "Add '" + h.substr(q1, q2 - q1) + "'"
+                    });
+                }
+            } else if (h.find("add '(' to call '") != std::string::npos) {
+                suggestions.push_back(JsonSuggestion{
+                    "insert",
+                    filePath,
+                    startLine,
+                    startCol,
+                    startLine,
+                    startCol,
+                    "(",
+                    "Add '(' before argument"
+                });
+            }
+        }
+
+        ss << "    \"suggestions\": [";
+        for (size_t s = 0; s < suggestions.size(); ++s) {
+            const auto& sug = suggestions[s];
+            ss << (s == 0 ? "\n      {\n" : "      {\n");
+            ss << "        \"type\": \"" << escapeJsonString(sug.type) << "\",\n";
+            ss << "        \"file\": \"" << escapeJsonString(sug.file) << "\",\n";
+            ss << "        \"startLine\": " << sug.startLine << ",\n";
+            ss << "        \"startColumn\": " << sug.startColumn << ",\n";
+            ss << "        \"endLine\": " << sug.endLine << ",\n";
+            ss << "        \"endColumn\": " << sug.endColumn << ",\n";
+            ss << "        \"replacement\": \"" << escapeJsonString(sug.replacement) << "\",\n";
+            ss << "        \"title\": \"" << escapeJsonString(sug.title) << "\"\n";
+            ss << "      }" << (s + 1 < suggestions.size() ? ",\n" : "\n    ");
+        }
+        ss << "]\n";
+
+        ss << "  }" << (i + 1 < diagnostics_.size() ? "," : "") << "\n";
+    }
+
+    ss << "]\n";
+    return ss.str();
+}
+
+void DiagnosticEmitter::emitJson(std::ostream& os) const {
+    os << formatJson();
+}
+
 } // namespace keety::diag

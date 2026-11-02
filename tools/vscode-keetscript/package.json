@@ -1,0 +1,136 @@
+{
+  "name": "keetscript",
+  "displayName": "KeetScript",
+  "description": "Rich language support for KeetScript (.keet) - syntax highlighting, live diagnostics, quick fixes, IntelliSense, and execution",
+  "version": "0.1.0",
+  "publisher": "keet-lang",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Snippets"
+  ],
+  "keywords": [
+    "keetscript",
+    "keet",
+    "keety"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:keetscript"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "keetscript",
+        "aliases": [
+          "KeetScript",
+          "keet"
+        ],
+        "extensions": [
+          ".keet"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "keetscript",
+        "scopeName": "source.keet",
+        "path": "./syntaxes/keet.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "keetscript",
+        "path": "./snippets/keet.snippets.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "keetscript.run",
+        "title": "KeetScript: Run Current File",
+        "icon": "$(play)"
+      },
+      {
+        "command": "keetscript.build",
+        "title": "KeetScript: Build Current File",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "keetscript.check",
+        "title": "KeetScript: Check Current File",
+        "icon": "$(check)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "keetscript.run",
+          "when": "resourceExtname == .keet",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "keetscript.run",
+          "when": "resourceExtname == .keet"
+        },
+        {
+          "command": "keetscript.build",
+          "when": "resourceExtname == .keet"
+        },
+        {
+          "command": "keetscript.check",
+          "when": "resourceExtname == .keet"
+        }
+      ]
+    },
+    "configuration": {
+      "type": "object",
+      "title": "KeetScript",
+      "properties": {
+        "keetscript.compilerPath": {
+          "type": "string",
+          "default": "keety",
+          "description": "Path to the keety compiler binary (default: 'keety', auto-searches workspace build/src/keety)."
+        },
+        "keetscript.checkOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically run 'keety check' on file save."
+        },
+        "keetscript.checkOnType": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically run 'keety check' in the background while typing (debounced)."
+        },
+        "keetscript.checkDelayMs": {
+          "type": "number",
+          "default": 300,
+          "description": "Debounce delay in milliseconds for background checking while typing."
+        },
+        "keetscript.extraCheckArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra command line flags to pass to 'keety check'."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.3.3"
+  }
+}

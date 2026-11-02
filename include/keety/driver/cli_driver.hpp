@@ -37,6 +37,12 @@ enum class EmitTarget {
 
 [[nodiscard]] std::string_view to_string(EmitTarget target) noexcept;
 
+/// Output formatting for compiler diagnostics
+enum class DiagnosticFormat {
+    Human,
+    Json
+};
+
 /// Parsed CLI configuration options
 struct CliOptions {
     CliCommand command{CliCommand::Unknown};
@@ -53,6 +59,7 @@ struct CliOptions {
     bool test_benchmarks{false};
     std::vector<std::string> run_args{};
     diag::ColorMode color_mode{diag::ColorMode::Never};
+    DiagnosticFormat diagnostic_format{DiagnosticFormat::Human};
 };
 
 /// CLI command driver and entry point

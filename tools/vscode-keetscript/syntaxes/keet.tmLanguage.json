@@ -1,0 +1,254 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "KeetScript",
+  "scopeName": "source.keet",
+  "fileTypes": ["keet"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#constants" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#stdlib" },
+    { "include": "#function-declarations" },
+    { "include": "#function-calls" },
+    { "include": "#numbers" },
+    { "include": "#operators" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.keet",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.keet",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.keet",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.keet",
+              "match": "\\\\([nrt0\\\\\"']|x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4})"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.keet",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.keet",
+              "match": "\\\\([nrt0\\\\\"']|x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4})"
+            }
+          ]
+        },
+        {
+          "name": "string.interpolated.keet",
+          "begin": "`",
+          "end": "`",
+          "patterns": [
+            {
+              "name": "constant.character.escape.keet",
+              "match": "\\\\([nrt0\\\\\"'`]|x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4})"
+            },
+            {
+              "name": "meta.embedded.line.keet",
+              "begin": "\\$\\{",
+              "beginCaptures": {
+                "0": { "name": "punctuation.definition.template-expression.begin.keet" }
+              },
+              "end": "\\}",
+              "endCaptures": {
+                "0": { "name": "punctuation.definition.template-expression.end.keet" }
+              },
+              "patterns": [
+                { "include": "$self" }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.keet",
+          "match": "\\b(true|false)\\b"
+        },
+        {
+          "name": "constant.language.null.keet",
+          "match": "\\b(null)\\b"
+        },
+        {
+          "name": "constant.other.caps.keet",
+          "match": "\\b[A-Z][A-Z0-9_]{2,}\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.keet",
+          "match": "\\b(if|else|while|for|in|return|break|continue|switch|case|default|yield|zonk)\\b"
+        },
+        {
+          "name": "keyword.declaration.keet",
+          "match": "\\b(fn|let|mut|const|define|struct|class|interface|enum|type|errtype|module)\\b"
+        },
+        {
+          "name": "keyword.control.import.keet",
+          "match": "\\b(import|export|from|as)\\b"
+        },
+        {
+          "name": "storage.modifier.keet",
+          "match": "\\b(pub|priv|async|await|inherits|override|static)\\b"
+        },
+        {
+          "name": "keyword.operator.expression.keet",
+          "match": "\\b(is|typeof|as)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.primitive.keet",
+          "match": "\\b(int|float|bool|char|string|void|error|any|null)\\b"
+        },
+        {
+          "name": "support.type.collection.keet",
+          "match": "\\b(array|map)\\b"
+        },
+        {
+          "name": "entity.name.type.keet",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "stdlib": {
+      "patterns": [
+        {
+          "name": "support.class.stdlib.keet",
+          "match": "\\b(io|fs|sys|math|time)\\b"
+        },
+        {
+          "name": "support.constant.stdlib.keet",
+          "match": "\\b(PI|E|TAU|INF|NAN|MS_PER_SEC|NS_PER_SEC|SEC_PER_MIN|MIN_PER_HOUR)\\b"
+        }
+      ]
+    },
+    "function-declarations": {
+      "match": "\\b(fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.declaration.keet" },
+        "2": { "name": "entity.name.function.keet" }
+      }
+    },
+    "function-calls": {
+      "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?:<[^>]*>)?\\s*(?=\\()",
+      "captures": {
+        "1": { "name": "entity.name.function.call.keet" }
+      }
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.keet",
+          "match": "\\b0x[0-9a-fA-F_]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.keet",
+          "match": "\\b0b[01_]+\\b"
+        },
+        {
+          "name": "constant.numeric.octal.keet",
+          "match": "\\b0o[0-7_]+\\b"
+        },
+        {
+          "name": "constant.numeric.float.keet",
+          "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.integer.keet",
+          "match": "\\b[0-9][0-9_]*\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.arrow.keet",
+          "match": "(->|=>)"
+        },
+        {
+          "name": "keyword.operator.comparison.keet",
+          "match": "(==|!=|<=|>=|<|>)"
+        },
+        {
+          "name": "keyword.operator.assignment.compound.keet",
+          "match": "(\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|<<=|>>=)"
+        },
+        {
+          "name": "keyword.operator.assignment.keet",
+          "match": "="
+        },
+        {
+          "name": "keyword.operator.logical.keet",
+          "match": "(&&|\\|\\||!)"
+        },
+        {
+          "name": "keyword.operator.bitwise.keet",
+          "match": "(&|\\||\\^|~|<<|>>)"
+        },
+        {
+          "name": "keyword.operator.arithmetic.keet",
+          "match": "(\\+|-|\\*|/|%)"
+        },
+        {
+          "name": "keyword.operator.null-coalescing.keet",
+          "match": "(\\?\\?|\\?|:)"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.terminator.statement.keet",
+          "match": ";"
+        },
+        {
+          "name": "punctuation.separator.comma.keet",
+          "match": ","
+        },
+        {
+          "name": "punctuation.accessor.dot.keet",
+          "match": "\\."
+        },
+        {
+          "name": "punctuation.section.scope.keet",
+          "match": "[{}]"
+        },
+        {
+          "name": "punctuation.section.parens.keet",
+          "match": "[()]"
+        },
+        {
+          "name": "punctuation.section.brackets.keet",
+          "match": "[\\[\\]]"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "Main Function": {
+    "prefix": "main",
+    "body": [
+      "import io;",
+      "",
+      "fn main(): void {",
+      "\t${1:io.println(\"Hello, KeetScript!\");}",
+      "}"
+    ],
+    "description": "Standard main function entrypoint"
+  },
+  "Function Declaration": {
+    "prefix": "fn",
+    "body": [
+      "fn ${1:name}(${2:param}: ${3:type}): ${4:void} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Declare a typed function"
+  },
+  "Zonk Fallback": {
+    "prefix": "zonk",
+    "body": [
+      "let ${1:val}: ${2:type} = ${3:expression} zonk ${4:fallback};"
+    ],
+    "description": "Error recovery expression with fallback"
+  },
+  "Zonk Block": {
+    "prefix": "zonkblock",
+    "body": [
+      "let ${1:val}: ${2:type} = ${3:expression} zonk (${4:err}) {",
+      "\t${5:yield fallback;}",
+      "};"
+    ],
+    "description": "Error recovery block with error parameter and yield"
+  },
+  "If Not Null Narrowing": {
+    "prefix": "ifnull",
+    "body": [
+      "if (${1:value} != null) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Check for null with flow-sensitive type narrowing"
+  },
+  "For In Loop": {
+    "prefix": "forin",
+    "body": [
+      "for (${1:item} in ${2:collection}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Iterate over an array or collection"
+  },
+  "While Loop": {
+    "prefix": "while",
+    "body": [
+      "while (${1:condition}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "While loop"
+  },
+  "Class Declaration": {
+    "prefix": "class",
+    "body": [
+      "class ${1:ClassName} {",
+      "\t${2:field}: ${3:string};",
+      "",
+      "\tfn init(${2:field}: ${3:string}) {",
+      "\t\tthis.${2:field} = ${2:field};",
+      "\t}",
+      "}"
+    ],
+    "description": "Declare a class"
+  },
+  "Enum Declaration": {
+    "prefix": "enum",
+    "body": [
+      "enum ${1:Color} {",
+      "\t${2:Red},",
+      "\t${3:Green},",
+      "\t${4:Blue}",
+      "}"
+    ],
+    "description": "Declare an enumeration"
+  },
+  "Import Module": {
+    "prefix": "import",
+    "body": [
+      "import ${1|io,fs,sys,math,time|};"
+    ],
+    "description": "Import standard library module"
+  }
+}

@@ -31,6 +31,12 @@ public:
     /// Emits formatted diagnostic directly to an output stream.
     void emit(const Diagnostic& diag, std::ostream& os) const;
 
+    /// Formats all diagnostics into a JSON array string conforming to the IDE tooling specification.
+    [[nodiscard]] std::string formatJson() const;
+
+    /// Emits formatted JSON array directly to an output stream.
+    void emitJson(std::ostream& os) const;
+
     /// Adds a diagnostic to internal session storage.
     void report(Diagnostic diag);
 
