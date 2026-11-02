@@ -17,6 +17,7 @@ bool ModulePathResolver::isStandardLibraryModule(std::string_view importPath) no
         "sys",
         "math",
         "time",
+        "json",
         "net",
         "net.http",
         "net.tcp",

@@ -26,6 +26,7 @@ add_executable(keety_unit_tests
     unit/test_runtime_sys.cpp
     unit/test_runtime_math.cpp
     unit/test_runtime_time.cpp
+    unit/test_runtime_json.cpp
     unit/test_token.cpp
     unit/test_lexer.cpp
     unit/test_blank_ident.cpp
@@ -72,6 +73,7 @@ add_executable(keety_unit_tests
     conformance/test_conformance_sys.cpp
     conformance/test_conformance_math.cpp
     conformance/test_conformance_time.cpp
+    conformance/test_conformance_json.cpp
     conformance/test_conformance_negative.cpp
 )
 

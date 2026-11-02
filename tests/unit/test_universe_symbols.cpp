@@ -155,3 +155,35 @@ TEST_CASE("Universe symbols propagate down through child scopes", "[sema][univer
         CHECK(emptyUniverse->lookup("int") == nullptr);
     }
 }
+
+TEST_CASE("Standard library json module scope population", "[sema][universe][json]") {
+    auto universe = Scope::createUniverse();
+    REQUIRE(universe != nullptr);
+
+    CHECK(isStdlibModule("json"));
+    auto jsonScope = createStdlibModuleScope("json", universe);
+    REQUIRE(jsonScope != nullptr);
+
+    const std::vector<std::string> expectedFunctions = {
+        "isValid", "typeOf", "isObject", "isArray", "size", "keys",
+        "hasKey", "isNull", "getString", "getInt", "getFloat", "getBool", "getArray", "getObject",
+        "getStringOr", "getIntOr", "getFloatOr", "getBoolOr",
+        "parseMap", "parseArray", "parseIntArray", "parseFloatArray", "parseBoolArray",
+        "emptyObject", "emptyArray", "setString", "setInt", "setFloat", "setBool", "setNull", "setRaw", "removeKey",
+        "stringify", "format", "minify", "escape", "unescape",
+        "readFile", "writeFile"
+    };
+
+    CHECK(jsonScope->size() == expectedFunctions.size());
+    for (const auto& fnName : expectedFunctions) {
+        auto sym = jsonScope->lookupCurrent(fnName);
+        REQUIRE(sym != nullptr);
+        CHECK(sym->getName() == fnName);
+        CHECK(sym->getKind() == SymbolKind::Function);
+        CHECK(sym->isExported());
+    }
+
+    CHECK(jsonScope->lookupCurrent("is_valid") == nullptr);
+    CHECK(jsonScope->lookupCurrent("get_string") == nullptr);
+}
+

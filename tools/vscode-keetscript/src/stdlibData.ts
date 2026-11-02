@@ -691,6 +691,285 @@ export const STDLIB_MODULES: Record<string, StdlibModule> = {
         snippet: 'formatLocal(${1:timestampSec}, "${2:%Y-%m-%d %H:%M:%S}")'
       }
     }
+  },
+  json: {
+    name: 'json',
+    doc: 'RFC 8259 JSON validation, dot-path extraction, collection parsers, immutable builders, and polymorphic serialization.',
+    members: {
+      isValid: {
+        name: 'isValid',
+        kind: 'function',
+        signature: 'fn isValid(text: string): bool',
+        doc: 'Returns true if text is strictly valid RFC 8259 JSON.',
+        snippet: 'isValid(${1:text})'
+      },
+      typeOf: {
+        name: 'typeOf',
+        kind: 'function',
+        signature: 'fn typeOf(text: string): string',
+        doc: 'Returns "object", "array", "string", "number", "bool", "null", or "invalid".',
+        snippet: 'typeOf(${1:text})'
+      },
+      isObject: {
+        name: 'isObject',
+        kind: 'function',
+        signature: 'fn isObject(text: string): bool',
+        doc: 'Returns true if text is a valid JSON object ({...}).',
+        snippet: 'isObject(${1:text})'
+      },
+      isArray: {
+        name: 'isArray',
+        kind: 'function',
+        signature: 'fn isArray(text: string): bool',
+        doc: 'Returns true if text is a valid JSON array ([...]).',
+        snippet: 'isArray(${1:text})'
+      },
+      size: {
+        name: 'size',
+        kind: 'function',
+        signature: 'fn size(text: string): int',
+        doc: 'Returns the entry/element count of a JSON object or array.',
+        snippet: 'size(${1:text})'
+      },
+      keys: {
+        name: 'keys',
+        kind: 'function',
+        signature: 'fn keys(text: string): array<string>',
+        doc: 'Returns the sorted top-level keys of a JSON object.',
+        snippet: 'keys(${1:text})'
+      },
+      hasKey: {
+        name: 'hasKey',
+        kind: 'function',
+        signature: 'fn hasKey(text: string, path: string): bool',
+        doc: 'Returns true if path resolves to an existing key or array index.',
+        snippet: 'hasKey(${1:text}, "${2:path}")'
+      },
+      isNull: {
+        name: 'isNull',
+        kind: 'function',
+        signature: 'fn isNull(text: string, path: string): bool',
+        doc: 'Returns true if path resolves to a JSON null literal.',
+        snippet: 'isNull(${1:text}, "${2:path}")'
+      },
+      getString: {
+        name: 'getString',
+        kind: 'function',
+        signature: 'fn getString(text: string, path: string): string',
+        doc: 'Extracts the unescaped string at dot-path (throws JsonError on failure).',
+        snippet: 'getString(${1:text}, "${2:path}")'
+      },
+      getInt: {
+        name: 'getInt',
+        kind: 'function',
+        signature: 'fn getInt(text: string, path: string): int',
+        doc: 'Extracts an exact 64-bit integer at dot-path (throws JsonError on failure).',
+        snippet: 'getInt(${1:text}, "${2:path}")'
+      },
+      getFloat: {
+        name: 'getFloat',
+        kind: 'function',
+        signature: 'fn getFloat(text: string, path: string): float',
+        doc: 'Extracts a float at dot-path (throws JsonError on failure).',
+        snippet: 'getFloat(${1:text}, "${2:path}")'
+      },
+      getBool: {
+        name: 'getBool',
+        kind: 'function',
+        signature: 'fn getBool(text: string, path: string): bool',
+        doc: 'Extracts a boolean at dot-path (throws JsonError on failure).',
+        snippet: 'getBool(${1:text}, "${2:path}")'
+      },
+      getArray: {
+        name: 'getArray',
+        kind: 'function',
+        signature: 'fn getArray(text: string, path: string): array<string>',
+        doc: 'Extracts a JSON array at dot-path as array<string>.',
+        snippet: 'getArray(${1:text}, "${2:path}")'
+      },
+      getObject: {
+        name: 'getObject',
+        kind: 'function',
+        signature: 'fn getObject(text: string, path: string): string',
+        doc: 'Extracts a nested JSON object at dot-path as a serialized JSON string.',
+        snippet: 'getObject(${1:text}, "${2:path}")'
+      },
+      getStringOr: {
+        name: 'getStringOr',
+        kind: 'function',
+        signature: 'fn getStringOr(text: string, path: string, defaultVal: string): string',
+        doc: 'Returns getString(text, path) on success, or defaultVal on any error.',
+        snippet: 'getStringOr(${1:text}, "${2:path}", ${3:defaultVal})'
+      },
+      getIntOr: {
+        name: 'getIntOr',
+        kind: 'function',
+        signature: 'fn getIntOr(text: string, path: string, defaultVal: int): int',
+        doc: 'Returns getInt(text, path) on success, or defaultVal on any error.',
+        snippet: 'getIntOr(${1:text}, "${2:path}", ${3:0})'
+      },
+      getFloatOr: {
+        name: 'getFloatOr',
+        kind: 'function',
+        signature: 'fn getFloatOr(text: string, path: string, defaultVal: float): float',
+        doc: 'Returns getFloat(text, path) on success, or defaultVal on any error.',
+        snippet: 'getFloatOr(${1:text}, "${2:path}", ${3:0.0})'
+      },
+      getBoolOr: {
+        name: 'getBoolOr',
+        kind: 'function',
+        signature: 'fn getBoolOr(text: string, path: string, defaultVal: bool): bool',
+        doc: 'Returns getBool(text, path) on success, or defaultVal on any error.',
+        snippet: 'getBoolOr(${1:text}, "${2:path}", ${3:false})'
+      },
+      parseMap: {
+        name: 'parseMap',
+        kind: 'function',
+        signature: 'fn parseMap(text: string): map<string, string>',
+        doc: 'Parses a JSON object into a map<string, string>.',
+        snippet: 'parseMap(${1:text})'
+      },
+      parseArray: {
+        name: 'parseArray',
+        kind: 'function',
+        signature: 'fn parseArray(text: string): array<string>',
+        doc: 'Parses a JSON array into an array<string>.',
+        snippet: 'parseArray(${1:text})'
+      },
+      parseIntArray: {
+        name: 'parseIntArray',
+        kind: 'function',
+        signature: 'fn parseIntArray(text: string): array<int>',
+        doc: 'Parses a homogeneous JSON array of integers into array<int>.',
+        snippet: 'parseIntArray(${1:text})'
+      },
+      parseFloatArray: {
+        name: 'parseFloatArray',
+        kind: 'function',
+        signature: 'fn parseFloatArray(text: string): array<float>',
+        doc: 'Parses a homogeneous JSON array of numbers into array<float>.',
+        snippet: 'parseFloatArray(${1:text})'
+      },
+      parseBoolArray: {
+        name: 'parseBoolArray',
+        kind: 'function',
+        signature: 'fn parseBoolArray(text: string): array<bool>',
+        doc: 'Parses a homogeneous JSON array of booleans into array<bool>.',
+        snippet: 'parseBoolArray(${1:text})'
+      },
+      emptyObject: {
+        name: 'emptyObject',
+        kind: 'function',
+        signature: 'fn emptyObject(): string',
+        doc: 'Returns an empty JSON object literal "{}".',
+        snippet: 'emptyObject()'
+      },
+      emptyArray: {
+        name: 'emptyArray',
+        kind: 'function',
+        signature: 'fn emptyArray(): string',
+        doc: 'Returns an empty JSON array literal "[]".',
+        snippet: 'emptyArray()'
+      },
+      setString: {
+        name: 'setString',
+        kind: 'function',
+        signature: 'fn setString(text: string, path: string, value: string): string',
+        doc: 'Sets dot-path to a string value and returns the updated JSON string.',
+        snippet: 'setString(${1:text}, "${2:path}", ${3:value})'
+      },
+      setInt: {
+        name: 'setInt',
+        kind: 'function',
+        signature: 'fn setInt(text: string, path: string, value: int): string',
+        doc: 'Sets dot-path to an integer value and returns the updated JSON string.',
+        snippet: 'setInt(${1:text}, "${2:path}", ${3:value})'
+      },
+      setFloat: {
+        name: 'setFloat',
+        kind: 'function',
+        signature: 'fn setFloat(text: string, path: string, value: float): string',
+        doc: 'Sets dot-path to a finite float value and returns the updated JSON string.',
+        snippet: 'setFloat(${1:text}, "${2:path}", ${3:value})'
+      },
+      setBool: {
+        name: 'setBool',
+        kind: 'function',
+        signature: 'fn setBool(text: string, path: string, value: bool): string',
+        doc: 'Sets dot-path to a boolean value and returns the updated JSON string.',
+        snippet: 'setBool(${1:text}, "${2:path}", ${3:value})'
+      },
+      setNull: {
+        name: 'setNull',
+        kind: 'function',
+        signature: 'fn setNull(text: string, path: string): string',
+        doc: 'Sets dot-path to null and returns the updated JSON string.',
+        snippet: 'setNull(${1:text}, "${2:path}")'
+      },
+      setRaw: {
+        name: 'setRaw',
+        kind: 'function',
+        signature: 'fn setRaw(text: string, path: string, rawJson: string): string',
+        doc: 'Validates rawJson and embeds it at dot-path inside text.',
+        snippet: 'setRaw(${1:text}, "${2:path}", ${3:rawJson})'
+      },
+      removeKey: {
+        name: 'removeKey',
+        kind: 'function',
+        signature: 'fn removeKey(text: string, path: string): string',
+        doc: 'Removes the object key or array index at dot-path and returns the updated JSON string.',
+        snippet: 'removeKey(${1:text}, "${2:path}")'
+      },
+      stringify: {
+        name: 'stringify',
+        kind: 'function',
+        signature: 'fn stringify(value: Any): string',
+        doc: 'Serializes any JSON-compatible native KeetScript value to an RFC 8259 JSON string.',
+        snippet: 'stringify(${1:value})'
+      },
+      format: {
+        name: 'format',
+        kind: 'function',
+        signature: 'fn format(text: string, indent: int): string',
+        doc: 'Validates text and pretty-prints it with indent spaces per nesting level (0..16).',
+        snippet: 'format(${1:text}, ${2:2})'
+      },
+      minify: {
+        name: 'minify',
+        kind: 'function',
+        signature: 'fn minify(text: string): string',
+        doc: 'Validates text and removes all insignificant whitespace.',
+        snippet: 'minify(${1:text})'
+      },
+      escape: {
+        name: 'escape',
+        kind: 'function',
+        signature: 'fn escape(str: string): string',
+        doc: 'Escapes a raw string into a double-quoted JSON string literal ("...").',
+        snippet: 'escape(${1:str})'
+      },
+      unescape: {
+        name: 'unescape',
+        kind: 'function',
+        signature: 'fn unescape(str: string): string',
+        doc: 'Unescapes a JSON string literal.',
+        snippet: 'unescape(${1:str})'
+      },
+      readFile: {
+        name: 'readFile',
+        kind: 'function',
+        signature: 'fn readFile(path: string): string',
+        doc: 'Reads UTF-8 file at path, validates its JSON content, and returns the canonical JSON string.',
+        snippet: 'readFile(${1:path})'
+      },
+      writeFile: {
+        name: 'writeFile',
+        kind: 'function',
+        signature: 'fn writeFile(path: string, text: string, indent: int): bool',
+        doc: 'Validates text, formats with indent spaces, and writes to path.',
+        snippet: 'writeFile(${1:path}, ${2:text}, ${3:2})'
+      }
+    }
   }
 };
 

@@ -206,6 +206,15 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                         imported_time_symbols_.insert(sym_name);
                     }
                 }
+            } else if (p == "json" || p == "std.json" || p == "keet.json") {
+                has_json_import_ = true;
+                add_standard_header("<keet/runtime.hpp>");
+                if (!imp->getModuleAlias().empty()) {
+                    json_aliases_.insert(imp->getModuleAlias());
+                }
+                for (const auto& s : imp->getSymbols()) {
+                    imported_json_symbols_.insert(s.getEffectiveName());
+                }
             }
         }
     }
@@ -468,6 +477,9 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             if (obj_id->getName() == "time") {
                 return "::keet::time::" + mem->getMemberName();
             }
+            if (obj_id->getName() == "json" || json_aliases_.count(obj_id->getName())) {
+                return "::keet::json::" + mem->getMemberName();
+            }
         }
         if (const auto* obj_mem = dynamic_cast<const ast::MemberExpr*>(mem->getObject())) {
             if (const auto* root_id = dynamic_cast<const ast::IdentExpr*>(obj_mem->getObject())) {
@@ -556,6 +568,9 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             }
             if (obj_s == "time") {
                 return "::keet::time::" + m_name + "(" + args_str + ")";
+            }
+            if (obj_s == "json" || json_aliases_.count(obj_s)) {
+                return "::keet::json::" + m_name + "(" + args_str + ")";
             }
             // Container member mapping
             if (m_name == "push") {
@@ -680,6 +695,19 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
                 name == "monthUtc" || name == "dayUtc" || name == "hourUtc" ||
                 name == "minuteUtc" || name == "secondUtc")) {
                 return "::keet::time::" + name + "(" + args_str + ")";
+            }
+            if (has_json_import_ && (imported_json_symbols_.count(name) ||
+                name == "isValid" || name == "typeOf" || name == "isObject" || name == "isArray" ||
+                name == "size" || name == "keys" || name == "hasKey" || name == "isNull" ||
+                name == "getString" || name == "getInt" || name == "getFloat" || name == "getBool" ||
+                name == "getArray" || name == "getObject" || name == "getStringOr" || name == "getIntOr" ||
+                name == "getFloatOr" || name == "getBoolOr" || name == "parseMap" || name == "parseArray" ||
+                name == "parseIntArray" || name == "parseFloatArray" || name == "parseBoolArray" ||
+                name == "emptyObject" || name == "emptyArray" || name == "setString" || name == "setInt" ||
+                name == "setFloat" || name == "setBool" || name == "setNull" || name == "setRaw" ||
+                name == "removeKey" || name == "stringify" || name == "format" || name == "minify" ||
+                name == "escape" || name == "unescape" || name == "readFile" || name == "writeFile")) {
+                return "::keet::json::" + name + "(" + args_str + ")";
             }
         }
 
@@ -1293,6 +1321,9 @@ std::string CppEmitter::translate_ir_function(const ir::Function& fn) const {
                 } else if (callee.rfind("keet.time.", 0) == 0) {
                     std::string func_name = callee.substr(10);
                     call_expr = "::keet::time::" + func_name + "(";
+                } else if (callee.rfind("keet.json.", 0) == 0) {
+                    std::string func_name = callee.substr(10);
+                    call_expr = "::keet::json::" + func_name + "(";
                 } else {
                     call_expr = callee + "(";
                 }
