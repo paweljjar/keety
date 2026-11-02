@@ -870,9 +870,10 @@ bool Parser::isMissingCallLParen(const ast::Expr* expr) {
         return false;
     }
 
+    const uint32_t calleeLine = lastConsumed_.span.end.line;
     const auto& nextTok = peek(0);
     // Must be on the exact same line as the callee
-    if (nextTok.span.start.line != lastConsumed_.span.end.line) {
+    if (nextTok.span.start.line != calleeLine) {
         return false;
     }
 
@@ -925,12 +926,14 @@ bool Parser::isMissingCallLParen(const ast::Expr* expr) {
         break;
     }
 
+    const lexer::TokenKind firstArgKind = nextTok.kind;
+
     // Now scan ahead on the same line to check for an unmatched ')' or a ';'
     int parenDepth = 0;
     size_t k = 0;
     while (true) {
         const auto& tok = peek(k);
-        if (tok.is(lexer::TokenKind::Eof) || tok.span.start.line != lastConsumed_.span.end.line) {
+        if (tok.is(lexer::TokenKind::Eof) || tok.span.start.line != calleeLine) {
             break;
         }
         if (tok.is(lexer::TokenKind::LBrace) || tok.is(lexer::TokenKind::RBrace)) {
@@ -948,15 +951,15 @@ bool Parser::isMissingCallLParen(const ast::Expr* expr) {
         } else if (tok.is(lexer::TokenKind::Semicolon)) {
             // Reached semicolon with parenDepth == 0.
             // If the argument starts immediately, e.g. `io.print "Hello";`
-            if (nextTok.is(lexer::TokenKind::StringLiteral) ||
-                nextTok.is(lexer::TokenKind::CharLiteral) ||
-                nextTok.is(lexer::TokenKind::IntLiteral) ||
-                nextTok.is(lexer::TokenKind::FloatLiteral) ||
-                nextTok.is(lexer::TokenKind::TemplateNoSub) ||
-                nextTok.is(lexer::TokenKind::TemplateHead) ||
-                nextTok.is(lexer::TokenKind::KwTrue) ||
-                nextTok.is(lexer::TokenKind::KwFalse) ||
-                nextTok.is(lexer::TokenKind::KwNull)) {
+            if (firstArgKind == lexer::TokenKind::StringLiteral ||
+                firstArgKind == lexer::TokenKind::CharLiteral ||
+                firstArgKind == lexer::TokenKind::IntLiteral ||
+                firstArgKind == lexer::TokenKind::FloatLiteral ||
+                firstArgKind == lexer::TokenKind::TemplateNoSub ||
+                firstArgKind == lexer::TokenKind::TemplateHead ||
+                firstArgKind == lexer::TokenKind::KwTrue ||
+                firstArgKind == lexer::TokenKind::KwFalse ||
+                firstArgKind == lexer::TokenKind::KwNull) {
                 return true;
             }
             break;
@@ -1952,8 +1955,9 @@ std::unique_ptr<ast::Expr> Parser::parsePrefixExpression() {
             // Check if there is a closing ')' on this line
             bool hasClosingParen = false;
             size_t k = 0;
+            const uint32_t calleeLine = lastConsumed_.span.end.line;
             while (!check(lexer::TokenKind::Semicolon, k) && !check(lexer::TokenKind::Eof, k) &&
-                   peek(k).span.start.line == lastConsumed_.span.end.line) {
+                   peek(k).span.start.line == calleeLine) {
                 if (check(lexer::TokenKind::RParen, k)) {
                     hasClosingParen = true;
                     break;

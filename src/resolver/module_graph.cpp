@@ -139,7 +139,9 @@ bool ModuleGraph::buildGraph(const std::filesystem::path& entryFilePath,
             continue;
         }
 
-        std::string targetCanonical = resolved->canonicalPath.string();
+        std::string targetCanonical = (resolved->kind == ModuleKind::StandardLibrary && ! std::filesystem::exists(resolved->canonicalPath))
+                                          ? resolved->canonicalPath.generic_string()
+                                          : resolved->canonicalPath.string();
         addEdge(canonicalStr, targetCanonical, importDecl->getSpan(), importPath);
 
         auto& targetNode = getOrCreateNode(targetCanonical, resolved->moduleName, resolved->kind, resolved->isNativeHeader);

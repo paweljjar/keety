@@ -22,7 +22,7 @@ TEST_CASE("keet::math basic arithmetic and rounding", "[runtime][math]") {
         REQUIRE_THAT(keet::math::abs(4.5), WithinAbs(4.5, 1e-9));
         REQUIRE(keet::math::absInt(-42) == 42);
         REQUIRE(keet::math::absInt(42) == 42);
-        REQUIRE(keet::math::abs(-100LL) == 100LL);
+        REQUIRE(keet::math::abs(int64_t{-100}) == int64_t{100});
     }
 
     SECTION("min, minInt, max, maxInt") {
@@ -30,8 +30,8 @@ TEST_CASE("keet::math basic arithmetic and rounding", "[runtime][math]") {
         REQUIRE(keet::math::minInt(10, 20) == 10);
         REQUIRE_THAT(keet::math::max(3.5, 2.1), WithinAbs(3.5, 1e-9));
         REQUIRE(keet::math::maxInt(10, 20) == 20);
-        REQUIRE(keet::math::min(5LL, 9LL) == 5LL);
-        REQUIRE(keet::math::max(5LL, 9LL) == 9LL);
+        REQUIRE(keet::math::min(int64_t{5}, int64_t{9}) == int64_t{5});
+        REQUIRE(keet::math::max(int64_t{5}, int64_t{9}) == int64_t{9});
     }
 
     SECTION("clamp and clampInt valid and invalid bounds") {
@@ -41,7 +41,7 @@ TEST_CASE("keet::math basic arithmetic and rounding", "[runtime][math]") {
         REQUIRE(keet::math::clampInt(5, 0, 10) == 5);
         REQUIRE(keet::math::clampInt(-2, 0, 10) == 0);
         REQUIRE(keet::math::clampInt(15, 0, 10) == 10);
-        REQUIRE(keet::math::clamp(7LL, 0LL, 10LL) == 7LL);
+        REQUIRE(keet::math::clamp(int64_t{7}, int64_t{0}, int64_t{10}) == int64_t{7});
 
         // Invalid bounds throw MathError
         REQUIRE_THROWS_AS(keet::math::clamp(5.0, 10.0, 0.0), keet::error);
@@ -60,7 +60,7 @@ TEST_CASE("keet::math basic arithmetic and rounding", "[runtime][math]") {
         REQUIRE(keet::math::signInt(42) == 1);
         REQUIRE(keet::math::signInt(-42) == -1);
         REQUIRE(keet::math::signInt(0) == 0);
-        REQUIRE(keet::math::sign(10LL) == 1LL);
+        REQUIRE(keet::math::sign(int64_t{10}) == int64_t{1});
     }
 
     SECTION("rounding functions") {

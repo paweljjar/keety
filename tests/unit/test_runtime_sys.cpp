@@ -140,7 +140,11 @@ TEST_CASE("keet::sys working directory and system paths", "[runtime][sys]") {
 
 TEST_CASE("keet::sys subprocess execution", "[runtime][sys]") {
     SECTION("exec runs simple command successfully") {
+#if defined(_WIN32)
+        int64_t code = keet::sys::exec("echo sys_test_exec > NUL");
+#else
         int64_t code = keet::sys::exec("echo sys_test_exec > /dev/null");
+#endif
         REQUIRE(code == 0);
     }
 
@@ -150,11 +154,20 @@ TEST_CASE("keet::sys subprocess execution", "[runtime][sys]") {
     }
 
     SECTION("execOutput throws keet::error on non-zero exit status") {
+#if defined(_WIN32)
+        REQUIRE_THROWS_AS(keet::sys::execOutput("cmd /c exit 1"), keet::error);
+        try {
+            keet::sys::execOutput("cmd /c exit 1");
+        } catch (const keet::error& err) {
+            REQUIRE(err.name == "SystemError");
+        }
+#else
         REQUIRE_THROWS_AS(keet::sys::execOutput("false || exit 1"), keet::error);
         try {
             keet::sys::execOutput("false || exit 1");
         } catch (const keet::error& err) {
             REQUIRE(err.name == "SystemError");
         }
+#endif
     }
 }

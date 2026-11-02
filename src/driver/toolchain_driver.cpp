@@ -176,9 +176,11 @@ std::vector<std::string> ToolchainDriver::build_compile_args(
             args.push_back("-fwrapv");
         }
 
+#if !defined(_WIN32)
         if (options.position_independent_code) {
             args.push_back("-fPIC");
         }
+#endif
 
         if (options.compile_only) {
             args.push_back("-c");
@@ -244,11 +246,11 @@ CompilationResult ToolchainDriver::compile(
     std::string cmd = build_compile_command(source_file, output_file, options);
     result.command_line = cmd;
 
-    std::string full_cmd = cmd + " 2>&1";
-
 #if defined(_WIN32)
+    std::string full_cmd = "\"" + cmd + " 2>&1\"";
     FILE* pipe = _popen(full_cmd.c_str(), "r");
 #else
+    std::string full_cmd = cmd + " 2>&1";
     FILE* pipe = popen(full_cmd.c_str(), "r");
 #endif
 
@@ -342,7 +344,9 @@ std::vector<std::string> ToolchainDriver::build_link_args(
 #else
             args.push_back("-shared");
 #endif
+#if !defined(_WIN32)
             args.push_back("-fPIC");
+#endif
         }
 
         for (const auto& obj : object_files) {
@@ -421,11 +425,11 @@ LinkResult ToolchainDriver::link(
     std::string cmd = build_link_command(object_files, output_file, options);
     result.command_line = cmd;
 
-    std::string full_cmd = cmd + " 2>&1";
-
 #if defined(_WIN32)
+    std::string full_cmd = "\"" + cmd + " 2>&1\"";
     FILE* pipe = _popen(full_cmd.c_str(), "r");
 #else
+    std::string full_cmd = cmd + " 2>&1";
     FILE* pipe = popen(full_cmd.c_str(), "r");
 #endif
 

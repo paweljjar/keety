@@ -17,7 +17,8 @@ std::string run_process_capture(const std::string& cmd) {
     std::string result;
     std::array<char, 256> buffer;
 #if defined(_WIN32)
-    std::unique_ptr<FILE, decltype(&_pclose)> pipe(_popen(cmd.c_str(), "r"), _pclose);
+    std::string full_cmd = "\"" + cmd + "\"";
+    std::unique_ptr<FILE, decltype(&_pclose)> pipe(_popen(full_cmd.c_str(), "r"), _pclose);
 #else
     std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd.c_str(), "r"), pclose);
 #endif

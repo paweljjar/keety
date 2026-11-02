@@ -85,7 +85,9 @@ TEST_CASE("Toolchain driver builds Clang/GCC compilation arguments", "[driver][t
     CHECK(contains_arg("-std=c++17"));
     CHECK(contains_arg("-O3"));
     CHECK(contains_arg("-fwrapv"));
+#if !defined(_WIN32)
     CHECK(contains_arg("-fPIC"));
+#endif
     CHECK(contains_arg("-c"));
     CHECK(contains_arg("-I/opt/keety/include"));
     CHECK(contains_arg("-I/opt/keety/runtime"));
@@ -167,7 +169,9 @@ TEST_CASE("Toolchain driver builds linker arguments for Clang and GCC", "[driver
 #else
     CHECK(contains_arg(sh_args, "-shared"));
 #endif
+#if !defined(_WIN32)
     CHECK(contains_arg(sh_args, "-fPIC"));
+#endif
     CHECK(contains_arg(sh_args, "plugin.o"));
     CHECK(contains_arg(sh_args, "-o"));
     CHECK(contains_arg(sh_args, "libplugin.dylib"));
