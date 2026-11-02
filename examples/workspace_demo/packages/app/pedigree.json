@@ -1,0 +1,13 @@
+{
+  "name": "demo-app",
+  "version": "1.0.0",
+  "description": "Application consumer demonstrating workspace package imports",
+  "entry": "src/main.keet",
+  "dependencies": {
+    "math-utils": "path:../math_utils"
+  },
+  "scripts": {
+    "start": "keety run src/main.keet",
+    "test": "echo [demo-app] Running application smoke tests: OK"
+  }
+}

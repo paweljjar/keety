@@ -1,0 +1,13 @@
+export fn square(n: int): int {
+    return n * n;
+}
+
+export fn clampInt(val: int, minVal: int, maxVal: int): int {
+    if (val < minVal) {
+        return minVal;
+    }
+    if (val > maxVal) {
+        return maxVal;
+    }
+    return val;
+}

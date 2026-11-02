@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <system_error>
 
 namespace keety::pkg {
@@ -102,6 +103,15 @@ int handleInit(
     m.scripts["start"] = "keety run src/main.keet";
 
     m.save(manifestPath);
+
+    std::filesystem::path gitignorePath = cwd / ".gitignore";
+    if (!std::filesystem::exists(gitignorePath, ec)) {
+        std::ofstream gitignore(gitignorePath);
+        gitignore << "# KeetScript package and build artifacts\n"
+                  << "keet_modules/\n"
+                  << ".keety_build/\n";
+    }
+
     out << "Initialized new KeetScript project '" << name << "' in " << cwd.string() << "\n";
     return 0;
 }

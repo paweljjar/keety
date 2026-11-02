@@ -41,7 +41,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
-The compiled binary will be located at `./build/src/keety`.
+The compiled binaries will be located at `./build/src/keety` and `./build/src/kattery`.
 
 #### CMake Configuration Options
 
@@ -142,6 +142,44 @@ Options:
 ```
 
 You can also override the runtime headers location via the `KEETY_RUNTIME_DIR` environment variable if running `keety` outside the build tree.
+
+---
+
+## Package Management with Kattery
+
+KeetScript features a clean separation between compilation and package management:
+- **`keety`** runs and compiles programs directly, resolving dependencies from `keet_modules/`.
+- **`kattery`** is the official package and workspace manager (like `npm` or `cargo`).
+
+Project metadata and dependencies are declared in **`pedigree.json`**, with locked, reproducible dependencies recorded in **`pedigree.lock`**.
+
+### Common Commands:
+
+```bash
+# Scaffold a new project with pedigree.json and .gitignore
+kattery init
+
+# Add a Git or local dependency
+kattery add mathx git+https://github.com/keetscript/mathx.git#v1.0.0
+kattery add shared-utils path:../shared-utils
+
+# Remove an installed dependency
+kattery remove mathx
+
+# Install or restore locked dependencies (CI-friendly)
+kattery install --frozen
+
+# Execute custom scripts defined in pedigree.json
+kattery run start
+
+# Compile entry point using keety wrapper
+kattery build
+
+# Execute test suite
+kattery test
+```
+
+For full command options, monorepo workspaces, manifest schema, and package authoring guidelines, see [Kattery Documentation](documentation/kattery/README.md).
 
 ---
 

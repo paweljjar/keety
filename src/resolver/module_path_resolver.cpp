@@ -186,11 +186,16 @@ std::optional<ResolvedModule> ModulePathResolver::resolveQualifiedImport(
     std::string slashPath = importPath;
     std::replace(slashPath.begin(), slashPath.end(), '.', '/');
 
+    std::string hyphenPath = importPath;
+    std::replace(hyphenPath.begin(), hyphenPath.end(), '_', '-');
+
     std::vector<std::filesystem::path> candidates = {
         keetModulesDir_ / (slashPath + ".keet"),
         keetModulesDir_ / slashPath / "index.keet",
         keetModulesDir_ / (importPath + ".keet"),
-        keetModulesDir_ / importPath / "index.keet"
+        keetModulesDir_ / importPath / "index.keet",
+        keetModulesDir_ / (hyphenPath + ".keet"),
+        keetModulesDir_ / hyphenPath / "index.keet"
     };
 
     for (const auto& cand : candidates) {
@@ -212,9 +217,17 @@ std::optional<ResolvedModule> ModulePathResolver::resolveQualifiedImport(
                 canonical = std::filesystem::weakly_canonical(cand);
             }
 
-            std::string modName = cand.filename() == "index.keet"
-                                      ? cand.parent_path().filename().string()
-                                      : cand.stem().string();
+            std::string dirName = cand.parent_path().filename().string();
+            std::string modName;
+            if (cand.filename() == "index.keet") {
+                if (dirName == hyphenPath) {
+                    modName = importPath;
+                } else {
+                    modName = dirName;
+                }
+            } else {
+                modName = cand.stem().string();
+            }
 
             return ResolvedModule{ModuleKind::Package, std::move(modName), canonical, false};
         }
