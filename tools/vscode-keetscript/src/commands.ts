@@ -4,7 +4,7 @@ import { DiagnosticManager } from './diagnostics';
 export class CommandManager {
   private terminal: vscode.Terminal | null = null;
 
-  constructor(private diagnosticManager: DiagnosticManager) {}
+  constructor(private diagnosticManager: DiagnosticManager | null) {}
 
   public registerCommands(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
@@ -41,7 +41,7 @@ export class CommandManager {
 
     await this.ensureSaved(editor.document);
 
-    const compiler = this.diagnosticManager.resolveCompilerPath();
+    const compiler = this.resolveCompilerPath();
     const filePath = editor.document.uri.fsPath;
     const terminal = this.getTerminal();
 
@@ -63,7 +63,7 @@ export class CommandManager {
 
     await this.ensureSaved(editor.document);
 
-    const compiler = this.diagnosticManager.resolveCompilerPath();
+    const compiler = this.resolveCompilerPath();
     const filePath = editor.document.uri.fsPath;
     const terminal = this.getTerminal();
 
@@ -81,8 +81,16 @@ export class CommandManager {
       return;
     }
 
-    await this.diagnosticManager.checkDocument(editor.document);
-    vscode.window.setStatusBarMessage('KeetScript check complete', 2000);
+    if (this.diagnosticManager) {
+      await this.diagnosticManager.checkDocument(editor.document);
+      vscode.window.setStatusBarMessage('KeetScript check complete', 2000);
+    } else {
+      vscode.window.setStatusBarMessage('KeetScript: Live LSP check active', 2000);
+    }
+  }
+
+  private resolveCompilerPath(): string {
+    return this.diagnosticManager ? this.diagnosticManager.resolveCompilerPath() : 'keety';
   }
 
   private escapeShellArg(arg: string): string {

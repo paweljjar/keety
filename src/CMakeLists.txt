@@ -105,3 +105,38 @@ set_target_properties(kattery PROPERTIES
     OUTPUT_NAME "kattery"
 )
 
+# -----------------------------------------------------------------------------
+# KeetScript Language Server Protocol (LSP) Engine & Executable
+# -----------------------------------------------------------------------------
+add_library(keet_lsp_core STATIC
+    lsp/protocol.cpp
+    lsp/transport.cpp
+    lsp/document.cpp
+    lsp/analyzer.cpp
+    lsp/server.cpp
+)
+
+target_include_directories(keet_lsp_core PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../runtime>
+    $<INSTALL_INTERFACE:include>
+)
+
+target_link_libraries(keet_lsp_core PUBLIC
+    keety_core
+    keety_warnings
+)
+
+add_executable(keet-lsp
+    lsp/main.cpp
+)
+
+target_link_libraries(keet-lsp PRIVATE
+    keet_lsp_core
+    keety_warnings
+)
+
+set_target_properties(keet-lsp PROPERTIES
+    OUTPUT_NAME "keet-lsp"
+)
+

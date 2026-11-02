@@ -91,11 +91,19 @@ add_executable(keety_unit_tests
     unit/test_driver_project_root.cpp
     unit/test_kattery_run.cpp
     conformance/test_conformance_package_import.cpp
+    unit/test_lsp_protocol.cpp
+    unit/test_lsp_server.cpp
+    unit/test_lsp_diagnostics.cpp
+    unit/test_lsp_definition.cpp
+    unit/test_lsp_hover.cpp
+    unit/test_lsp_completion.cpp
+    unit/test_lsp_symbols.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE
     keety_core
     kattery_core
+    keet_lsp_core
     keety_warnings
     Catch2::Catch2WithMain
 )

@@ -7,6 +7,10 @@
   "engines": {
     "vscode": "^1.80.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/paweljjar/keety.git"
+  },
   "categories": [
     "Programming Languages",
     "Linters",
@@ -104,6 +108,16 @@
       "type": "object",
       "title": "KeetScript",
       "properties": {
+        "keetscript.enableLsp": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Language Server Protocol (keet-lsp) for live in-memory diagnostics, definitions, hover, completion, and outline."
+        },
+        "keetscript.lspServerPath": {
+          "type": "string",
+          "default": "keet-lsp",
+          "description": "Path to the keet-lsp Language Server binary (default: 'keet-lsp', auto-searches workspace build/src/keet-lsp)."
+        },
         "keetscript.compilerPath": {
           "type": "string",
           "default": "keety",
@@ -144,5 +158,8 @@
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.80.0",
     "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^11.0.0"
   }
 }
