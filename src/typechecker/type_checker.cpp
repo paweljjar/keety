@@ -3821,7 +3821,7 @@ TypePtr TypeChecker::checkNetMemberCall(const ast::MemberExpr* member, const ast
         if (checkArgCount(1)) checkStringArg(0, "url");
         return Type::intType();
     }
-    if (name == "post") {
+    if (name == "post" || name == "put") {
         if (checkArgCount(3)) {
             checkStringArg(0, "url");
             checkStringArg(1, "body");
@@ -3829,10 +3829,10 @@ TypePtr TypeChecker::checkNetMemberCall(const ast::MemberExpr* member, const ast
         }
         return Type::stringType();
     }
-    if (name == "postJson" || name == "put") {
+    if (name == "postJson") {
         if (checkArgCount(2)) {
             checkStringArg(0, "url");
-            checkStringArg(1, name == "postJson" ? "jsonBody" : "body");
+            checkStringArg(1, "jsonBody");
         }
         return Type::stringType();
     }
@@ -3855,7 +3855,7 @@ TypePtr TypeChecker::checkNetMemberCall(const ast::MemberExpr* member, const ast
     }
 
     // 4. TCP Stream Sockets (Handle-Based)
-    if (name == "tcpConnect" || name == "tcpListen") {
+    if (name == "tcpConnect") {
         if (checkArgCount(2)) {
             checkStringArg(0, "host");
             checkIntArg(1, "port");
@@ -3870,6 +3870,14 @@ TypePtr TypeChecker::checkNetMemberCall(const ast::MemberExpr* member, const ast
         }
         return Type::intType();
     }
+    if (name == "tcpListen") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "host");
+            checkIntArg(1, "port");
+            checkIntArg(2, "backlog");
+        }
+        return Type::intType();
+    }
     if (name == "tcpAccept") {
         if (checkArgCount(1)) checkIntArg(0, "serverHandle");
         return Type::intType();
@@ -3878,7 +3886,7 @@ TypePtr TypeChecker::checkNetMemberCall(const ast::MemberExpr* member, const ast
         if (checkArgCount(1)) checkIntArg(0, "handle");
         return Type::intType();
     }
-    if (name == "tcpPeerAddr" || name == "tcpRecvLine") {
+    if (name == "tcpPeerAddr") {
         if (checkArgCount(1)) checkIntArg(0, "handle");
         return Type::stringType();
     }
@@ -3889,7 +3897,7 @@ TypePtr TypeChecker::checkNetMemberCall(const ast::MemberExpr* member, const ast
         }
         return Type::intType();
     }
-    if (name == "tcpRecv") {
+    if (name == "tcpRecv" || name == "tcpRecvLine") {
         if (checkArgCount(2)) {
             checkIntArg(0, "handle");
             checkIntArg(1, "maxBytes");
@@ -3901,11 +3909,11 @@ TypePtr TypeChecker::checkNetMemberCall(const ast::MemberExpr* member, const ast
             checkIntArg(0, "handle");
             checkIntArg(1, "timeoutMs");
         }
-        return Type::boolType();
+        return Type::voidType();
     }
     if (name == "tcpClose") {
         if (checkArgCount(1)) checkIntArg(0, "handle");
-        return Type::boolType();
+        return Type::voidType();
     }
 
     // 5. UDP Datagram Sockets (Handle-Based)
@@ -3938,7 +3946,7 @@ TypePtr TypeChecker::checkNetMemberCall(const ast::MemberExpr* member, const ast
     }
     if (name == "udpClose") {
         if (checkArgCount(1)) checkIntArg(0, "handle");
-        return Type::boolType();
+        return Type::voidType();
     }
 
     if (emitter_) {
@@ -4067,7 +4075,7 @@ TypePtr TypeChecker::checkNetDirectCall(const ast::IdentExpr* callee, const ast:
         if (checkArgCount(1)) checkStringArg(0, "url");
         return Type::intType();
     }
-    if (name == "post") {
+    if (name == "post" || name == "put") {
         if (checkArgCount(3)) {
             checkStringArg(0, "url");
             checkStringArg(1, "body");
@@ -4075,10 +4083,10 @@ TypePtr TypeChecker::checkNetDirectCall(const ast::IdentExpr* callee, const ast:
         }
         return Type::stringType();
     }
-    if (name == "postJson" || name == "put") {
+    if (name == "postJson") {
         if (checkArgCount(2)) {
             checkStringArg(0, "url");
-            checkStringArg(1, name == "postJson" ? "jsonBody" : "body");
+            checkStringArg(1, "jsonBody");
         }
         return Type::stringType();
     }
@@ -4099,7 +4107,7 @@ TypePtr TypeChecker::checkNetDirectCall(const ast::IdentExpr* callee, const ast:
         }
         return Type::boolType();
     }
-    if (name == "tcpConnect" || name == "tcpListen") {
+    if (name == "tcpConnect") {
         if (checkArgCount(2)) {
             checkStringArg(0, "host");
             checkIntArg(1, "port");
@@ -4114,6 +4122,14 @@ TypePtr TypeChecker::checkNetDirectCall(const ast::IdentExpr* callee, const ast:
         }
         return Type::intType();
     }
+    if (name == "tcpListen") {
+        if (checkArgCount(3)) {
+            checkStringArg(0, "host");
+            checkIntArg(1, "port");
+            checkIntArg(2, "backlog");
+        }
+        return Type::intType();
+    }
     if (name == "tcpAccept") {
         if (checkArgCount(1)) checkIntArg(0, "serverHandle");
         return Type::intType();
@@ -4122,7 +4138,7 @@ TypePtr TypeChecker::checkNetDirectCall(const ast::IdentExpr* callee, const ast:
         if (checkArgCount(1)) checkIntArg(0, "handle");
         return Type::intType();
     }
-    if (name == "tcpPeerAddr" || name == "tcpRecvLine") {
+    if (name == "tcpPeerAddr") {
         if (checkArgCount(1)) checkIntArg(0, "handle");
         return Type::stringType();
     }
@@ -4133,7 +4149,7 @@ TypePtr TypeChecker::checkNetDirectCall(const ast::IdentExpr* callee, const ast:
         }
         return Type::intType();
     }
-    if (name == "tcpRecv") {
+    if (name == "tcpRecv" || name == "tcpRecvLine") {
         if (checkArgCount(2)) {
             checkIntArg(0, "handle");
             checkIntArg(1, "maxBytes");
@@ -4145,11 +4161,11 @@ TypePtr TypeChecker::checkNetDirectCall(const ast::IdentExpr* callee, const ast:
             checkIntArg(0, "handle");
             checkIntArg(1, "timeoutMs");
         }
-        return Type::boolType();
+        return Type::voidType();
     }
     if (name == "tcpClose") {
         if (checkArgCount(1)) checkIntArg(0, "handle");
-        return Type::boolType();
+        return Type::voidType();
     }
     if (name == "udpBind") {
         if (checkArgCount(2)) {
@@ -4180,7 +4196,7 @@ TypePtr TypeChecker::checkNetDirectCall(const ast::IdentExpr* callee, const ast:
     }
     if (name == "udpClose") {
         if (checkArgCount(1)) checkIntArg(0, "handle");
-        return Type::boolType();
+        return Type::voidType();
     }
 
     return Type::unknownType();

@@ -141,7 +141,7 @@
       "patterns": [
         {
           "name": "support.class.stdlib.keet",
-          "match": "\\b(io|fs|sys|math|time|json)\\b"
+          "match": "\\b(io|fs|sys|math|time|json|net)\\b"
         },
         {
           "name": "support.constant.stdlib.keet",
