@@ -54,6 +54,24 @@ Range spanToRange(const Document& doc, const diag::SourceSpan& span) {
     return Range{startPos, endPos};
 }
 
+Range findIdentifierRange(const Document& doc, const std::string& name, const diag::SourceSpan& enclosingSpan) {
+    if (!enclosingSpan.isValid() || name.empty()) {
+        return spanToRange(doc, enclosingSpan);
+    }
+    const std::string& text = doc.text();
+    size_t start = enclosingSpan.start.offset;
+    size_t end = std::min(static_cast<size_t>(enclosingSpan.end.offset), text.size());
+    if (start < end) {
+        size_t found = text.find(name, start);
+        if (found != std::string::npos && found + name.size() <= end) {
+            Position s = doc.offsetToPosition(found);
+            Position e = doc.offsetToPosition(found + name.size());
+            return Range{s, e};
+        }
+    }
+    return spanToRange(doc, enclosingSpan);
+}
+
 DiagnosticSeverity convertSeverity(diag::DiagnosticSeverity sev) {
     switch (sev) {
     case diag::DiagnosticSeverity::Error:
@@ -1589,6 +1607,166 @@ CompletionList Analyzer::getCompletions(
     }
 
     return list;
+}
+
+std::vector<DocumentSymbol> Analyzer::getDocumentSymbols(const Document& doc) {
+    std::vector<DocumentSymbol> symbols;
+
+    std::string pathStr = uriToPath(doc.uri());
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+
+    diag::SourceManager sm;
+    diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
+    diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+    lexer::Lexer pLexer(fileId, doc.text());
+    parser::Parser parser(pLexer, &emitter);
+    auto ast = parser.parseModule(moduleName);
+
+    for (const auto& decl : ast.declarations) {
+        if (!decl) continue;
+
+        if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+            DocumentSymbol sym;
+            sym.name = cd->getName();
+            sym.kind = SymbolKind::Class;
+            sym.range = spanToRange(doc, cd->getSpan());
+            sym.selectionRange = findIdentifierRange(doc, cd->getName(), cd->getSpan());
+            if (cd->hasBaseClass()) {
+                sym.detail = "inherits " + cd->getBaseClass();
+            } else {
+                sym.detail = (cd->isExported() ? "export class" : "class");
+            }
+
+            // Class Fields
+            for (const auto& field : cd->getFields()) {
+                DocumentSymbol fSym;
+                fSym.name = field.name;
+                fSym.kind = field.isConst ? SymbolKind::Constant : SymbolKind::Field;
+                fSym.range = spanToRange(doc, field.span);
+                fSym.selectionRange = findIdentifierRange(doc, field.name, field.span);
+                std::string fSig;
+                if (field.visibility == ast::Visibility::Pub) fSig += "pub ";
+                else if (field.visibility == ast::Visibility::Priv) fSig += "priv ";
+                fSig += std::string(field.isConst ? "const " : "let ") + field.name + ": " + formatType(field.type.get(), "any");
+                fSym.detail = std::move(fSig);
+                sym.children.push_back(std::move(fSym));
+            }
+
+            // Class Methods
+            for (const auto& method : cd->getMethods()) {
+                if (!method) continue;
+                DocumentSymbol mSym;
+                mSym.name = method->getName();
+                mSym.kind = (method->getName() == cd->getName()) ? SymbolKind::Constructor : SymbolKind::Method;
+                mSym.range = spanToRange(doc, method->getSpan());
+                mSym.selectionRange = findIdentifierRange(doc, method->getName(), method->getSpan());
+                std::string mSig;
+                if (method->getVisibility() == ast::Visibility::Pub) mSig += "pub ";
+                else if (method->getVisibility() == ast::Visibility::Priv) mSig += "priv ";
+                if (method->isAsync()) mSig += "async ";
+                mSig += "fn " + method->getName() + "(";
+                for (size_t i = 0; i < method->getParams().size(); ++i) {
+                    if (i > 0) mSig += ", ";
+                    const auto& param = method->getParams()[i];
+                    if (param.isMut) mSig += "mut ";
+                    mSig += param.name + ": " + formatType(param.type.get(), "any");
+                }
+                mSig += "): " + formatType(method->getReturnType(), "void");
+                mSym.detail = std::move(mSig);
+                sym.children.push_back(std::move(mSym));
+            }
+
+            symbols.push_back(std::move(sym));
+        } else if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+            DocumentSymbol sym;
+            sym.name = fnDecl->getName();
+            sym.kind = SymbolKind::Function;
+            sym.range = spanToRange(doc, fnDecl->getSpan());
+            sym.selectionRange = findIdentifierRange(doc, fnDecl->getName(), fnDecl->getSpan());
+            std::string sig = (fnDecl->isExported() ? "export " : "") + std::string(fnDecl->isAsync() ? "async " : "") + "fn " + fnDecl->getName() + "(";
+            for (size_t i = 0; i < fnDecl->getParams().size(); ++i) {
+                if (i > 0) sig += ", ";
+                const auto& param = fnDecl->getParams()[i];
+                if (param.isMut) sig += "mut ";
+                sig += param.name + ": " + formatType(param.type.get(), "any");
+            }
+            sig += "): " + formatType(fnDecl->getReturnType(), "void");
+            sym.detail = std::move(sig);
+            symbols.push_back(std::move(sym));
+        } else if (const auto* ed = dynamic_cast<const ast::EnumDecl*>(decl.get())) {
+            DocumentSymbol sym;
+            sym.name = ed->getName();
+            sym.kind = SymbolKind::Enum;
+            sym.range = spanToRange(doc, ed->getSpan());
+            sym.selectionRange = findIdentifierRange(doc, ed->getName(), ed->getSpan());
+            sym.detail = (ed->isExported() ? "export enum" : "enum");
+
+            for (const auto& member : ed->getMembers()) {
+                DocumentSymbol memSym;
+                memSym.name = member.name;
+                memSym.kind = SymbolKind::EnumMember;
+                memSym.range = spanToRange(doc, member.span);
+                memSym.selectionRange = findIdentifierRange(doc, member.name, member.span);
+                sym.children.push_back(std::move(memSym));
+            }
+
+            symbols.push_back(std::move(sym));
+        } else if (const auto* vd = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+            DocumentSymbol sym;
+            sym.name = vd->getName();
+            sym.kind = SymbolKind::Variable;
+            sym.range = spanToRange(doc, vd->getSpan());
+            sym.selectionRange = findIdentifierRange(doc, vd->getName(), vd->getSpan());
+            sym.detail = (vd->isExported() ? "export let " : "let ") + vd->getName() + ": " + formatType(vd->getType(), "any");
+            symbols.push_back(std::move(sym));
+        } else if (const auto* cnd = dynamic_cast<const ast::ConstDecl*>(decl.get())) {
+            DocumentSymbol sym;
+            sym.name = cnd->getName();
+            sym.kind = SymbolKind::Constant;
+            sym.range = spanToRange(doc, cnd->getSpan());
+            sym.selectionRange = findIdentifierRange(doc, cnd->getName(), cnd->getSpan());
+            sym.detail = (cnd->isExported() ? "export const " : "const ") + cnd->getName() + ": " + formatType(cnd->getType(), "any");
+            symbols.push_back(std::move(sym));
+        } else if (const auto* dd = dynamic_cast<const ast::DefineDecl*>(decl.get())) {
+            DocumentSymbol sym;
+            sym.name = dd->getName();
+            sym.kind = SymbolKind::Constant;
+            sym.range = spanToRange(doc, dd->getSpan());
+            sym.selectionRange = findIdentifierRange(doc, dd->getName(), dd->getSpan());
+            sym.detail = "define " + dd->getName();
+            symbols.push_back(std::move(sym));
+        } else if (const auto* errd = dynamic_cast<const ast::ErrTypeDecl*>(decl.get())) {
+            DocumentSymbol sym;
+            sym.name = errd->getName();
+            sym.kind = SymbolKind::Struct;
+            sym.range = spanToRange(doc, errd->getSpan());
+            sym.selectionRange = findIdentifierRange(doc, errd->getName(), errd->getSpan());
+            sym.detail = (errd->getBaseError().empty() ? "errtype" : "inherits " + errd->getBaseError());
+
+            for (const auto& field : errd->getFields()) {
+                DocumentSymbol fSym;
+                fSym.name = field.name;
+                fSym.kind = SymbolKind::Field;
+                fSym.range = spanToRange(doc, field.span);
+                fSym.selectionRange = findIdentifierRange(doc, field.name, field.span);
+                fSym.detail = field.name + ": " + formatType(field.type.get(), "any");
+                sym.children.push_back(std::move(fSym));
+            }
+
+            symbols.push_back(std::move(sym));
+        } else if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+            DocumentSymbol sym;
+            sym.name = !imp->getModuleAlias().empty() ? imp->getModuleAlias() : imp->getModulePath();
+            sym.kind = SymbolKind::Module;
+            sym.range = spanToRange(doc, imp->getSpan());
+            sym.selectionRange = sym.range;
+            sym.detail = "import \"" + imp->getModulePath() + "\"";
+            symbols.push_back(std::move(sym));
+        }
+    }
+
+    return symbols;
 }
 
 } // namespace keety::lsp

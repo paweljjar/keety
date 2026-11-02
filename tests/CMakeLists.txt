@@ -97,6 +97,7 @@ add_executable(keety_unit_tests
     unit/test_lsp_definition.cpp
     unit/test_lsp_hover.cpp
     unit/test_lsp_completion.cpp
+    unit/test_lsp_symbols.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE

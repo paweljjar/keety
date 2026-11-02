@@ -51,6 +51,7 @@ private:
     JsonValue handleDefinition(const JsonValue& params);
     JsonValue handleHover(const JsonValue& params);
     JsonValue handleCompletion(const JsonValue& params);
+    JsonValue handleDocumentSymbol(const JsonValue& params);
 
     void publishDiagnostics(const std::string& uri, int32_t version);
 

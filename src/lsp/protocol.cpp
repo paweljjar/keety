@@ -13,6 +13,27 @@ const JsonValue::Object* asObject(const JsonValue& j) {
     return nullptr;
 }
 
+const std::string* asString(const JsonValue& j) {
+    if (j.is_string()) {
+        return &std::get<std::string>(j.value);
+    }
+    return nullptr;
+}
+
+const int64_t* asInt(const JsonValue& j) {
+    if (j.is_int()) {
+        return &std::get<int64_t>(j.value);
+    }
+    return nullptr;
+}
+
+const JsonValue::Array* asArray(const JsonValue& j) {
+    if (j.is_array()) {
+        return &std::get<JsonValue::Array>(j.value);
+    }
+    return nullptr;
+}
+
 const JsonValue* findField(const JsonValue::Object& obj, const std::string& key) {
     auto it = obj.find(key);
     return (it != obj.end()) ? &it->second : nullptr;
@@ -229,6 +250,64 @@ JsonValue CompletionList::toJson() const {
     }
     obj["items"] = JsonValue(std::move(arr));
     return JsonValue(std::move(obj));
+}
+
+JsonValue DocumentSymbol::toJson() const {
+    JsonValue::Object obj;
+    obj["name"] = JsonValue(name);
+    if (!detail.empty()) {
+        obj["detail"] = JsonValue(detail);
+    }
+    obj["kind"] = JsonValue(static_cast<int64_t>(kind));
+    obj["range"] = range.toJson();
+    obj["selectionRange"] = selectionRange.toJson();
+    if (!children.empty()) {
+        JsonValue::Array arr;
+        for (const auto& child : children) {
+            arr.push_back(child.toJson());
+        }
+        obj["children"] = JsonValue(std::move(arr));
+    }
+    return JsonValue(std::move(obj));
+}
+
+DocumentSymbol DocumentSymbol::fromJson(const JsonValue& j) {
+    DocumentSymbol ds;
+    if (auto* obj = asObject(j)) {
+        if (auto* nameNode = findField(*obj, "name")) {
+            if (auto* s = asString(*nameNode)) ds.name = *s;
+        }
+        if (auto* detailNode = findField(*obj, "detail")) {
+            if (auto* s = asString(*detailNode)) ds.detail = *s;
+        }
+        if (auto* kindNode = findField(*obj, "kind")) {
+            if (auto* k = asInt(*kindNode)) ds.kind = static_cast<SymbolKind>(*k);
+        }
+        if (auto* rangeNode = findField(*obj, "range")) {
+            ds.range = Range::fromJson(*rangeNode);
+        }
+        if (auto* selNode = findField(*obj, "selectionRange")) {
+            ds.selectionRange = Range::fromJson(*selNode);
+        }
+        if (auto* childrenNode = findField(*obj, "children")) {
+            if (auto* arr = asArray(*childrenNode)) {
+                for (const auto& childNode : *arr) {
+                    ds.children.push_back(DocumentSymbol::fromJson(childNode));
+                }
+            }
+        }
+    }
+    return ds;
+}
+
+DocumentSymbolParams DocumentSymbolParams::fromJson(const JsonValue& j) {
+    DocumentSymbolParams p;
+    if (auto* obj = asObject(j)) {
+        if (auto* docNode = findField(*obj, "textDocument")) {
+            p.textDocument = TextDocumentIdentifier::fromJson(*docNode);
+        }
+    }
+    return p;
 }
 
 TextDocumentPositionParams TextDocumentPositionParams::fromJson(const JsonValue& j) {

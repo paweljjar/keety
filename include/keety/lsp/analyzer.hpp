@@ -24,6 +24,9 @@ public:
 
     /// Computes context-aware code completion items (keywords, stdlib, locals, classes, dot completions).
     CompletionList getCompletions(const Document& doc, Position pos, const DocumentManager* docManager = nullptr);
+
+    /// Extracts the hierarchical document outline and symbols (classes, methods, fields, functions, enums).
+    std::vector<DocumentSymbol> getDocumentSymbols(const Document& doc);
 };
 
 } // namespace keety::lsp

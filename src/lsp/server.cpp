@@ -90,6 +90,9 @@ std::optional<std::string> Server::handleRawMessage(const std::string& rawJson) 
             } else if (method == "textDocument/completion") {
                 auto res = handleCompletion(params);
                 return JsonRpcResponse::makeResult(id, res).serialize();
+            } else if (method == "textDocument/documentSymbol") {
+                auto res = handleDocumentSymbol(params);
+                return JsonRpcResponse::makeResult(id, res).serialize();
             } else if (method == "shutdown") {
                 auto res = handleShutdown();
                 return JsonRpcResponse::makeResult(id, res).serialize();
@@ -189,6 +192,12 @@ void Server::handleRequest(const RequestId& id, const std::string& method, const
         return;
     }
 
+    if (method == "textDocument/documentSymbol") {
+        auto res = handleDocumentSymbol(params);
+        transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
+        return;
+    }
+
     auto resp = JsonRpcResponse::makeError(id, JsonRpcErrorCode::MethodNotFound, "method not found: " + method);
     transport_.writeMessage(resp.serialize());
 }
@@ -241,7 +250,7 @@ JsonValue Server::handleInitialize(const JsonValue& /*params*/) {
     compProvider["triggerCharacters"] = JsonValue(std::move(trigChars));
     caps["completionProvider"] = JsonValue(std::move(compProvider));
 
-    caps["documentSymbolProvider"] = JsonValue(false);
+    caps["documentSymbolProvider"] = JsonValue(true);
 
     JsonValue::Object serverInfo;
     serverInfo["name"] = JsonValue(std::string("keet-lsp"));
@@ -349,6 +358,21 @@ JsonValue Server::handleCompletion(const JsonValue& params) {
     }
     auto list = analyzer_.getCompletions(*docOpt, p.position, &docManager_);
     return list.toJson();
+}
+
+JsonValue Server::handleDocumentSymbol(const JsonValue& params) {
+    auto p = DocumentSymbolParams::fromJson(params);
+    auto docOpt = docManager_.getDocument(p.textDocument.uri);
+    if (!docOpt.has_value()) {
+        JsonValue::Array emptyArr;
+        return JsonValue(std::move(emptyArr));
+    }
+    auto symbols = analyzer_.getDocumentSymbols(*docOpt);
+    JsonValue::Array arr;
+    for (const auto& sym : symbols) {
+        arr.push_back(sym.toJson());
+    }
+    return JsonValue(std::move(arr));
 }
 
 void Server::publishDiagnostics(const std::string& uri, int32_t version) {
