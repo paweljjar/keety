@@ -21,6 +21,9 @@ public:
 
     /// Computes rich hover information and Markdown documentation for the symbol or keyword under position.
     std::optional<Hover> getHover(const Document& doc, Position pos, const DocumentManager* docManager = nullptr);
+
+    /// Computes context-aware code completion items (keywords, stdlib, locals, classes, dot completions).
+    CompletionList getCompletions(const Document& doc, Position pos, const DocumentManager* docManager = nullptr);
 };
 
 } // namespace keety::lsp

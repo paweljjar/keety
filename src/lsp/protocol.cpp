@@ -198,6 +198,39 @@ Hover Hover::fromJson(const JsonValue& j) {
     return h;
 }
 
+JsonValue CompletionItem::toJson() const {
+    JsonValue::Object obj;
+    obj["label"] = JsonValue(label);
+    obj["kind"] = JsonValue(static_cast<int64_t>(kind));
+    if (!detail.empty()) {
+        obj["detail"] = JsonValue(detail);
+    }
+    if (!documentation.empty()) {
+        JsonValue::Object docObj;
+        docObj["kind"] = JsonValue(std::string("markdown"));
+        docObj["value"] = JsonValue(documentation);
+        obj["documentation"] = JsonValue(std::move(docObj));
+    }
+    if (!insertText.empty()) {
+        obj["insertText"] = JsonValue(insertText);
+    }
+    if (insertTextFormat == InsertTextFormat::Snippet) {
+        obj["insertTextFormat"] = JsonValue(static_cast<int64_t>(InsertTextFormat::Snippet));
+    }
+    return JsonValue(std::move(obj));
+}
+
+JsonValue CompletionList::toJson() const {
+    JsonValue::Object obj;
+    obj["isIncomplete"] = JsonValue(isIncomplete);
+    JsonValue::Array arr;
+    for (const auto& item : items) {
+        arr.push_back(item.toJson());
+    }
+    obj["items"] = JsonValue(std::move(arr));
+    return JsonValue(std::move(obj));
+}
+
 TextDocumentPositionParams TextDocumentPositionParams::fromJson(const JsonValue& j) {
     TextDocumentPositionParams p;
     if (auto* obj = asObject(j)) {

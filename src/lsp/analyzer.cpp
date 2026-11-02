@@ -1,5 +1,9 @@
 #include <keety/lsp/analyzer.hpp>
 
+#include <keety/ast/decl.hpp>
+#include <keety/ast/expr.hpp>
+#include <keety/ast/stmt.hpp>
+#include <keety/ast/type.hpp>
 #include <keety/diag/diagnostic_emitter.hpp>
 #include <keety/diag/source_manager.hpp>
 #include <keety/driver/project_root.hpp>
@@ -12,9 +16,12 @@
 #include <keety/typechecker/type_checker.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace keety::lsp {
 
@@ -323,6 +330,218 @@ std::optional<std::string> getKeywordDoc(lexer::TokenKind kind) {
     default:
         return std::nullopt;
     }
+}
+
+lexer::TokenKind kwToTokenKind(const std::string& kw) {
+    using namespace lexer;
+    if (kw == "fn") return TokenKind::KwFn;
+    if (kw == "let") return TokenKind::KwLet;
+    if (kw == "mut") return TokenKind::KwMut;
+    if (kw == "const") return TokenKind::KwConst;
+    if (kw == "define") return TokenKind::KwDefine;
+    if (kw == "class") return TokenKind::KwClass;
+    if (kw == "inherits") return TokenKind::KwInherits;
+    if (kw == "inherited") return TokenKind::KwInherited;
+    if (kw == "this") return TokenKind::KwThis;
+    if (kw == "enum") return TokenKind::KwEnum;
+    if (kw == "import") return TokenKind::KwImport;
+    if (kw == "export") return TokenKind::KwExport;
+    if (kw == "pub") return TokenKind::KwPub;
+    if (kw == "priv") return TokenKind::KwPriv;
+    if (kw == "if") return TokenKind::KwIf;
+    if (kw == "else") return TokenKind::KwElse;
+    if (kw == "elif") return TokenKind::KwElif;
+    if (kw == "for") return TokenKind::KwFor;
+    if (kw == "in") return TokenKind::KwIn;
+    if (kw == "while") return TokenKind::KwWhile;
+    if (kw == "return") return TokenKind::KwReturn;
+    if (kw == "yield") return TokenKind::KwYield;
+    if (kw == "break") return TokenKind::KwBreak;
+    if (kw == "continue") return TokenKind::KwContinue;
+    if (kw == "switch") return TokenKind::KwSwitch;
+    if (kw == "case") return TokenKind::KwCase;
+    if (kw == "default") return TokenKind::KwDefault;
+    if (kw == "typeof") return TokenKind::KwTypeof;
+    if (kw == "as") return TokenKind::KwAs;
+    if (kw == "from") return TokenKind::KwFrom;
+    if (kw == "errtype") return TokenKind::KwErrtype;
+    if (kw == "zonk") return TokenKind::KwZonk;
+    return TokenKind::Invalid;
+}
+
+void collectLocalBindings(
+    const ast::Stmt* stmt,
+    size_t targetOffset,
+    std::vector<CompletionItem>& items,
+    std::unordered_set<std::string>& seen
+) {
+    if (!stmt) return;
+    if (const auto* block = dynamic_cast<const ast::BlockStmt*>(stmt)) {
+        for (const auto& s : block->getStatements()) {
+            if (!s) continue;
+            if (s->getSpan().start.offset >= targetOffset) {
+                continue;
+            }
+            if (const auto* declStmt = dynamic_cast<const ast::DeclStmt*>(s.get())) {
+                const auto* d = declStmt->getDeclaration();
+                if (const auto* vd = dynamic_cast<const ast::VarDecl*>(d)) {
+                    if (seen.insert(vd->getName()).second) {
+                        CompletionItem item;
+                        item.label = vd->getName();
+                        item.kind = CompletionItemKind::Variable;
+                        item.detail = "let " + vd->getName() + ": " + formatType(vd->getType(), "any");
+                        items.push_back(std::move(item));
+                    }
+                } else if (const auto* cd = dynamic_cast<const ast::ConstDecl*>(d)) {
+                    if (seen.insert(cd->getName()).second) {
+                        CompletionItem item;
+                        item.label = cd->getName();
+                        item.kind = CompletionItemKind::Constant;
+                        item.detail = "const " + cd->getName() + ": " + formatType(cd->getType(), "any");
+                        items.push_back(std::move(item));
+                    }
+                }
+            } else if (const auto* ifStmt = dynamic_cast<const ast::IfStmt*>(s.get())) {
+                collectLocalBindings(ifStmt->getThenBranch(), targetOffset, items, seen);
+                collectLocalBindings(ifStmt->getElseBranch(), targetOffset, items, seen);
+            } else if (const auto* forInStmt = dynamic_cast<const ast::ForInStmt*>(s.get())) {
+                if (targetOffset >= forInStmt->getSpan().start.offset && targetOffset <= forInStmt->getSpan().end.offset) {
+                    if (!forInStmt->getValueName().empty() && seen.insert(forInStmt->getValueName()).second) {
+                        CompletionItem item;
+                        item.label = forInStmt->getValueName();
+                        item.kind = CompletionItemKind::Variable;
+                        item.detail = "(loop item) " + forInStmt->getValueName() + ": " + formatType(forInStmt->getValueType(), "any");
+                        items.push_back(std::move(item));
+                    }
+                    if (!forInStmt->getKeyName().empty() && seen.insert(forInStmt->getKeyName()).second) {
+                        CompletionItem item;
+                        item.label = forInStmt->getKeyName();
+                        item.kind = CompletionItemKind::Variable;
+                        item.detail = "(loop key) " + forInStmt->getKeyName() + ": " + formatType(forInStmt->getKeyType(), "any");
+                        items.push_back(std::move(item));
+                    }
+                    collectLocalBindings(forInStmt->getBody(), targetOffset, items, seen);
+                }
+            } else if (const auto* forStmt = dynamic_cast<const ast::ForStmt*>(s.get())) {
+                if (targetOffset >= forStmt->getSpan().start.offset && targetOffset <= forStmt->getSpan().end.offset) {
+                    collectLocalBindings(forStmt->getInit(), targetOffset, items, seen);
+                    collectLocalBindings(forStmt->getBody(), targetOffset, items, seen);
+                }
+            } else if (const auto* whileStmt = dynamic_cast<const ast::WhileStmt*>(s.get())) {
+                if (targetOffset >= whileStmt->getSpan().start.offset && targetOffset <= whileStmt->getSpan().end.offset) {
+                    collectLocalBindings(whileStmt->getBody(), targetOffset, items, seen);
+                }
+            }
+        }
+    }
+}
+
+std::string findReceiverClassName(
+    const parser::ModuleAST& ast,
+    const std::string& varName,
+    size_t targetOffset
+) {
+    // 1. Check enclosing function/method params
+    for (const auto& decl : ast.declarations) {
+        if (!decl) continue;
+        if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+            if (targetOffset >= fnDecl->getSpan().start.offset && targetOffset <= fnDecl->getSpan().end.offset) {
+                for (const auto& p : fnDecl->getParams()) {
+                    if (p.name == varName && p.type) {
+                        if (const auto* ct = dynamic_cast<const ast::CustomType*>(p.type.get())) {
+                            return ct->getName();
+                        }
+                    }
+                }
+            }
+        } else if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+            for (const auto& m : cd->getMethods()) {
+                if (m && targetOffset >= m->getSpan().start.offset && targetOffset <= m->getSpan().end.offset) {
+                    for (const auto& p : m->getParams()) {
+                        if (p.name == varName && p.type) {
+                            if (const auto* ct = dynamic_cast<const ast::CustomType*>(p.type.get())) {
+                                return ct->getName();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Search statements for variable declaration
+    std::function<std::string(const ast::Stmt*)> searchStmt = [&](const ast::Stmt* s) -> std::string {
+        if (!s) return "";
+        if (const auto* block = dynamic_cast<const ast::BlockStmt*>(s)) {
+            for (const auto& stmt : block->getStatements()) {
+                if (!stmt) continue;
+                if (const auto* declStmt = dynamic_cast<const ast::DeclStmt*>(stmt.get())) {
+                    if (const auto* vd = dynamic_cast<const ast::VarDecl*>(declStmt->getDeclaration())) {
+                        if (vd->getName() == varName) {
+                            if (vd->getType()) {
+                                if (const auto* ct = dynamic_cast<const ast::CustomType*>(vd->getType())) {
+                                    return ct->getName();
+                                }
+                            }
+                            if (vd->getInitializer()) {
+                                if (const auto* call = dynamic_cast<const ast::CallExpr*>(vd->getInitializer())) {
+                                    if (const auto* id = dynamic_cast<const ast::IdentExpr*>(call->getCallee())) {
+                                        return id->getName();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if (const auto* ifStmt = dynamic_cast<const ast::IfStmt*>(stmt.get())) {
+                    auto r = searchStmt(ifStmt->getThenBranch());
+                    if (!r.empty()) return r;
+                    r = searchStmt(ifStmt->getElseBranch());
+                    if (!r.empty()) return r;
+                }
+            }
+        }
+        return "";
+    };
+
+    for (const auto& decl : ast.declarations) {
+        if (!decl) continue;
+        if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+            if (targetOffset >= fnDecl->getSpan().start.offset && targetOffset <= fnDecl->getSpan().end.offset) {
+                auto r = searchStmt(fnDecl->getBody());
+                if (!r.empty()) return r;
+            }
+        } else if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+            for (const auto& m : cd->getMethods()) {
+                if (m && targetOffset >= m->getSpan().start.offset && targetOffset <= m->getSpan().end.offset) {
+                    auto r = searchStmt(m->getBody());
+                    if (!r.empty()) return r;
+                }
+            }
+        }
+    }
+
+    // 3. Top-level variables
+    for (const auto& decl : ast.declarations) {
+        if (!decl) continue;
+        if (const auto* vd = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+            if (vd->getName() == varName) {
+                if (vd->getType()) {
+                    if (const auto* ct = dynamic_cast<const ast::CustomType*>(vd->getType())) {
+                        return ct->getName();
+                    }
+                }
+                if (vd->getInitializer()) {
+                    if (const auto* call = dynamic_cast<const ast::CallExpr*>(vd->getInitializer())) {
+                        if (const auto* id = dynamic_cast<const ast::IdentExpr*>(call->getCallee())) {
+                            return id->getName();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return "";
 }
 
 } // namespace
@@ -848,6 +1067,528 @@ std::optional<Hover> Analyzer::getHover(
     }
 
     return std::nullopt;
+}
+
+CompletionList Analyzer::getCompletions(
+    const Document& doc,
+    Position pos,
+    const DocumentManager* docManager
+) {
+    CompletionList list;
+    list.isIncomplete = false;
+
+    auto byteOffsetOpt = doc.positionToOffset(pos);
+    if (!byteOffsetOpt.has_value()) {
+        return list;
+    }
+    size_t targetOffset = *byteOffsetOpt;
+    const std::string& text = doc.text();
+    if (targetOffset > text.size()) {
+        targetOffset = text.size();
+    }
+
+    std::string pathStr = uriToPath(doc.uri());
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+
+    // Line prefix up to cursor
+    size_t lineStart = targetOffset;
+    while (lineStart > 0 && text[lineStart - 1] != '\n') {
+        lineStart--;
+    }
+    std::string linePrefix = text.substr(lineStart, targetOffset - lineStart);
+
+    // 1. Check if completing an import path (inside quotes following `import` or `from`)
+    size_t kwImport = linePrefix.rfind("import");
+    size_t kwFrom = linePrefix.rfind("from");
+    size_t kwPos = std::string::npos;
+    if (kwImport != std::string::npos && (kwFrom == std::string::npos || kwImport > kwFrom)) {
+        kwPos = kwImport;
+    } else if (kwFrom != std::string::npos) {
+        kwPos = kwFrom;
+    }
+
+    if (kwPos != std::string::npos) {
+        int singleQuotes = 0;
+        int doubleQuotes = 0;
+        for (size_t i = kwPos; i < linePrefix.size(); ++i) {
+            if (linePrefix[i] == '\'') singleQuotes++;
+            else if (linePrefix[i] == '"') doubleQuotes++;
+        }
+        if ((singleQuotes % 2 == 1) || (doubleQuotes % 2 == 1)) {
+            std::filesystem::path currentDir = fsPath.parent_path();
+            if (currentDir.empty()) {
+                std::error_code ec;
+                currentDir = std::filesystem::current_path(ec);
+            }
+
+            std::unordered_set<std::string> seen;
+            std::error_code ec;
+            if (std::filesystem::exists(currentDir, ec)) {
+                for (const auto& entry : std::filesystem::directory_iterator(currentDir, ec)) {
+                    if (entry.is_regular_file(ec) && entry.path().extension() == ".keet") {
+                        if (entry.path() != fsPath) {
+                            std::string stem = entry.path().stem().string();
+                            std::string fn = entry.path().filename().string();
+                            if (seen.insert("./" + stem).second) {
+                                CompletionItem item;
+                                item.label = "./" + stem;
+                                item.kind = CompletionItemKind::File;
+                                item.detail = "KeetScript module (" + fn + ")";
+                                item.insertText = "./" + stem;
+                                list.items.push_back(std::move(item));
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (docManager) {
+                for (const auto& openUri : docManager->openUris()) {
+                    if (openUri == doc.uri()) continue;
+                    std::string openPath = uriToPath(openUri);
+                    std::filesystem::path op(openPath);
+                    if (op.parent_path() == currentDir && op.extension() == ".keet") {
+                        std::string stem = op.stem().string();
+                        if (seen.insert("./" + stem).second) {
+                            CompletionItem item;
+                            item.label = "./" + stem;
+                            item.kind = CompletionItemKind::File;
+                            item.detail = "Open KeetScript module (" + op.filename().string() + ")";
+                            item.insertText = "./" + stem;
+                            list.items.push_back(std::move(item));
+                        }
+                    }
+                }
+            }
+
+            return list;
+        }
+    }
+
+    // 2. Check for Dot-Completion (`receiver.`)
+    size_t p = targetOffset;
+    while (p > 0 && (std::isalnum(static_cast<unsigned char>(text[p - 1])) || text[p - 1] == '_')) {
+        p--;
+    }
+    while (p > 0 && (text[p - 1] == ' ' || text[p - 1] == '\t')) {
+        p--;
+    }
+    bool isDot = (p > 0 && text[p - 1] == '.');
+
+    if (isDot) {
+        p--; // Skip '.'
+        while (p > 0 && (text[p - 1] == ' ' || text[p - 1] == '\t')) {
+            p--;
+        }
+        size_t receiverEnd = p;
+        while (p > 0 && (std::isalnum(static_cast<unsigned char>(text[p - 1])) || text[p - 1] == '_')) {
+            p--;
+        }
+        std::string receiver = text.substr(p, receiverEnd - p);
+
+        // Check if there was another qualifier dot before receiver (e.g. `io.Color.`)
+        std::string qualifier = "";
+        size_t q = p;
+        while (q > 0 && (text[q - 1] == ' ' || text[q - 1] == '\t')) q--;
+        if (q > 0 && text[q - 1] == '.') {
+            q--;
+            while (q > 0 && (text[q - 1] == ' ' || text[q - 1] == '\t')) q--;
+            size_t qEnd = q;
+            while (q > 0 && (std::isalnum(static_cast<unsigned char>(text[q - 1])) || text[q - 1] == '_')) q--;
+            qualifier = text.substr(q, qEnd - q);
+        }
+
+        // 2a. Standard library module dot completion: `io.`, `fs.`, `math.`, etc.
+        if (sema::isStdlibModule(receiver)) {
+            auto scope = sema::createStdlibModuleScope(receiver);
+            if (scope) {
+                for (const auto& [name, sym] : scope->getSymbols()) {
+                    CompletionItem item;
+                    item.label = name;
+                    if (sym->getKind() == sema::SymbolKind::Function) {
+                        item.kind = CompletionItemKind::Function;
+                    } else if (sym->getKind() == sema::SymbolKind::Constant) {
+                        item.kind = CompletionItemKind::Constant;
+                    } else if (sym->getKind() == sema::SymbolKind::Enum) {
+                        item.kind = CompletionItemKind::Enum;
+                    } else if (sym->getKind() == sema::SymbolKind::EnumValue) {
+                        item.kind = CompletionItemKind::EnumMember;
+                    } else {
+                        item.kind = CompletionItemKind::Field;
+                    }
+
+                    if (auto docOpt = getStdlibMemberDoc(name)) {
+                        item.detail = docOpt->signature;
+                        item.documentation = docOpt->doc;
+                    } else {
+                        item.detail = receiver + "." + name;
+                    }
+                    list.items.push_back(std::move(item));
+                }
+                std::sort(list.items.begin(), list.items.end(), [](const CompletionItem& a, const CompletionItem& b) {
+                    return a.label < b.label;
+                });
+                return list;
+            }
+        }
+
+        // 2b. Special stdlib sub-enum dot completion: `io.Color.`
+        if (qualifier == "io" && receiver == "Color") {
+            const std::vector<std::string> colorMembers = {
+                "Default", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White", "Gray"
+            };
+            for (const auto& m : colorMembers) {
+                CompletionItem item;
+                item.label = m;
+                item.kind = CompletionItemKind::EnumMember;
+                item.detail = "(enum member) io.Color." + m;
+                list.items.push_back(std::move(item));
+            }
+            return list;
+        }
+
+        // Parse AST to resolve classes, enums, 'this', and variables
+        diag::SourceManager sm;
+        diag::FileId fileId = sm.addBuffer(pathStr, text);
+        diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+        lexer::Lexer pLexer(fileId, text);
+        parser::Parser parser(pLexer, &emitter);
+        auto ast = parser.parseModule(moduleName);
+
+        // 2c. `this.` dot completion
+        if (receiver == "this") {
+            const ast::ClassDecl* enclosingClass = nullptr;
+            for (const auto& decl : ast.declarations) {
+                if (!decl) continue;
+                if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                    if (targetOffset >= cd->getSpan().start.offset && targetOffset <= cd->getSpan().end.offset) {
+                        enclosingClass = cd;
+                        break;
+                    }
+                }
+            }
+
+            if (enclosingClass) {
+                for (const auto& field : enclosingClass->getFields()) {
+                    CompletionItem item;
+                    item.label = field.name;
+                    item.kind = CompletionItemKind::Field;
+                    std::string sig;
+                    if (field.visibility == ast::Visibility::Pub) sig += "pub ";
+                    else if (field.visibility == ast::Visibility::Priv) sig += "priv ";
+                    sig += std::string(field.isConst ? "const " : "let ") + field.name + ": " + formatType(field.type.get(), "any");
+                    item.detail = sig;
+                    list.items.push_back(std::move(item));
+                }
+                for (const auto& method : enclosingClass->getMethods()) {
+                    if (!method) continue;
+                    CompletionItem item;
+                    item.label = method->getName();
+                    item.kind = CompletionItemKind::Method;
+                    std::string sig = "(method) ";
+                    if (method->getVisibility() == ast::Visibility::Pub) sig += "pub ";
+                    else if (method->getVisibility() == ast::Visibility::Priv) sig += "priv ";
+                    if (method->isAsync()) sig += "async ";
+                    sig += "fn " + method->getName() + "(";
+                    for (size_t i = 0; i < method->getParams().size(); ++i) {
+                        if (i > 0) sig += ", ";
+                        const auto& param = method->getParams()[i];
+                        if (param.isMut) sig += "mut ";
+                        sig += param.name + ": " + formatType(param.type.get(), "any");
+                    }
+                    sig += "): " + formatType(method->getReturnType(), "void");
+                    item.detail = sig;
+                    item.documentation = extractDocComments(text, method->getSpan().start.offset);
+                    list.items.push_back(std::move(item));
+                }
+                return list;
+            }
+        }
+
+        // 2d. Enum variant completion: `Status.`
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* ed = dynamic_cast<const ast::EnumDecl*>(decl.get())) {
+                if (ed->getName() == receiver) {
+                    for (const auto& member : ed->getMembers()) {
+                        CompletionItem item;
+                        item.label = member.name;
+                        item.kind = CompletionItemKind::EnumMember;
+                        item.detail = "(enum member) " + ed->getName() + "." + member.name;
+                        list.items.push_back(std::move(item));
+                    }
+                    return list;
+                }
+            }
+        }
+
+        // 2e. Instance variable dot completion: `u.` where `let u = User();` or `fn test(u: User)`
+        std::string inferredClass = findReceiverClassName(ast, receiver, targetOffset);
+        if (inferredClass.empty()) {
+            inferredClass = receiver;
+        }
+
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                if (cd->getName() == inferredClass) {
+                    for (const auto& field : cd->getFields()) {
+                        CompletionItem item;
+                        item.label = field.name;
+                        item.kind = CompletionItemKind::Field;
+                        item.detail = (field.isConst ? "const " : "let ") + field.name + ": " + formatType(field.type.get(), "any");
+                        list.items.push_back(std::move(item));
+                    }
+                    for (const auto& method : cd->getMethods()) {
+                        if (!method) continue;
+                        CompletionItem item;
+                        item.label = method->getName();
+                        item.kind = CompletionItemKind::Method;
+                        std::string sig = "fn " + method->getName() + "(";
+                        for (size_t i = 0; i < method->getParams().size(); ++i) {
+                            if (i > 0) sig += ", ";
+                            const auto& param = method->getParams()[i];
+                            if (param.isMut) sig += "mut ";
+                            sig += param.name + ": " + formatType(param.type.get(), "any");
+                        }
+                        sig += "): " + formatType(method->getReturnType(), "void");
+                        item.detail = sig;
+                        item.documentation = extractDocComments(text, method->getSpan().start.offset);
+                        list.items.push_back(std::move(item));
+                    }
+                    return list;
+                }
+            }
+        }
+
+        return list;
+    }
+
+    // 3. General Scope Completions (Keywords, Snippets, Types, Globals, Locals, Top-Level)
+    std::unordered_set<std::string> seen;
+
+    // 3a. Snippets
+    auto addSnippet = [&](std::string label, std::string insertText, std::string detail) {
+        if (seen.insert(label).second) {
+            CompletionItem item;
+            item.label = std::move(label);
+            item.insertText = std::move(insertText);
+            item.insertTextFormat = InsertTextFormat::Snippet;
+            item.kind = CompletionItemKind::Snippet;
+            item.detail = std::move(detail);
+            list.items.push_back(std::move(item));
+        }
+    };
+    addSnippet("fn (snippet)", "fn ${1:name}(${2}): ${3:void} {\n\t${0}\n}", "Function declaration snippet");
+    addSnippet("for (snippet)", "for ${1:item} in ${2:collection} {\n\t${0}\n}", "For-in iteration loop snippet");
+    addSnippet("if (snippet)", "if ${1:condition} {\n\t${0}\n}", "Conditional statement snippet");
+    addSnippet("class (snippet)", "class ${1:Name} {\n\t${0}\n}", "Class declaration snippet");
+    addSnippet("main (snippet)", "fn main(): void {\n\t${0}\n}", "Main entrypoint snippet");
+
+    // 3b. Keywords
+    static const std::vector<std::string> keywords = {
+        "fn", "let", "mut", "const", "class", "enum", "import", "export", "pub", "priv",
+        "if", "else", "elif", "for", "in", "while", "return", "zonk", "switch", "case",
+        "default", "break", "continue", "inherits", "typeof", "as", "from", "errtype"
+    };
+    for (const auto& kw : keywords) {
+        if (seen.insert(kw).second) {
+            CompletionItem item;
+            item.label = kw;
+            item.kind = CompletionItemKind::Keyword;
+            item.detail = "keyword";
+            auto tk = kwToTokenKind(kw);
+            if (auto kwDoc = getKeywordDoc(tk)) {
+                item.documentation = *kwDoc;
+            }
+            list.items.push_back(std::move(item));
+        }
+    }
+
+    // 3c. Primitive Types
+    static const std::vector<std::string> primitives = {
+        "int", "float", "string", "bool", "char", "void", "error", "array", "map", "any"
+    };
+    for (const auto& prim : primitives) {
+        if (seen.insert(prim).second) {
+            CompletionItem item;
+            item.label = prim;
+            item.kind = CompletionItemKind::Keyword;
+            item.detail = "primitive type";
+            list.items.push_back(std::move(item));
+        }
+    }
+
+    // 3d. Predeclared Constants
+    static const std::vector<std::string> constants = {"true", "false", "null"};
+    for (const auto& c : constants) {
+        if (seen.insert(c).second) {
+            CompletionItem item;
+            item.label = c;
+            item.kind = CompletionItemKind::Constant;
+            item.detail = "built-in constant";
+            list.items.push_back(std::move(item));
+        }
+    }
+
+    // 3e. Standard Library Modules
+    static const std::vector<std::pair<std::string, std::string>> stdModules = {
+        {"io", "Standard Library Module: `io` (Console and standard streams)"},
+        {"fs", "Standard Library Module: `fs` (File system operations)"},
+        {"sys", "Standard Library Module: `sys` (System and process information)"},
+        {"math", "Standard Library Module: `math` (Mathematical functions and constants)"},
+        {"time", "Standard Library Module: `time` (Time measurement and formatting)"},
+        {"json", "Standard Library Module: `json` (JSON serialization and parsing)"},
+        {"net", "Standard Library Module: `net` (Networking, HTTP and sockets)"}
+    };
+    for (const auto& [mod, desc] : stdModules) {
+        if (seen.insert(mod).second) {
+            CompletionItem item;
+            item.label = mod;
+            item.kind = CompletionItemKind::Module;
+            item.detail = "Standard library module";
+            item.documentation = desc;
+            list.items.push_back(std::move(item));
+        }
+    }
+
+    // Parse AST to gather local scope and top-level definitions
+    diag::SourceManager sm;
+    diag::FileId fileId = sm.addBuffer(pathStr, text);
+    diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+    lexer::Lexer pLexer(fileId, text);
+    parser::Parser parser(pLexer, &emitter);
+    auto ast = parser.parseModule(moduleName);
+
+    // 3f. Function parameters and local variables if inside a function/method
+    bool insideClassMethod = false;
+    for (const auto& decl : ast.declarations) {
+        if (!decl) continue;
+        if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+            if (targetOffset >= fnDecl->getSpan().start.offset && targetOffset <= fnDecl->getSpan().end.offset) {
+                for (const auto& param : fnDecl->getParams()) {
+                    if (seen.insert(param.name).second) {
+                        CompletionItem item;
+                        item.label = param.name;
+                        item.kind = CompletionItemKind::Variable;
+                        item.detail = "(parameter) " + std::string(param.isMut ? "mut " : "") + param.name + ": " + formatType(param.type.get(), "any");
+                        list.items.push_back(std::move(item));
+                    }
+                }
+                collectLocalBindings(fnDecl->getBody(), targetOffset, list.items, seen);
+            }
+        } else if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+            for (const auto& method : cd->getMethods()) {
+                if (method && targetOffset >= method->getSpan().start.offset && targetOffset <= method->getSpan().end.offset) {
+                    insideClassMethod = true;
+                    for (const auto& param : method->getParams()) {
+                        if (seen.insert(param.name).second) {
+                            CompletionItem item;
+                            item.label = param.name;
+                            item.kind = CompletionItemKind::Variable;
+                            item.detail = "(parameter) " + std::string(param.isMut ? "mut " : "") + param.name + ": " + formatType(param.type.get(), "any");
+                            list.items.push_back(std::move(item));
+                        }
+                    }
+                    collectLocalBindings(method->getBody(), targetOffset, list.items, seen);
+                }
+            }
+        }
+    }
+
+    if (insideClassMethod) {
+        if (seen.insert("this").second) {
+            CompletionItem item;
+            item.label = "this";
+            item.kind = CompletionItemKind::Keyword;
+            item.detail = "Current class instance";
+            list.items.push_back(std::move(item));
+        }
+        if (seen.insert("inherited").second) {
+            CompletionItem item;
+            item.label = "inherited";
+            item.kind = CompletionItemKind::Keyword;
+            item.detail = "Base class member access";
+            list.items.push_back(std::move(item));
+        }
+    }
+
+    // 3g. Top-level AST declarations
+    for (const auto& decl : ast.declarations) {
+        if (!decl) continue;
+        if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+            if (seen.insert(fnDecl->getName()).second) {
+                CompletionItem item;
+                item.label = fnDecl->getName();
+                item.kind = CompletionItemKind::Function;
+                std::string sig = (fnDecl->isExported() ? "export " : "") + std::string("fn ") + fnDecl->getName() + "(";
+                for (size_t i = 0; i < fnDecl->getParams().size(); ++i) {
+                    if (i > 0) sig += ", ";
+                    const auto& param = fnDecl->getParams()[i];
+                    if (param.isMut) sig += "mut ";
+                    sig += param.name + ": " + formatType(param.type.get(), "any");
+                }
+                sig += "): " + formatType(fnDecl->getReturnType(), "void");
+                item.detail = sig;
+                item.documentation = extractDocComments(text, fnDecl->getSpan().start.offset);
+                list.items.push_back(std::move(item));
+            }
+        } else if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+            if (seen.insert(cd->getName()).second) {
+                CompletionItem item;
+                item.label = cd->getName();
+                item.kind = CompletionItemKind::Class;
+                item.detail = (cd->isExported() ? "export class " : "class ") + cd->getName();
+                item.documentation = extractDocComments(text, cd->getSpan().start.offset);
+                list.items.push_back(std::move(item));
+            }
+        } else if (const auto* ed = dynamic_cast<const ast::EnumDecl*>(decl.get())) {
+            if (seen.insert(ed->getName()).second) {
+                CompletionItem item;
+                item.label = ed->getName();
+                item.kind = CompletionItemKind::Enum;
+                item.detail = (ed->isExported() ? "export enum " : "enum ") + ed->getName();
+                item.documentation = extractDocComments(text, ed->getSpan().start.offset);
+                list.items.push_back(std::move(item));
+            }
+        } else if (const auto* vd = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+            if (seen.insert(vd->getName()).second) {
+                CompletionItem item;
+                item.label = vd->getName();
+                item.kind = CompletionItemKind::Variable;
+                item.detail = (vd->isExported() ? "export let " : "let ") + vd->getName() + ": " + formatType(vd->getType(), "any");
+                list.items.push_back(std::move(item));
+            }
+        } else if (const auto* cnd = dynamic_cast<const ast::ConstDecl*>(decl.get())) {
+            if (seen.insert(cnd->getName()).second) {
+                CompletionItem item;
+                item.label = cnd->getName();
+                item.kind = CompletionItemKind::Constant;
+                item.detail = (cnd->isExported() ? "export const " : "const ") + cnd->getName() + ": " + formatType(cnd->getType(), "any");
+                list.items.push_back(std::move(item));
+            }
+        } else if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+            for (const auto& sym : imp->getSymbols()) {
+                if (seen.insert(sym.getEffectiveName()).second) {
+                    CompletionItem item;
+                    item.label = sym.getEffectiveName();
+                    item.kind = CompletionItemKind::Reference;
+                    item.detail = "Imported from \"" + imp->getModulePath() + "\"";
+                    list.items.push_back(std::move(item));
+                }
+            }
+            if (!imp->getModuleAlias().empty() && seen.insert(imp->getModuleAlias()).second) {
+                CompletionItem item;
+                item.label = imp->getModuleAlias();
+                item.kind = CompletionItemKind::Module;
+                item.detail = "Module alias for \"" + imp->getModulePath() + "\"";
+                list.items.push_back(std::move(item));
+            }
+        }
+    }
+
+    return list;
 }
 
 } // namespace keety::lsp

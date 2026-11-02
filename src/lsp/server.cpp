@@ -87,6 +87,9 @@ std::optional<std::string> Server::handleRawMessage(const std::string& rawJson) 
             } else if (method == "textDocument/hover") {
                 auto res = handleHover(params);
                 return JsonRpcResponse::makeResult(id, res).serialize();
+            } else if (method == "textDocument/completion") {
+                auto res = handleCompletion(params);
+                return JsonRpcResponse::makeResult(id, res).serialize();
             } else if (method == "shutdown") {
                 auto res = handleShutdown();
                 return JsonRpcResponse::makeResult(id, res).serialize();
@@ -180,6 +183,12 @@ void Server::handleRequest(const RequestId& id, const std::string& method, const
         return;
     }
 
+    if (method == "textDocument/completion") {
+        auto res = handleCompletion(params);
+        transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
+        return;
+    }
+
     auto resp = JsonRpcResponse::makeError(id, JsonRpcErrorCode::MethodNotFound, "method not found: " + method);
     transport_.writeMessage(resp.serialize());
 }
@@ -222,7 +231,16 @@ JsonValue Server::handleInitialize(const JsonValue& /*params*/) {
 
     caps["definitionProvider"] = JsonValue(true);
     caps["hoverProvider"] = JsonValue(true);
-    caps["completionProvider"] = JsonValue(std::monostate{});
+
+    JsonValue::Object compProvider;
+    compProvider["resolveProvider"] = JsonValue(false);
+    JsonValue::Array trigChars;
+    trigChars.push_back(JsonValue(std::string(".")));
+    trigChars.push_back(JsonValue(std::string("\"")));
+    trigChars.push_back(JsonValue(std::string("/")));
+    compProvider["triggerCharacters"] = JsonValue(std::move(trigChars));
+    caps["completionProvider"] = JsonValue(std::move(compProvider));
+
     caps["documentSymbolProvider"] = JsonValue(false);
 
     JsonValue::Object serverInfo;
@@ -320,6 +338,17 @@ JsonValue Server::handleHover(const JsonValue& params) {
         return JsonValue(std::monostate{});
     }
     return hoverOpt->toJson();
+}
+
+JsonValue Server::handleCompletion(const JsonValue& params) {
+    auto p = TextDocumentPositionParams::fromJson(params);
+    auto docOpt = docManager_.getDocument(p.textDocument.uri);
+    if (!docOpt.has_value()) {
+        CompletionList emptyList;
+        return emptyList.toJson();
+    }
+    auto list = analyzer_.getCompletions(*docOpt, p.position, &docManager_);
+    return list.toJson();
 }
 
 void Server::publishDiagnostics(const std::string& uri, int32_t version) {
