@@ -59,4 +59,7 @@ void populateTimeModuleScope(Scope& timeScope);
 /// Populates an existing Scope with all exported symbols of the 'json' standard library module.
 void populateJsonModuleScope(Scope& jsonScope);
 
+/// Populates an existing Scope with all exported symbols of the 'net' standard library module.
+void populateNetModuleScope(Scope& netScope);
+
 } // namespace keety::sema
