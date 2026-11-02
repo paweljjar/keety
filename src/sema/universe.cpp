@@ -103,7 +103,8 @@ bool isStdlibModule(std::string_view name) noexcept {
            name == "fs" || name == "std.fs" || name == "keet.fs" ||
            name == "sys" || name == "std.sys" || name == "keet.sys" ||
            name == "math" || name == "std.math" || name == "keet.math" ||
-           name == "time" || name == "std.time" || name == "keet.time";
+           name == "time" || name == "std.time" || name == "keet.time" ||
+           name == "json" || name == "std.json" || name == "keet.json";
 }
 
 void populateIoModuleScope(Scope& ioScope) {
@@ -353,6 +354,68 @@ void populateTimeModuleScope(Scope& timeScope) {
     makeFn("secondUtc");
 }
 
+void populateJsonModuleScope(Scope& jsonScope) {
+    diag::SourceSpan span{};
+
+    auto makeFn = [&](const char* name) {
+        auto sym = std::make_shared<Symbol>(name, SymbolKind::Function, span);
+        sym->setExported(true);
+        sym->setConst(true);
+        jsonScope.define(sym, false);
+    };
+
+    // Validation & Type Inspection
+    makeFn("isValid");
+    makeFn("typeOf");
+    makeFn("isObject");
+    makeFn("isArray");
+    makeFn("size");
+    makeFn("keys");
+
+    // Dot-Path Queries & Typed Extraction
+    makeFn("hasKey");
+    makeFn("isNull");
+    makeFn("getString");
+    makeFn("getInt");
+    makeFn("getFloat");
+    makeFn("getBool");
+    makeFn("getArray");
+    makeFn("getObject");
+
+    // Non-Throwing Fallback Extractors (*Or)
+    makeFn("getStringOr");
+    makeFn("getIntOr");
+    makeFn("getFloatOr");
+    makeFn("getBoolOr");
+
+    // Typed Collection Parsers
+    makeFn("parseMap");
+    makeFn("parseArray");
+    makeFn("parseIntArray");
+    makeFn("parseFloatArray");
+    makeFn("parseBoolArray");
+
+    // Immutable Object & Array Builders / Mutation Helpers
+    makeFn("emptyObject");
+    makeFn("emptyArray");
+    makeFn("setString");
+    makeFn("setInt");
+    makeFn("setFloat");
+    makeFn("setBool");
+    makeFn("setNull");
+    makeFn("setRaw");
+    makeFn("removeKey");
+
+    // Polymorphic Serialization, Formatting, Escaping & File I/O
+    makeFn("stringify");
+    makeFn("format");
+    makeFn("minify");
+    makeFn("escape");
+    makeFn("unescape");
+    makeFn("readFile");
+    makeFn("writeFile");
+}
+
 std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, const std::shared_ptr<Scope>& universe) {
     auto scope = std::make_shared<Scope>(ScopeKind::Module, universe);
     if (moduleName == "io" || moduleName == "std.io" || moduleName == "keet.io") {
@@ -365,6 +428,8 @@ std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, cons
         populateMathModuleScope(*scope);
     } else if (moduleName == "time" || moduleName == "std.time" || moduleName == "keet.time") {
         populateTimeModuleScope(*scope);
+    } else if (moduleName == "json" || moduleName == "std.json" || moduleName == "keet.json") {
+        populateJsonModuleScope(*scope);
     }
     return scope;
 }
