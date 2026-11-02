@@ -11,7 +11,7 @@ namespace keet_module_zonk_block_yield {
     }
 
     int64_t divideNumbers(int64_t a, int64_t b) {
-        return a / b;
+        return keet::div_safe(a, b);
     }
 
     int64_t testCustomErrorRecovery() {

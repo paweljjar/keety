@@ -247,7 +247,7 @@ TEST_CASE("C++ Implementation Emitter translates functions accessing module-leve
         REQUIRE(cpp.find("int64_t computeRatio(int64_t hits, int64_t total) {") != std::string::npos);
         REQUIRE(cpp.find("if (total == 0) {") != std::string::npos);
         REQUIRE(cpp.find("throw keet::error(\"Error\", \"Cannot divide by zero in computeRatio\");") != std::string::npos);
-        REQUIRE(cpp.find("return hits / total;") != std::string::npos);
+        REQUIRE(cpp.find("return keet::div_safe(hits, total);") != std::string::npos);
     }
 }
 

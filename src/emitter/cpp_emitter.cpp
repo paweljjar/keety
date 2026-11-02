@@ -420,10 +420,10 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
                 return lhs + " = " + translate_expression(bin->getRight());
             }
         }
-        if (in_zonk_expr_ && bin->getOp() == lexer::TokenKind::Slash) {
+        if (bin->getOp() == lexer::TokenKind::Slash) {
             return "keet::div_safe(" + translate_expression(bin->getLeft()) + ", " + translate_expression(bin->getRight()) + ")";
         }
-        if (in_zonk_expr_ && bin->getOp() == lexer::TokenKind::Percent) {
+        if (bin->getOp() == lexer::TokenKind::Percent) {
             return "keet::mod_safe(" + translate_expression(bin->getLeft()) + ", " + translate_expression(bin->getRight()) + ")";
         }
         std::string_view op_str = lexer::getTokenKindName(bin->getOp());
