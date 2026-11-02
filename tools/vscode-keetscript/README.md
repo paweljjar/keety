@@ -9,7 +9,7 @@ Official Visual Studio Code extension providing first-class language support for
 - **🎨 Syntax Highlighting:** Full TextMate grammar covering all KeetScript keywords (`fn`, `zonk`, `mut`, `let`, `class`, `enum`), types, literals, template expressions, and standard library namespaces.
 - **⚡ Live Diagnostics:** Background compile-check on typing (debounced) and saving via `keety check --diagnostic-format=json`, highlighting syntax and type errors directly in the editor and Problems view.
 - **💡 1-Click Quick Fixes:** Instant lightbulb fixes for typo suggestions (`did you mean '...'?`), missing imports (`add 'import <module>;'`), missing semicolons, and equality comparisons.
-- **🔍 Rich IntelliSense & Autocompletion:** Dot-completions for standard library modules (`io.`, `fs.`, `sys.`, `math.`, `time.`), built-in types, keywords, and container methods.
+- **🔍 Rich IntelliSense & Autocompletion:** Dot-completions for standard library modules (`io.`, `fs.`, `sys.`, `math.`, `time.`, `json.`), built-in types, keywords, and container methods.
 - **📖 Hover Documentation:** Inline type signatures, parameter hints, and Markdown docstrings for built-in functions, constants, and language constructs.
 - **📦 Snippets:** Instant templates for `main`, `fn`, `zonk`, `zonkblock`, `ifnull`, `forin`, `class`, and `import`.
 - **▶ Run & Build Buttons:** One-click execution button (▶) in the editor title bar to run `keety run <file>` in the Integrated Terminal.

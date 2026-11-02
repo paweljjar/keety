@@ -647,6 +647,7 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
     module_scopes["<stdlib>/sys"] = sema::createStdlibModuleScope("sys", universe);
     module_scopes["<stdlib>/math"] = sema::createStdlibModuleScope("math", universe);
     module_scopes["<stdlib>/time"] = sema::createStdlibModuleScope("time", universe);
+    module_scopes["<stdlib>/json"] = sema::createStdlibModuleScope("json", universe);
 
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
@@ -674,6 +675,9 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
             } else if (edge.toCanonicalPath == "<stdlib>/time" || edge.rawImportPath == "time") {
                 auto timeModSym = std::make_shared<sema::Symbol>("time", sema::SymbolKind::Module, edge.importSpan);
                 module_scope->define(timeModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/json" || edge.rawImportPath == "json") {
+                auto jsonModSym = std::make_shared<sema::Symbol>("json", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(jsonModSym, false);
             }
             if (edge.toCanonicalPath.rfind("<stdlib>/", 0) != 0) {
                 auto it = module_scopes.find(edge.toCanonicalPath);
@@ -805,6 +809,7 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
     module_scopes["<stdlib>/sys"] = sema::createStdlibModuleScope("sys", universe);
     module_scopes["<stdlib>/math"] = sema::createStdlibModuleScope("math", universe);
     module_scopes["<stdlib>/time"] = sema::createStdlibModuleScope("time", universe);
+    module_scopes["<stdlib>/json"] = sema::createStdlibModuleScope("json", universe);
 
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
@@ -832,6 +837,9 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
             } else if (edge.toCanonicalPath == "<stdlib>/time" || edge.rawImportPath == "time") {
                 auto timeModSym = std::make_shared<sema::Symbol>("time", sema::SymbolKind::Module, edge.importSpan);
                 module_scope->define(timeModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/json" || edge.rawImportPath == "json") {
+                auto jsonModSym = std::make_shared<sema::Symbol>("json", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(jsonModSym, false);
             }
             if (edge.toCanonicalPath.rfind("<stdlib>/", 0) != 0) {
                 auto it = module_scopes.find(edge.toCanonicalPath);
@@ -1028,6 +1036,7 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     module_scopes["<stdlib>/sys"] = sema::createStdlibModuleScope("sys", universe);
     module_scopes["<stdlib>/math"] = sema::createStdlibModuleScope("math", universe);
     module_scopes["<stdlib>/time"] = sema::createStdlibModuleScope("time", universe);
+    module_scopes["<stdlib>/json"] = sema::createStdlibModuleScope("json", universe);
 
     // 1. Semantic and type checking across all modules
     for (const auto* node : ordered_nodes) {
@@ -1052,6 +1061,9 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
             } else if (edge.toCanonicalPath == "<stdlib>/time" || edge.rawImportPath == "time") {
                 auto timeModSym = std::make_shared<sema::Symbol>("time", sema::SymbolKind::Module, edge.importSpan);
                 module_scope->define(timeModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/json" || edge.rawImportPath == "json") {
+                auto jsonModSym = std::make_shared<sema::Symbol>("json", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(jsonModSym, false);
             }
             if (edge.toCanonicalPath.rfind("<stdlib>/", 0) != 0) {
                 auto it = module_scopes.find(edge.toCanonicalPath);
