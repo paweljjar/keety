@@ -81,6 +81,10 @@ add_executable(keety_unit_tests
     unit/test_pkg_manifest.cpp
     unit/test_pkg_lockfile.cpp
     unit/test_pkg_workspace.cpp
+    unit/test_pkg_process.cpp
+    unit/test_pkg_git.cpp
+    unit/test_pkg_graph.cpp
+    unit/test_pkg_installer.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE

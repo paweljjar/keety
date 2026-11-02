@@ -71,6 +71,11 @@ add_library(kattery_core STATIC
     pkg/manifest.cpp
     pkg/lockfile.cpp
     pkg/workspace.cpp
+    pkg/process.cpp
+    pkg/git_client.cpp
+    pkg/fetcher.cpp
+    pkg/graph.cpp
+    pkg/installer.cpp
 )
 
 target_include_directories(kattery_core PUBLIC

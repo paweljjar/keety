@@ -27,9 +27,22 @@ enum class ErrorCode {
     UnsupportedLockVersion = 1011, // Unknown `lockVersion`
     SelfDependency = 1012,         // Package lists itself as a dependency
 
-    // --- KAT3xxx: workspaces ---
+    // --- KAT2xxx: fetch / git ---
+    GitNotFound = 2001,            // git executable missing from PATH
+    GitCloneFailed = 2002,         // git clone or fetch failed
+    GitRefNotFound = 2003,         // git ref could not be resolved
+    GitCheckoutFailed = 2004,      // git checkout failed
+    TreeHashMismatch = 2005,       // Tree hash does not match lockfile integrity
+    LocalPathNotFound = 2006,      // Local path does not exist
+    LocalLinkFailed = 2007,        // Symlink / junction / copy failed
+
+    // --- KAT3xxx: resolve / install / workspaces ---
+    DependencyCycle = 3001,          // Cyclic dependency detected (A -> B -> A)
+    DependencyConflict = 3002,       // Two dependencies require different commits for same package
+    LockfileMismatch = 3003,         // Lockfile stale under --frozen
     DuplicateWorkspaceMember = 3004, // Two members (or root + member) share a name
     WorkspaceMemberMissing = 3005,   // Listed member has no pedigree.json
+    InstallationFailed = 3006,       // File I/O or staging failure during install
 };
 
 /// Returns the printable code, e.g. `KAT1005`.
