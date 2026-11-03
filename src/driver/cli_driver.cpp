@@ -1313,6 +1313,7 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     link_opts.kind = BinaryKind::Executable;
 #if defined(_WIN32)
     link_opts.libraries.push_back("ws2_32");
+    link_opts.libraries.push_back("bcrypt");
 #endif
     if (options.verbose) {
         out << "[verbose] Linking " << object_files.size() << " object file(s) into "

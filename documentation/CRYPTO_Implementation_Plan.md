@@ -148,26 +148,26 @@ let scannedUrl: string = crypto.decodeQr(qr.matrix) zonk "decode failed";
 ### Part 1: Encodings, CSPRNG & Security Utilities
 
 #### Phase 1.1: Data Encodings
-- [ ] **Task 1.1.1: Hexadecimal Encoding & Decoding**
+- [x] **Task 1.1.1: Hexadecimal Encoding & Decoding**
   - Implement `toHex(data: string) -> string` (lowercase hex).
   - Implement `fromHex(hexStr: string) -> string` with validation (rejects invalid hex characters or odd-length inputs with `zonk`-able errors).
-- [ ] **Task 1.1.2: Base64 & Base64URL**
+- [x] **Task 1.1.2: Base64 & Base64URL**
   - Implement RFC 4648 standard Base64 `toBase64(data: string) -> string` and `fromBase64(b64: string) -> string`.
   - Implement URL-safe Base64 without padding (`toBase64Url`, `fromBase64Url`) for JWT / web tokens.
 
 #### Phase 1.2: Cryptographically Secure Pseudo-Random Number Generation (CSPRNG)
-- [ ] **Task 1.2.1: OS Entropy Source Abstraction**
+- [x] **Task 1.2.1: OS Entropy Source Abstraction**
   - macOS / iOS / BSD: `arc4random_buf` / `getentropy`.
   - Linux: `getrandom(2)` syscall with graceful fallback to `/dev/urandom`.
   - Windows: `BCryptGenRandom` (`BCRYPT_USE_SYSTEM_PREFERRED_RNG`).
-- [ ] **Task 1.2.2: Random Generators API**
+- [x] **Task 1.2.2: Random Generators API**
   - `randomBytes(length: int) -> string`: Raw byte string of size `length`.
   - `randomHex(length: int) -> string`: Hex-encoded random string of length $2 \times \text{length}$.
   - `randomInt(min: int, max: int) -> int`: Uniform non-biased random integer in range $[min, max]$ using rejection sampling.
   - `randomUuid() -> string`: RFC 4122 v4 UUID generator.
 
 #### Phase 1.3: Side-Channel Hardening
-- [ ] **Task 1.3.1: Constant-Time Comparisons**
+- [x] **Task 1.3.1: Constant-Time Comparisons**
   - Implement `timingSafeEqual(a: string, b: string) -> bool` to protect MAC / signature verification against timing attacks.
 
 ---
