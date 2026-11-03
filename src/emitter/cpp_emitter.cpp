@@ -1341,6 +1341,10 @@ std::string CppEmitter::translate_ir_function(const ir::Function& fn) const {
         }
         for (const auto& inst : bb->get_instructions()) {
             if (!inst) continue;
+            std::string line_dir = format_line(inst->get_span());
+            if (!line_dir.empty()) {
+                ss << line_dir;
+            }
             switch (inst->get_opcode()) {
             case ir::Opcode::Alloca: {
                 const auto* al = dynamic_cast<const ir::AllocaInst*>(inst.get());

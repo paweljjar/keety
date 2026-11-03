@@ -197,7 +197,7 @@ size_t PipelineReservePass::run_on_function(Function& fn) {
             }
 
             // Insert ReserveInst right after this method call
-            bb->insert_instruction(i + 1, std::make_unique<ReserveInst>(dest, capacity));
+            bb->insert_instruction(i + 1, std::make_unique<ReserveInst>(dest, capacity, inst->get_span()));
             ++count;
             ++i; // Advance past the newly inserted reserve instruction
         }

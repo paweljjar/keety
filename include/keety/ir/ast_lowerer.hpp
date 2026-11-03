@@ -67,11 +67,15 @@ public:
     void set_emitter(diag::DiagnosticEmitter* emitter) noexcept { emitter_ = emitter; }
     [[nodiscard]] diag::DiagnosticEmitter* get_emitter() const noexcept { return emitter_; }
 
+    [[nodiscard]] diag::SourceSpan get_current_span() const noexcept { return current_span_; }
+    void set_current_span(diag::SourceSpan span) noexcept { current_span_ = span; }
+
 private:
     diag::DiagnosticEmitter* emitter_{nullptr};
     Module* current_module_{nullptr};
     Function* current_fn_{nullptr};
     BasicBlock* current_bb_{nullptr};
+    diag::SourceSpan current_span_{};
 
     // Control flow stacks for break/continue
     std::vector<LoopContext> loop_stack_;

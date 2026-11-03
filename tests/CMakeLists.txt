@@ -65,6 +65,7 @@ add_executable(keety_unit_tests
     unit/test_cpp_emitter.cpp
     unit/test_line_directive_tracker.cpp
     unit/test_cpp_emitter_lines.cpp
+    unit/test_ir_span_preservation.cpp
     unit/test_toolchain_detector.cpp
     unit/test_toolchain_driver.cpp
     unit/test_cli_driver.cpp
