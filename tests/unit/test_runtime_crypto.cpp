@@ -400,4 +400,123 @@ TEST_CASE("keet::crypto AES-256-GCM NIST SP 800-38D AEAD", "[runtime][crypto]") 
     }
 }
 
+TEST_CASE("keet::crypto Code 128 barcode encoding and decoding", "[runtime][crypto]") {
+    SECTION("roundtrip encoding and decoding") {
+        const std::vector<std::string> test_strings = {
+            "HELLO",
+            "123456",
+            "Keet-2026",
+            "Standard Crypto Library",
+            "Test_#123@xyz!"
+        };
+
+        for (const auto& text : test_strings) {
+            std::string bitstream = keet::crypto::encodeCode128(text);
+            REQUIRE(!bitstream.empty());
+
+            std::string decoded = keet::crypto::decodeCode128(bitstream);
+            REQUIRE(decoded == text);
+        }
+    }
+
+    SECTION("SVG and ASCII visual renderers") {
+        std::string text = "KEET-BARCODE";
+        std::string svg = keet::crypto::encodeCode128Svg(text, 50, 2);
+        REQUIRE(svg.rfind("<svg", 0) == 0);
+        REQUIRE(svg.find("</svg>") != std::string::npos);
+        REQUIRE(svg.find("<rect") != std::string::npos);
+
+        std::string ascii = keet::crypto::encodeCode128Ascii(text);
+        REQUIRE(!ascii.empty());
+        REQUIRE(ascii.find("█") != std::string::npos);
+    }
+
+    SECTION("error handling") {
+        // Empty string
+        REQUIRE_THROWS_AS(keet::crypto::encodeCode128(""), keet::error);
+
+        // Non-ASCII or control characters not supported in Code 128-B
+        REQUIRE_THROWS_AS(keet::crypto::encodeCode128("Hello\tWorld"), keet::error);
+        REQUIRE_THROWS_AS(keet::crypto::encodeCode128("Hello\x80World"), keet::error);
+
+        // Bitstream decoding errors
+        REQUIRE_THROWS_AS(keet::crypto::decodeCode128(""), keet::error);
+        REQUIRE_THROWS_AS(keet::crypto::decodeCode128("00000000"), keet::error);
+        REQUIRE_THROWS_AS(keet::crypto::decodeCode128("1111"), keet::error);
+
+        // Corrupted checksum
+        std::string valid_bits = keet::crypto::encodeCode128("CORRUPT_ME");
+        // Flip a bit in the checksum symbol (just before stop symbol of 13 bits)
+        size_t checksum_bit_pos = valid_bits.rfind('1');
+        if (checksum_bit_pos >= 20) {
+            valid_bits[checksum_bit_pos - 15] = (valid_bits[checksum_bit_pos - 15] == '1') ? '0' : '1';
+            REQUIRE_THROWS_AS(keet::crypto::decodeCode128(valid_bits), keet::error);
+        }
+    }
+}
+
+TEST_CASE("keet::crypto QR Code ISO/IEC 18004 generation and decoding", "[runtime][crypto]") {
+    SECTION("roundtrip short text (Version 1)") {
+        std::string text = "HELLO";
+        auto qr = keet::crypto::generateQr(text);
+        REQUIRE(qr.version == 1);
+        REQUIRE(qr.size == 21);
+        REQUIRE(qr.matrix.size() == 21);
+        REQUIRE(qr.matrix[0].size() == 21);
+
+        // Top-left finder pattern outer ring checks
+        REQUIRE(qr.matrix[0][0] == true);
+        REQUIRE(qr.matrix[0][6] == true);
+        REQUIRE(qr.matrix[6][0] == true);
+        REQUIRE(qr.matrix[6][6] == true);
+
+        std::string decoded = keet::crypto::decodeQr(qr.matrix);
+        REQUIRE(decoded == text);
+    }
+
+    SECTION("roundtrip medium text requiring higher version (Version 2+)") {
+        std::string url = "https://keet-lang.org/docs/crypto";
+        auto qr = keet::crypto::generateQr(url);
+        REQUIRE(qr.version >= 2);
+        REQUIRE(qr.size == 17 + 4 * qr.version);
+
+        std::string decoded = keet::crypto::decodeQr(qr.matrix);
+        REQUIRE(decoded == url);
+    }
+
+    SECTION("roundtrip complex payload") {
+        std::string sentence = "The quick brown fox jumps over the lazy dog. 1234567890!";
+        auto qr = keet::crypto::generateQr(sentence);
+
+        std::string decoded = keet::crypto::decodeQr(qr.matrix);
+        REQUIRE(decoded == sentence);
+    }
+
+    SECTION("renderers SVG and ASCII") {
+        auto qr = keet::crypto::generateQr("keet");
+        std::string svg = qr.toSvg(4);
+        REQUIRE(svg.rfind("<svg", 0) == 0);
+        REQUIRE(svg.find("</svg>") != std::string::npos);
+        REQUIRE(svg.find("<rect") != std::string::npos);
+
+        std::string ascii = qr.toAscii(2);
+        REQUIRE(!ascii.empty());
+        REQUIRE((ascii.find("█") != std::string::npos || ascii.find("▀") != std::string::npos || ascii.find("▄") != std::string::npos));
+    }
+
+    SECTION("error handling") {
+        // Empty payload
+        REQUIRE_THROWS_AS(keet::crypto::generateQr(""), keet::error);
+
+        // Oversized payload (> 106 bytes for version 6-M)
+        std::string huge(200, 'x');
+        REQUIRE_THROWS_AS(keet::crypto::generateQr(huge), keet::error);
+
+        // Invalid matrix dimensions in decoder
+        std::vector<std::vector<keet::BoolByte>> small_matrix(10, std::vector<keet::BoolByte>(10, 0));
+        REQUIRE_THROWS_AS(keet::crypto::decodeQr(small_matrix), keet::error);
+    }
+}
+
+
 

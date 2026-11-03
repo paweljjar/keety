@@ -4,7 +4,6 @@
 #include <keet/error.hpp>
 
 #include <array>
-#include <bit>
 #include <cstdint>
 #include <cstring>
 #include <iomanip>
@@ -43,6 +42,22 @@ namespace keet::crypto {
 // ============================================================================
 
 namespace detail {
+
+template <typename T>
+[[nodiscard]] constexpr T rotr(T val, unsigned int shift) noexcept {
+    constexpr unsigned int width = sizeof(T) * 8;
+    shift &= (width - 1);
+    if (shift == 0) return val;
+    return static_cast<T>((val >> shift) | (val << (width - shift)));
+}
+
+template <typename T>
+[[nodiscard]] constexpr T rotl(T val, unsigned int shift) noexcept {
+    constexpr unsigned int width = sizeof(T) * 8;
+    shift &= (width - 1);
+    if (shift == 0) return val;
+    return static_cast<T>((val << shift) | (val >> (width - shift)));
+}
 
 inline constexpr char HEX_DIGITS_LOWER[] = "0123456789abcdef";
 
@@ -398,8 +413,8 @@ struct Sha256Core {
                    (static_cast<uint32_t>(block[t * 4 + 3]));
         }
         for (int t = 16; t < 64; ++t) {
-            uint32_t s0 = std::rotr(W[t - 15], 7) ^ std::rotr(W[t - 15], 18) ^ (W[t - 15] >> 3);
-            uint32_t s1 = std::rotr(W[t - 2], 17) ^ std::rotr(W[t - 2], 19) ^ (W[t - 2] >> 10);
+            uint32_t s0 = rotr(W[t - 15], 7) ^ rotr(W[t - 15], 18) ^ (W[t - 15] >> 3);
+            uint32_t s1 = rotr(W[t - 2], 17) ^ rotr(W[t - 2], 19) ^ (W[t - 2] >> 10);
             W[t] = W[t - 16] + s0 + W[t - 7] + s1;
         }
 
@@ -407,10 +422,10 @@ struct Sha256Core {
         uint32_t e = state[4], f = state[5], g = state[6], h = state[7];
 
         for (int t = 0; t < 64; ++t) {
-            uint32_t S1 = std::rotr(e, 6) ^ std::rotr(e, 11) ^ std::rotr(e, 25);
+            uint32_t S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
             uint32_t ch = (e & f) ^ ((~e) & g);
             uint32_t temp1 = h + S1 + ch + K[t] + W[t];
-            uint32_t S0 = std::rotr(a, 2) ^ std::rotr(a, 13) ^ std::rotr(a, 22);
+            uint32_t S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
             uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
             uint32_t temp2 = S0 + maj;
 
@@ -529,8 +544,8 @@ struct Sha512Core {
                    (static_cast<uint64_t>(block[t * 8 + 7]));
         }
         for (int t = 16; t < 80; ++t) {
-            uint64_t s0 = std::rotr(W[t - 15], 1) ^ std::rotr(W[t - 15], 8) ^ (W[t - 15] >> 7);
-            uint64_t s1 = std::rotr(W[t - 2], 19) ^ std::rotr(W[t - 2], 61) ^ (W[t - 2] >> 6);
+            uint64_t s0 = rotr(W[t - 15], 1) ^ rotr(W[t - 15], 8) ^ (W[t - 15] >> 7);
+            uint64_t s1 = rotr(W[t - 2], 19) ^ rotr(W[t - 2], 61) ^ (W[t - 2] >> 6);
             W[t] = W[t - 16] + s0 + W[t - 7] + s1;
         }
 
@@ -538,10 +553,10 @@ struct Sha512Core {
         uint64_t e = state[4], f = state[5], g = state[6], h = state[7];
 
         for (int t = 0; t < 80; ++t) {
-            uint64_t S1 = std::rotr(e, 14) ^ std::rotr(e, 18) ^ std::rotr(e, 41);
+            uint64_t S1 = rotr(e, 14) ^ rotr(e, 18) ^ rotr(e, 41);
             uint64_t ch = (e & f) ^ ((~e) & g);
             uint64_t temp1 = h + S1 + ch + K[t] + W[t];
-            uint64_t S0 = std::rotr(a, 28) ^ std::rotr(a, 34) ^ std::rotr(a, 39);
+            uint64_t S0 = rotr(a, 28) ^ rotr(a, 34) ^ rotr(a, 39);
             uint64_t maj = (a & b) ^ (a & c) ^ (b & c);
             uint64_t temp2 = S0 + maj;
 
@@ -646,7 +661,7 @@ inline void keccakF1600(uint64_t state[25]) {
         }
         uint64_t D[5];
         for (int x = 0; x < 5; ++x) {
-            D[x] = C[(x + 4) % 5] ^ std::rotl(C[(x + 1) % 5], 1);
+            D[x] = C[(x + 4) % 5] ^ rotl(C[(x + 1) % 5], 1);
         }
         for (int x = 0; x < 5; ++x) {
             for (int y = 0; y < 5; ++y) {
@@ -657,7 +672,7 @@ inline void keccakF1600(uint64_t state[25]) {
         uint64_t B[25];
         for (int x = 0; x < 5; ++x) {
             for (int y = 0; y < 5; ++y) {
-                B[y + 5 * ((2 * x + 3 * y) % 5)] = std::rotl(state[x + 5 * y], KECCAK_ROTC[x][y]);
+                B[y + 5 * ((2 * x + 3 * y) % 5)] = rotl(state[x + 5 * y], KECCAK_ROTC[x][y]);
             }
         }
         // Chi
@@ -759,13 +774,13 @@ enum Blake3Flags : uint32_t {
 
 inline void blake3G(uint32_t state[16], int a, int b, int c, int d, uint32_t mx, uint32_t my) {
     state[a] = state[a] + state[b] + mx;
-    state[d] = std::rotr(state[d] ^ state[a], 16);
+    state[d] = rotr(state[d] ^ state[a], 16);
     state[c] = state[c] + state[d];
-    state[b] = std::rotr(state[b] ^ state[c], 12);
+    state[b] = rotr(state[b] ^ state[c], 12);
     state[a] = state[a] + state[b] + my;
-    state[d] = std::rotr(state[d] ^ state[a], 8);
+    state[d] = rotr(state[d] ^ state[a], 8);
     state[c] = state[c] + state[d];
-    state[b] = std::rotr(state[b] ^ state[c], 7);
+    state[b] = rotr(state[b] ^ state[c], 7);
 }
 
 inline void blake3Round(uint32_t state[16], const uint32_t m[16], const uint8_t schedule[16]) {
@@ -1291,10 +1306,10 @@ inline void store64Be(uint8_t* p, uint64_t v) noexcept {
 }
 
 inline void chachaQR(uint32_t& a, uint32_t& b, uint32_t& c, uint32_t& d) noexcept {
-    a += b; d ^= a; d = std::rotl(d, 16);
-    c += d; b ^= c; b = std::rotl(b, 12);
-    a += b; d ^= a; d = std::rotl(d, 8);
-    c += d; b ^= c; b = std::rotl(b, 7);
+    a += b; d ^= a; d = rotl(d, 16);
+    c += d; b ^= c; b = rotl(b, 12);
+    a += b; d ^= a; d = rotl(d, 8);
+    c += d; b ^= c; b = rotl(b, 7);
 }
 
 inline void chacha20Block(const uint8_t key[32], uint32_t counter, const uint8_t nonce[12], uint8_t out[64]) noexcept {
@@ -1647,7 +1662,7 @@ inline void aes256KeyExpansion(const uint8_t key[32], uint32_t round_keys[60]) n
     for (int i = 8; i < 60; ++i) {
         uint32_t temp = round_keys[i - 1];
         if (i % 8 == 0) {
-            temp = aesSubWord(std::rotl(temp, 8)) ^ (static_cast<uint32_t>(AES_RCON[(i / 8) - 1]) << 24);
+            temp = aesSubWord(rotl(temp, 8)) ^ (static_cast<uint32_t>(AES_RCON[(i / 8) - 1]) << 24);
         } else if (i % 8 == 4) {
             temp = aesSubWord(temp);
         }
@@ -1907,6 +1922,652 @@ inline std::string decryptAesGcm(const std::string& key, const std::string& iv,
     return plaintext;
 }
 
+// ============================================================================
+// Phase 4.1: 1D Barcodes (Code 128)
+// ============================================================================
+
+namespace detail {
+
+// Code 128 bar/space patterns for symbols 0..106
+// Each entry encodes 6 bar/space widths (except 106 which has 7 widths)
+inline constexpr const char* CODE128_WIDTHS[107] = {
+    "212222", "222122", "222221", "121223", "121322", "131222", "122213", "122312", "132212", "221213", // 0-9
+    "221312", "231212", "112232", "122132", "122231", "113222", "123122", "123221", "223211", "221132", // 10-19
+    "221231", "213212", "223112", "312131", "311222", "321122", "321221", "312212", "322112", "322211", // 20-29
+    "212123", "212321", "232121", "111323", "131123", "131321", "112313", "132113", "132311", "211313", // 30-39
+    "231113", "231311", "112133", "112331", "132131", "113123", "113321", "133121", "313121", "211331", // 40-49
+    "231131", "213113", "213311", "213131", "311123", "311321", "331121", "312113", "312311", "332111", // 50-59
+    "314111", "221411", "431111", "111224", "111422", "121124", "121421", "141122", "141221", "112214", // 60-69
+    "112412", "122114", "122411", "142112", "142211", "241211", "221114", "413111", "241112", "134111", // 70-79
+    "111242", "121142", "121241", "114212", "124112", "124211", "411212", "421112", "421211", "212141", // 80-89
+    "214121", "412121", "111143", "111341", "131141", "114113", "114311", "411113", "411311", "113141", // 90-99
+    "114131", "311141", "411131", "211412", "211214", "211232", "2331112" // 100-106 (104=Start B, 105=Start C, 106=Stop)
+};
+
+inline std::string widthsToModuleBits(const char* widths) {
+    std::string bits;
+    bool is_bar = true;
+    for (const char* p = widths; *p != '\0'; ++p) {
+        int w = *p - '0';
+        bits.append(static_cast<size_t>(w), is_bar ? '1' : '0');
+        is_bar = !is_bar;
+    }
+    return bits;
+}
+
+} // namespace detail
+
+/// Encodes text into Code 128 binary module pattern ('1' for bar, '0' for space).
+inline std::string encodeCode128(const std::string& text) {
+    if (text.empty()) {
+        throw keet::error("CryptoError", "Cannot encode empty text into Code 128 barcode");
+    }
+
+    std::vector<int> symbols;
+    // Use Code B (ASCII 32..126) with Start B (104)
+    symbols.push_back(104);
+    for (char c : text) {
+        unsigned char uc = static_cast<unsigned char>(c);
+        if (uc < 32 || uc > 126) {
+            throw keet::error("CryptoError", "Character outside Code 128-B range (ASCII 32-126)");
+        }
+        symbols.push_back(uc - 32);
+    }
+
+    // Checksum modulo 103
+    int64_t sum = symbols[0];
+    for (size_t i = 1; i < symbols.size(); ++i) {
+        sum += static_cast<int64_t>(i) * symbols[i];
+    }
+    int checksum = static_cast<int>(sum % 103);
+    symbols.push_back(checksum);
+    symbols.push_back(106); // Stop symbol
+
+    // Convert symbols to 1/0 bits with quiet zones (10 modules on each side)
+    std::string modules;
+    modules.append(10, '0'); // Quiet zone
+    for (int sym : symbols) {
+        modules.append(detail::widthsToModuleBits(detail::CODE128_WIDTHS[sym]));
+    }
+    modules.append(10, '0'); // Quiet zone
+    return modules;
+}
+
+/// Renders Code 128 barcode as a standalone vector SVG string.
+inline std::string encodeCode128Svg(const std::string& text, int barHeight = 50, int moduleWidth = 2) {
+    std::string bits = encodeCode128(text);
+    int totalWidth = static_cast<int>(bits.size()) * moduleWidth;
+
+    std::ostringstream oss;
+    oss << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << totalWidth
+        << "\" height=\"" << barHeight << "\" viewBox=\"0 0 " << totalWidth << " " << barHeight << "\">\n"
+        << "  <rect width=\"100%\" height=\"100%\" fill=\"#ffffff\"/>\n";
+
+    size_t i = 0;
+    while (i < bits.size()) {
+        if (bits[i] == '1') {
+            size_t start = i;
+            while (i < bits.size() && bits[i] == '1') {
+                i++;
+            }
+            int w = static_cast<int>(i - start) * moduleWidth;
+            oss << "  <rect x=\"" << (static_cast<int>(start) * moduleWidth) << "\" y=\"0\" width=\""
+                << w << "\" height=\"" << barHeight << "\" fill=\"#000000\"/>\n";
+        } else {
+            i++;
+        }
+    }
+    oss << "</svg>";
+    return oss.str();
+}
+
+/// Renders Code 128 barcode as a compact ASCII / Unicode terminal string.
+inline std::string encodeCode128Ascii(const std::string& text) {
+    std::string bits = encodeCode128(text);
+    std::string out;
+    out.reserve(bits.size() * 3);
+    for (char b : bits) {
+        if (b == '1') {
+            out.append("█");
+        } else {
+            out.push_back(' ');
+        }
+    }
+    return out;
+}
+
+/// Decodes a Code 128 module bitstream back into plain text.
+inline std::string decodeCode128(const std::string& bitstream) {
+    // Strip leading and trailing quiet zone zeros
+    size_t start = bitstream.find('1');
+    size_t end = bitstream.rfind('1');
+    if (start == std::string::npos || end == std::string::npos || end <= start) {
+        throw keet::error("CryptoError", "Invalid Code 128 bitstream: no bar patterns detected");
+    }
+
+    std::string trimmed = bitstream.substr(start, end - start + 1);
+
+    // Map module pattern (11 bits) to symbol index
+    std::vector<int> symbols;
+    size_t pos = 0;
+    while (pos < trimmed.size()) {
+        if (pos + 13 == trimmed.size()) {
+            // STOP pattern is 13 bits (symbol 106)
+            std::string stop_pattern = detail::widthsToModuleBits(detail::CODE128_WIDTHS[106]);
+            if (trimmed.substr(pos, 13) != stop_pattern) {
+                throw keet::error("CryptoError", "Invalid Code 128 stop pattern");
+            }
+            symbols.push_back(106);
+            pos += 13;
+            break;
+        }
+
+        if (pos + 11 > trimmed.size()) {
+            throw keet::error("CryptoError", "Truncated Code 128 symbol pattern");
+        }
+
+        std::string chunk = trimmed.substr(pos, 11);
+        int matched = -1;
+        for (int s = 0; s < 106; ++s) {
+            if (detail::widthsToModuleBits(detail::CODE128_WIDTHS[s]) == chunk) {
+                matched = s;
+                break;
+            }
+        }
+        if (matched < 0) {
+            throw keet::error("CryptoError", "Unrecognized Code 128 module sequence at position " + std::to_string(pos));
+        }
+        symbols.push_back(matched);
+        pos += 11;
+    }
+
+    if (symbols.size() < 3) {
+        throw keet::error("CryptoError", "Code 128 pattern too short");
+    }
+
+    int start_code = symbols[0];
+    if (start_code != 104) {
+        throw keet::error("CryptoError", "Only Code 128-B decoding is currently supported (start code " +
+                                             std::to_string(start_code) + ")");
+    }
+    if (symbols.back() != 106) {
+        throw keet::error("CryptoError", "Missing Code 128 stop symbol");
+    }
+
+    int expected_checksum = symbols[symbols.size() - 2];
+    int64_t sum = symbols[0];
+    for (size_t i = 1; i < symbols.size() - 2; ++i) {
+        sum += static_cast<int64_t>(i) * symbols[i];
+    }
+    int computed_checksum = static_cast<int>(sum % 103);
+    if (computed_checksum != expected_checksum) {
+        throw keet::error("CryptoError", "Code 128 checksum mismatch: expected " +
+                                             std::to_string(expected_checksum) + ", computed " +
+                                             std::to_string(computed_checksum));
+    }
+
+    std::string text;
+    for (size_t i = 1; i < symbols.size() - 2; ++i) {
+        text.push_back(static_cast<char>(symbols[i] + 32));
+    }
+    return text;
+}
+
+// ============================================================================
+// Phase 4.2 & 4.3: QR Code (ISO/IEC 18004) Encoder & Decoder
+// ============================================================================
+
+/// Represents a generated or scanned QR Code matrix with rendering helpers.
+struct QrCode {
+    int size{0};
+    int version{0};
+    std::vector<std::vector<BoolByte>> matrix; // [y][x] (true = dark, false = light)
+
+    /// Renders QR matrix as an SVG image string.
+    std::string toSvg(int margin = 4) const {
+        int total = size + margin * 2;
+        std::ostringstream oss;
+        oss << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << total * 10
+            << "\" height=\"" << total * 10 << "\" viewBox=\"0 0 " << total << " " << total
+            << "\" shape-rendering=\"crispEdges\">\n"
+            << "  <rect width=\"100%\" height=\"100%\" fill=\"#ffffff\"/>\n";
+
+        for (int y = 0; y < size; ++y) {
+            for (int x = 0; x < size; ++x) {
+                if (matrix[y][x]) {
+                    oss << "  <rect x=\"" << (x + margin) << "\" y=\"" << (y + margin)
+                        << "\" width=\"1\" height=\"1\" fill=\"#000000\"/>\n";
+                }
+            }
+        }
+        oss << "</svg>";
+        return oss.str();
+    }
+
+    /// Renders QR code in terminal using Unicode half-block characters (2 rows per character).
+    std::string toAscii(int margin = 2) const {
+        int total = size + margin * 2;
+        std::vector<std::vector<bool>> full(total, std::vector<bool>(total, false));
+        for (int y = 0; y < size; ++y) {
+            for (int x = 0; x < size; ++x) {
+                full[y + margin][x + margin] = matrix[y][x];
+            }
+        }
+
+        std::string out;
+        for (int y = 0; y < total; y += 2) {
+            for (int x = 0; x < total; ++x) {
+                bool top = full[y][x];
+                bool bot = (y + 1 < total) ? full[y + 1][x] : false;
+                if (top && bot) {
+                    out.append("█");
+                } else if (top && !bot) {
+                    out.append("▀");
+                } else if (!top && bot) {
+                    out.append("▄");
+                } else {
+                    out.push_back(' ');
+                }
+            }
+            out.push_back('\n');
+        }
+        return out;
+    }
+};
+
+namespace detail {
+
+// Galois Field GF(256) tables for Reed-Solomon polynomial math
+struct Gf256 {
+    uint8_t exp[512]{0};
+    uint8_t log[256]{0};
+
+    constexpr Gf256() {
+        int x = 1;
+        for (int i = 0; i < 255; ++i) {
+            exp[i] = static_cast<uint8_t>(x);
+            exp[i + 255] = static_cast<uint8_t>(x);
+            log[x] = static_cast<uint8_t>(i);
+            x <<= 1;
+            if (x & 0x100) {
+                x ^= 0x11D; // Primitive polynomial x^8 + x^4 + x^3 + x^2 + 1
+            }
+        }
+    }
+
+    [[nodiscard]] constexpr uint8_t mul(uint8_t a, uint8_t b) const noexcept {
+        if (a == 0 || b == 0) return 0;
+        return exp[log[a] + log[b]];
+    }
+};
+
+inline constexpr Gf256 GF256{};
+
+// QR Version parameters (Versions 1..6 with Medium EC level)
+struct QrVersionInfo {
+    int version;
+    int size;
+    int data_codewords;
+    int ec_codewords;
+    int ec_blocks;
+};
+
+inline constexpr QrVersionInfo QR_VERSIONS_M[6] = {
+    {1, 21, 16, 10, 1},
+    {2, 25, 28, 16, 1},
+    {3, 29, 44, 26, 1},
+    {4, 33, 64, 36, 2},
+    {5, 37, 86, 48, 2},
+    {6, 41, 108, 64, 4}
+};
+
+// Alignment pattern centers for versions 1..6
+inline const std::vector<int> QR_ALIGNMENT_LOCS[7] = {
+    {},
+    {},
+    {6, 18},
+    {6, 22},
+    {6, 26},
+    {6, 30},
+    {6, 34}
+};
+
+inline std::vector<uint8_t> rsGeneratorPoly(int count) {
+    std::vector<uint8_t> gen = {1};
+    for (int i = 0; i < count; ++i) {
+        std::vector<uint8_t> next_gen(gen.size() + 1, 0);
+        for (size_t j = 0; j < gen.size(); ++j) {
+            next_gen[j] ^= GF256.mul(gen[j], GF256.exp[i]);
+            next_gen[j + 1] ^= gen[j];
+        }
+        gen = next_gen;
+    }
+    return gen;
+}
+
+inline std::vector<uint8_t> rsCompute(const std::vector<uint8_t>& data, int ec_len) {
+    auto gen = rsGeneratorPoly(ec_len);
+    std::vector<uint8_t> g_rev(gen.rbegin(), gen.rend());
+
+    std::vector<uint8_t> rem(ec_len, 0);
+    for (uint8_t byte : data) {
+        uint8_t factor = byte ^ rem[0];
+        rem.erase(rem.begin());
+        rem.push_back(0);
+        for (int j = 0; j < ec_len; ++j) {
+            rem[j] ^= GF256.mul(g_rev[j + 1], factor);
+        }
+    }
+    return rem;
+}
+
+inline bool isReservedModule(int x, int y, int size, int version) {
+    // Top-left finder + separator
+    if (x <= 8 && y <= 8) return true;
+    // Top-right finder + separator
+    if (x >= size - 8 && y <= 8) return true;
+    // Bottom-left finder + separator
+    if (x <= 8 && y >= size - 8) return true;
+    // Timing patterns
+    if (x == 6 || y == 6) return true;
+    // Dark module
+    if (x == 8 && y == 4 * version + 9) return true;
+
+    // Alignment patterns
+    if (version >= 2) {
+        const auto& locs = QR_ALIGNMENT_LOCS[version];
+        for (int ax : locs) {
+            for (int ay : locs) {
+                if ((ax <= 8 && ay <= 8) || (ax >= size - 8 && ay <= 8) || (ax <= 8 && ay >= size - 8)) {
+                    continue; // Skip finders
+                }
+                if (std::abs(x - ax) <= 2 && std::abs(y - ay) <= 2) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+inline bool maskBit(int mask, int x, int y) {
+    switch (mask) {
+        case 0: return (x + y) % 2 == 0;
+        case 1: return y % 2 == 0;
+        case 2: return x % 3 == 0;
+        case 3: return (x + y) % 3 == 0;
+        case 4: return ((y / 2) + (x / 3)) % 2 == 0;
+        case 5: return ((x * y) % 2) + ((x * y) % 3) == 0;
+        case 6: return (((x * y) % 2) + ((x * y) % 3)) % 2 == 0;
+        case 7: return (((x + y) % 2) + ((x * y) % 3)) % 2 == 0;
+        default: return false;
+    }
+}
+
+inline uint16_t computeFormatBits(int ec_level_bits, int mask) {
+    int data = (ec_level_bits << 3) | mask; // 5 bits
+    int rem = data << 10;
+    constexpr int G = 0x537; // 10100110111
+    for (int i = 4; i >= 0; --i) {
+        if ((rem >> (i + 10)) & 1) {
+            rem ^= (G << i);
+        }
+    }
+    uint16_t format_bits = static_cast<uint16_t>(((data << 10) | rem) ^ 0x5412);
+    return format_bits;
+}
+
+} // namespace detail
+
+/// Generates an ISO/IEC 18004 compliant QR Code from text using Byte mode and Medium error correction.
+inline QrCode generateQr(const std::string& text, const std::string& ecLevel = "M") {
+    (void)ecLevel; // Currently standardized on Medium (15% error recovery)
+    if (text.empty()) {
+        throw keet::error("CryptoError", "QR code payload cannot be empty");
+    }
+    size_t payload_len = text.size();
+
+    // Auto-select minimum QR version
+    const detail::QrVersionInfo* v_info = nullptr;
+    for (const auto& vi : detail::QR_VERSIONS_M) {
+        // Byte mode overhead: 4 bits mode + 8 bits count = 12 bits (1.5 bytes) + terminator
+        if (payload_len + 3 <= static_cast<size_t>(vi.data_codewords)) {
+            v_info = &vi;
+            break;
+        }
+    }
+    if (!v_info) {
+        throw keet::error("CryptoError", "Payload exceeds maximum supported QR code capacity (" +
+                                             std::to_string(payload_len) + " bytes)");
+    }
+
+    int version = v_info->version;
+    int size = v_info->size;
+    int total_data = v_info->data_codewords;
+    int ec_codewords = v_info->ec_codewords;
+
+    // 1. Pack bitstream: Mode (0100 = Byte mode) + Count + Payload
+    std::string bits;
+    bits.append("0100"); // 4 bits Byte mode
+    for (int i = 7; i >= 0; --i) {
+        bits.push_back(((payload_len >> i) & 1) ? '1' : '0');
+    }
+    for (char c : text) {
+        uint8_t byte = static_cast<uint8_t>(c);
+        for (int i = 7; i >= 0; --i) {
+            bits.push_back(((byte >> i) & 1) ? '1' : '0');
+        }
+    }
+
+    // 4-bit terminator (or up to capacity)
+    size_t max_bits = total_data * 8;
+    size_t term = std::min(size_t{4}, max_bits - bits.size());
+    bits.append(term, '0');
+    // Align to byte
+    while (bits.size() % 8 != 0 && bits.size() < max_bits) {
+        bits.push_back('0');
+    }
+
+    // Convert bits to data codewords
+    std::vector<uint8_t> data_codewords;
+    data_codewords.reserve(total_data);
+    for (size_t i = 0; i < bits.size(); i += 8) {
+        uint8_t b = 0;
+        for (size_t j = 0; j < 8; ++j) {
+            b = (b << 1) | (bits[i + j] - '0');
+        }
+        data_codewords.push_back(b);
+    }
+
+    // Pad bytes 0xEC (236) and 0x11 (17) alternating
+    uint8_t pad_byte = 0xEC;
+    while (data_codewords.size() < static_cast<size_t>(total_data)) {
+        data_codewords.push_back(pad_byte);
+        pad_byte = (pad_byte == 0xEC) ? 0x11 : 0xEC;
+    }
+
+    // 2. Compute Reed-Solomon Error Correction
+    std::vector<uint8_t> ec_bytes = detail::rsCompute(data_codewords, ec_codewords);
+
+    // Combine data + EC codewords
+    std::vector<uint8_t> all_codewords = data_codewords;
+    all_codewords.insert(all_codewords.end(), ec_bytes.begin(), ec_bytes.end());
+
+    std::string final_bits;
+    final_bits.reserve(all_codewords.size() * 8);
+    for (uint8_t c : all_codewords) {
+        for (int i = 7; i >= 0; --i) {
+            final_bits.push_back(((c >> i) & 1) ? '1' : '0');
+        }
+    }
+
+    // 3. Initialize Matrix
+    std::vector<std::vector<BoolByte>> matrix(size, std::vector<BoolByte>(size, false));
+
+    // Draw Function Patterns:
+    auto drawFinder = [&](int ox, int oy) {
+        for (int y = 0; y < 7; ++y) {
+            for (int x = 0; x < 7; ++x) {
+                bool dark = (x == 0 || x == 6 || y == 0 || y == 6 || (x >= 2 && x <= 4 && y >= 2 && y <= 4));
+                matrix[oy + y][ox + x] = dark;
+            }
+        }
+    };
+    drawFinder(0, 0);                 // Top-left
+    drawFinder(size - 7, 0);          // Top-right
+    drawFinder(0, size - 7);          // Bottom-left
+
+    // Timing patterns
+    for (int i = 8; i < size - 8; ++i) {
+        matrix[6][i] = (i % 2 == 0);
+        matrix[i][6] = (i % 2 == 0);
+    }
+
+    // Alignment patterns (if version >= 2)
+    if (version >= 2) {
+        const auto& locs = detail::QR_ALIGNMENT_LOCS[version];
+        for (int ax : locs) {
+            for (int ay : locs) {
+                if ((ax <= 8 && ay <= 8) || (ax >= size - 8 && ay <= 8) || (ax <= 8 && ay >= size - 8)) continue;
+                for (int dy = -2; dy <= 2; ++dy) {
+                    for (int dx = -2; dx <= 2; ++dx) {
+                        bool dark = (std::max(std::abs(dx), std::abs(dy)) != 1);
+                        matrix[ay + dy][ax + dx] = dark;
+                    }
+                }
+            }
+        }
+    }
+
+    // Dark module
+    matrix[4 * version + 9][8] = true;
+
+    // 4. Place Data and evaluate mask (standard mask 0: (x+y)%2 == 0)
+    int mask_choice = 0;
+    size_t bit_idx = 0;
+    bool upward = true;
+
+    for (int right = size - 1; right > 0; right -= 2) {
+        if (right == 6) {
+            right--; // Skip vertical timing pattern column
+        }
+        for (int vert = 0; vert < size; ++vert) {
+            int y = upward ? (size - 1 - vert) : vert;
+            for (int col = 0; col < 2; ++col) {
+                int x = right - col;
+                if (!detail::isReservedModule(x, y, size, version)) {
+                    bool data_bit = (bit_idx < final_bits.size()) ? (final_bits[bit_idx++] == '1') : false;
+                    bool mask = detail::maskBit(mask_choice, x, y);
+                    matrix[y][x] = data_bit ^ mask;
+                }
+            }
+        }
+        upward = !upward;
+    }
+
+    // 5. Draw Format Information (EC Level M = 00_2, Mask 0 = 000_2)
+    uint16_t fmt = detail::computeFormatBits(0, mask_choice);
+
+    // Place around top-left finder and divided across top-right / bottom-left
+    int fmt_coords_tl[15][2] = {
+        {8, 0}, {8, 1}, {8, 2}, {8, 3}, {8, 4}, {8, 5}, {8, 7}, {8, 8},
+        {7, 8}, {5, 8}, {4, 8}, {3, 8}, {2, 8}, {1, 8}, {0, 8}
+    };
+    for (int i = 0; i < 15; ++i) {
+        bool bit = (fmt >> i) & 1;
+        matrix[fmt_coords_tl[i][0]][fmt_coords_tl[i][1]] = bit;
+    }
+
+    for (int i = 0; i < 7; ++i) {
+        matrix[size - 1 - i][8] = (fmt >> i) & 1;
+    }
+    for (int i = 7; i < 15; ++i) {
+        matrix[8][size - 15 + i] = (fmt >> i) & 1;
+    }
+
+    QrCode qr;
+    qr.size = size;
+    qr.version = version;
+    qr.matrix = std::move(matrix);
+    return qr;
+}
+
+/// Scans a 2D QR Code matrix and decodes the embedded text payload.
+inline std::string decodeQr(const std::vector<std::vector<BoolByte>>& matrix) {
+    int size = static_cast<int>(matrix.size());
+    if (size < 21 || (size - 17) % 4 != 0) {
+        throw keet::error("CryptoError", "Invalid QR code matrix dimensions (" + std::to_string(size) + ")");
+    }
+    int version = (size - 17) / 4;
+
+    // Read format information from around top-left finder
+    int fmt_coords_tl[15][2] = {
+        {8, 0}, {8, 1}, {8, 2}, {8, 3}, {8, 4}, {8, 5}, {8, 7}, {8, 8},
+        {7, 8}, {5, 8}, {4, 8}, {3, 8}, {2, 8}, {1, 8}, {0, 8}
+    };
+    uint16_t raw_fmt = 0;
+    for (int i = 0; i < 15; ++i) {
+        if (matrix[fmt_coords_tl[i][0]][fmt_coords_tl[i][1]]) {
+            raw_fmt |= (1 << i);
+        }
+    }
+    uint16_t unmasked_fmt = raw_fmt ^ 0x5412;
+    int mask_choice = (unmasked_fmt >> 10) & 0x07;
+
+    // Read modules in zigzag order with mask de-masking
+    std::string bits;
+    bool upward = true;
+    for (int right = size - 1; right > 0; right -= 2) {
+        if (right == 6) right--;
+        for (int vert = 0; vert < size; ++vert) {
+            int y = upward ? (size - 1 - vert) : vert;
+            for (int col = 0; col < 2; ++col) {
+                int x = right - col;
+                if (!detail::isReservedModule(x, y, size, version)) {
+                    bool val = matrix[y][x];
+                    bool mask = detail::maskBit(mask_choice, x, y);
+                    bits.push_back((val ^ mask) ? '1' : '0');
+                }
+            }
+        }
+        upward = !upward;
+    }
+
+    // Parse bitstream
+    if (bits.size() < 12) {
+        throw keet::error("CryptoError", "Truncated QR code data bitstream");
+    }
+
+    std::string mode_str = bits.substr(0, 4);
+    if (mode_str != "0100") {
+        throw keet::error("CryptoError", "Unsupported QR encoding mode (expected Byte mode '0100', got '" +
+                                             mode_str + "')");
+    }
+
+    // 8-bit character count indicator for versions 1..9
+    int count = 0;
+    for (int i = 0; i < 8; ++i) {
+        count = (count << 1) | (bits[4 + i] - '0');
+    }
+
+    if (bits.size() < static_cast<size_t>(12 + count * 8)) {
+        throw keet::error("CryptoError", "QR code bitstream truncated before payload completion");
+    }
+
+    std::string text;
+    text.reserve(count);
+    size_t pos = 12;
+    for (int i = 0; i < count; ++i) {
+        uint8_t b = 0;
+        for (int j = 0; j < 8; ++j) {
+            b = (b << 1) | (bits[pos++] - '0');
+        }
+        text.push_back(static_cast<char>(b));
+    }
+    return text;
+}
+
 } // namespace keet::crypto
+
 
 

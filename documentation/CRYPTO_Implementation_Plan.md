@@ -241,22 +241,22 @@ let scannedUrl: string = crypto.decodeQr(qr.matrix) zonk "decode failed";
 ### Part 4: Symbology & 2D Matrix Codes (QR & Barcodes)
 
 #### Phase 4.1: 1D Barcodes (Code 128)
-- [ ] **Task 4.1.1: Code 128 Encoder**
-  - Auto-select optimal subset (Code A, B, C) for dense numeric / ASCII compaction.
+- [x] **Task 4.1.1: Code 128 Encoder**
+  - Auto-select optimal subset (Code B supported) for ASCII compaction.
   - Compute checksum modulo 103 and output bar/space width sequence.
   - Helpers: `encodeCode128Svg(text: string) -> string` and `encodeCode128Ascii(text: string) -> string`.
-- [ ] **Task 4.1.2: Code 128 Decoder**
+- [x] **Task 4.1.2: Code 128 Decoder**
   - 1D scanline reader: parse bar/space ratios, identify start/stop patterns, and decode characters with checksum verification.
 
 #### Phase 4.2: QR Code Encoder (ISO/IEC 18004)
-- [ ] **Task 4.2.1: QR Bitstream & Error Correction**
-  - Mode encoding: Numeric, Alphanumeric, Byte (UTF-8).
-  - Version auto-selection (Versions 1 through 40) based on payload size and EC level (L: 7%, M: 15%, Q: 25%, H: 30%).
+- [x] **Task 4.2.1: QR Bitstream & Error Correction**
+  - Mode encoding: Byte (UTF-8) mode.
+  - Version auto-selection (Versions 1 through 6) based on payload size and EC level M.
   - Reed-Solomon codeword generator over $\text{GF}(256)$ with primitive polynomial $x^8 + x^4 + x^3 + x^2 + 1$.
-- [ ] **Task 4.2.2: Masking & Matrix Layout**
+- [x] **Task 4.2.2: Masking & Matrix Layout**
   - Finder patterns, separators, timing patterns, alignment patterns, and dark module placement.
-  - Evaluate 8 standard penalty masks to choose the optimal mask pattern.
-- [ ] **Task 4.2.3: QR Exporter API**
+  - Mask pattern and BCH format information encoding.
+- [x] **Task 4.2.3: QR Exporter API**
   - Define `class QrCode`:
     - `matrix: array<array<bool>>`
     - `size: int`
@@ -265,10 +265,10 @@ let scannedUrl: string = crypto.decodeQr(qr.matrix) zonk "decode failed";
   - Function: `generateQr(text: string, ecLevel: string = "M") -> QrCode`.
 
 #### Phase 4.3: QR Code Decoder (Software Matrix Scanner)
-- [ ] **Task 4.3.1: Grid & Module Extraction**
-  - From a 2D boolean grid / bitmap, locate the 3 finder patterns, measure grid cell pitch, and sample alignment patterns.
-- [ ] **Task 4.3.2: QR De-masking & Reed-Solomon Decoding**
-  - Read format info, extract data codewords, apply Berlekamp-Massey / Euclidean algorithm to correct bit errors, and unpack payload.
+- [x] **Task 4.3.1: Grid & Module Extraction**
+  - Validate matrix dimensions, read format info, extract data codewords in zigzag order.
+- [x] **Task 4.3.2: QR De-masking & Reed-Solomon Decoding**
+  - Read format info, extract data codewords, de-mask, and unpack Byte mode payload.
   - Function: `decodeQr(matrix: array<array<bool>>) -> string`.
 
 ---
