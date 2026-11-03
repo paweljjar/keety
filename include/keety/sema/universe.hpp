@@ -62,4 +62,7 @@ void populateJsonModuleScope(Scope& jsonScope);
 /// Populates an existing Scope with all exported symbols of the 'net' standard library module.
 void populateNetModuleScope(Scope& netScope);
 
+/// Populates an existing Scope with all exported symbols of the 'test' standard library module.
+void populateTestModuleScope(Scope& testScope);
+
 } // namespace keety::sema

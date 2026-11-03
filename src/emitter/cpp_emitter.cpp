@@ -224,6 +224,15 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                 for (const auto& s : imp->getSymbols()) {
                     imported_net_symbols_.insert(s.getEffectiveName());
                 }
+            } else if (p == "test" || p == "std.test" || p == "keet.test") {
+                has_test_import_ = true;
+                add_standard_header("<keet/runtime.hpp>");
+                if (!imp->getModuleAlias().empty()) {
+                    test_aliases_.insert(imp->getModuleAlias());
+                }
+                for (const auto& s : imp->getSymbols()) {
+                    imported_test_symbols_.insert(s.getEffectiveName());
+                }
             } else {
                 std::string mod_id = !imp->getModuleAlias().empty() ? imp->getModuleAlias() : p;
                 if (mod_id.find('/') != std::string::npos || mod_id.find('\\') != std::string::npos) {
@@ -498,6 +507,12 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             if (obj_id->getName() == "net" || net_aliases_.count(obj_id->getName())) {
                 return "::keet::net::" + mem->getMemberName();
             }
+            if (obj_id->getName() == "test" || test_aliases_.count(obj_id->getName())) {
+                std::string m = mem->getMemberName();
+                if (m == "case") return "::keet_module_test::_keet_case";
+                if (m == "suite") return "::keet_module_test::_keet_suite";
+                return "::keet_module_test::" + m;
+            }
         }
         if (const auto* obj_mem = dynamic_cast<const ast::MemberExpr*>(mem->getObject())) {
             if (const auto* root_id = dynamic_cast<const ast::IdentExpr*>(obj_mem->getObject())) {
@@ -595,6 +610,11 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             }
             if (obj_s == "net" || net_aliases_.count(obj_s)) {
                 return "::keet::net::" + m_name + "(" + args_str + ")";
+            }
+            if (obj_s == "test" || test_aliases_.count(obj_s)) {
+                if (m_name == "case") return "::keet_module_test::_keet_case(" + args_str + ")";
+                if (m_name == "suite") return "::keet_module_test::_keet_suite(" + args_str + ")";
+                return "::keet_module_test::" + m_name + "(" + args_str + ")";
             }
             // Container member mapping
             if (m_name == "push") {
@@ -746,6 +766,14 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
                 name == "udpBind" || name == "udpLocalPort" || name == "udpSendTo" || name == "udpRecvFrom" ||
                 name == "udpClose")) {
                 return "::keet::net::" + name + "(" + args_str + ")";
+            }
+            if (has_test_import_ && (imported_test_symbols_.count(name) ||
+                name == "case" || name == "suite" || name == "assertEq" || name == "assertNe" ||
+                name == "assertTrue" || name == "assertFalse" || name == "assertZonks" ||
+                name == "fail" || name == "run")) {
+                if (name == "case") return "::keet_module_test::_keet_case(" + args_str + ")";
+                if (name == "suite") return "::keet_module_test::_keet_suite(" + args_str + ")";
+                return "::keet_module_test::" + name + "(" + args_str + ")";
             }
         }
 
@@ -1365,6 +1393,11 @@ std::string CppEmitter::translate_ir_function(const ir::Function& fn) const {
                 } else if (callee.rfind("keet.net.", 0) == 0) {
                     std::string func_name = callee.substr(9);
                     call_expr = "::keet::net::" + func_name + "(";
+                } else if (callee.rfind("keet.test.", 0) == 0) {
+                    std::string func_name = callee.substr(10);
+                    if (func_name == "case") func_name = "_keet_case";
+                    if (func_name == "suite") func_name = "_keet_suite";
+                    call_expr = "::keet_module_test::" + func_name + "(";
                 } else {
                     call_expr = callee + "(";
                 }

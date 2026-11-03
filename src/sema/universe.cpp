@@ -105,7 +105,8 @@ bool isStdlibModule(std::string_view name) noexcept {
            name == "math" || name == "std.math" || name == "keet.math" ||
            name == "time" || name == "std.time" || name == "keet.time" ||
            name == "json" || name == "std.json" || name == "keet.json" ||
-           name == "net" || name == "std.net" || name == "keet.net";
+           name == "net" || name == "std.net" || name == "keet.net" ||
+           name == "test" || name == "std.test" || name == "keet.test";
 }
 
 void populateIoModuleScope(Scope& ioScope) {
@@ -479,6 +480,27 @@ void populateNetModuleScope(Scope& netScope) {
     makeFn("udpClose");
 }
 
+void populateTestModuleScope(Scope& testScope) {
+    diag::SourceSpan span{};
+
+    auto makeFn = [&](const char* name) {
+        auto sym = std::make_shared<Symbol>(name, SymbolKind::Function, span);
+        sym->setExported(true);
+        sym->setConst(true);
+        testScope.define(sym, false);
+    };
+
+    makeFn("case");
+    makeFn("suite");
+    makeFn("assertEq");
+    makeFn("assertNe");
+    makeFn("assertTrue");
+    makeFn("assertFalse");
+    makeFn("assertZonks");
+    makeFn("fail");
+    makeFn("run");
+}
+
 std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, const std::shared_ptr<Scope>& universe) {
     auto scope = std::make_shared<Scope>(ScopeKind::Module, universe);
     if (moduleName == "io" || moduleName == "std.io" || moduleName == "keet.io") {
@@ -495,6 +517,8 @@ std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, cons
         populateJsonModuleScope(*scope);
     } else if (moduleName == "net" || moduleName == "std.net" || moduleName == "keet.net") {
         populateNetModuleScope(*scope);
+    } else if (moduleName == "test" || moduleName == "std.test" || moduleName == "keet.test") {
+        populateTestModuleScope(*scope);
     }
     return scope;
 }

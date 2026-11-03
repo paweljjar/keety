@@ -62,6 +62,10 @@ const std::vector<std::string> kNetCandidates = {
     "udpBind", "udpLocalPort", "udpSendTo", "udpRecvFrom", "udpClose"
 };
 
+const std::vector<std::string> kTestCandidates = {
+    "case", "suite", "assertEq", "assertNe", "assertTrue", "assertFalse", "assertZonks", "fail", "run"
+};
+
 const std::vector<std::string> kColorCandidates = {
     "Default", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White", "Gray"
 };
@@ -4202,6 +4206,271 @@ TypePtr TypeChecker::checkNetDirectCall(const ast::IdentExpr* callee, const ast:
     return Type::unknownType();
 }
 
+TypePtr TypeChecker::checkTestMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!member || !call) return Type::unknownType();
+    const std::string& name = member->getMemberName();
+
+    auto checkArgCountMinMax = [&](size_t minExpected, size_t maxExpected) -> bool {
+        size_t count = call->getArgs().size();
+        if (count < minExpected || count > maxExpected) {
+            if (emitter_) {
+                std::string expStr = (minExpected == maxExpected)
+                    ? std::to_string(minExpected)
+                    : std::to_string(minExpected) + " to " + std::to_string(maxExpected);
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function 'test." + name + "' expects " + expStr +
+                    " arguments, but got " + std::to_string(count),
+                    call->getSpan().start).withLabel(call->getSpan(), "wrong argument count"));
+            }
+            hasErrors_ = true;
+            return false;
+        }
+        return true;
+    };
+
+    auto checkStringArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::stringType());
+                if (aType && !aType->isString()) {
+                    reportTypeMismatch(Type::stringType(), aType, arg.value->getSpan(), "test." + name + " " + argName + " argument");
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkBoolArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::boolType());
+                if (aType && !aType->isBool()) {
+                    reportTypeMismatch(Type::boolType(), aType, arg.value->getSpan(), "test." + name + " " + argName + " argument");
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkCallableArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope);
+                if (aType && !aType->isFunction() && !aType->isUnknown()) {
+                    reportTypeMismatch(Type::function({}, Type::voidType()), aType, arg.value->getSpan(), "test." + name + " " + argName + " argument");
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    if (name == "case" || name == "suite") {
+        if (checkArgCountMinMax(2, 2)) {
+            checkStringArg(0, "name");
+            checkCallableArg(1, "callback");
+        }
+        return Type::voidType();
+    }
+    if (name == "assertEq" || name == "assertNe") {
+        if (checkArgCountMinMax(2, 3)) {
+            TypePtr t1 = call->getArgs().size() > 0 && call->getArgs()[0].value ? inferType(*call->getArgs()[0].value, scope) : Type::unknownType();
+            TypePtr t2 = call->getArgs().size() > 1 && call->getArgs()[1].value ? inferType(*call->getArgs()[1].value, scope) : Type::unknownType();
+            TypePtr b1 = t1 ? t1->getBaseType() : t1;
+            TypePtr b2 = t2 ? t2->getBaseType() : t2;
+            if (b1 && b2 && !b1->isUnknown() && !b2->isUnknown() && !b1->equals(*b2) && !b1->isAssignableTo(*b2) && !b2->isAssignableTo(*b1)) {
+                reportTypeMismatch(b1, b2, call->getArgs()[1].value->getSpan(), "test." + name + " expected argument");
+            }
+            if (call->getArgs().size() > 2) {
+                checkStringArg(2, "message");
+            }
+        }
+        return Type::voidType();
+    }
+    if (name == "assertTrue" || name == "assertFalse") {
+        if (checkArgCountMinMax(1, 2)) {
+            checkBoolArg(0, "condition");
+            if (call->getArgs().size() > 1) {
+                checkStringArg(1, "message");
+            }
+        }
+        return Type::voidType();
+    }
+    if (name == "assertZonks") {
+        if (checkArgCountMinMax(1, 3)) {
+            checkCallableArg(0, "callback");
+            if (call->getArgs().size() > 1) {
+                checkStringArg(1, "expectedErrorName");
+            }
+            if (call->getArgs().size() > 2) {
+                checkStringArg(2, "message");
+            }
+        }
+        return Type::voidType();
+    }
+    if (name == "fail") {
+        if (checkArgCountMinMax(0, 1)) {
+            if (call->getArgs().size() > 0) {
+                checkStringArg(0, "message");
+            }
+        }
+        return Type::voidType();
+    }
+    if (name == "run") {
+        if (checkArgCountMinMax(0, 1)) {
+            if (call->getArgs().size() > 0) {
+                checkStringArg(0, "filter");
+            }
+        }
+        return Type::intType();
+    }
+
+    if (emitter_) {
+        auto d = diag::Diagnostic::makeError(
+            diag::ErrorCode::InvalidMemberAccess,
+            "module 'test' has no member named '" + name + "'",
+            member->getSpan().start).withLabel(member->getSpan(), "unknown test member");
+        attachMemberSuggestions(d, name, kTestCandidates);
+        emitter_->report(d);
+    }
+    hasErrors_ = true;
+    return Type::unknownType();
+}
+
+TypePtr TypeChecker::checkTestDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!callee || !call) return Type::unknownType();
+    const std::string& name = callee->getName();
+
+    auto checkArgCountMinMax = [&](size_t minExpected, size_t maxExpected) -> bool {
+        size_t count = call->getArgs().size();
+        if (count < minExpected || count > maxExpected) {
+            if (emitter_) {
+                std::string expStr = (minExpected == maxExpected)
+                    ? std::to_string(minExpected)
+                    : std::to_string(minExpected) + " to " + std::to_string(maxExpected);
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function '" + name + "' expects " + expStr +
+                    " arguments, but got " + std::to_string(count),
+                    call->getSpan().start).withLabel(call->getSpan(), "wrong argument count"));
+            }
+            hasErrors_ = true;
+            return false;
+        }
+        return true;
+    };
+
+    auto checkStringArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::stringType());
+                if (aType && !aType->isString()) {
+                    reportTypeMismatch(Type::stringType(), aType, arg.value->getSpan(), name + " " + argName + " argument");
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkBoolArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::boolType());
+                if (aType && !aType->isBool()) {
+                    reportTypeMismatch(Type::boolType(), aType, arg.value->getSpan(), name + " " + argName + " argument");
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkCallableArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope);
+                if (aType && !aType->isFunction() && !aType->isUnknown()) {
+                    reportTypeMismatch(Type::function({}, Type::voidType()), aType, arg.value->getSpan(), name + " " + argName + " argument");
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    if (name == "case" || name == "suite") {
+        if (checkArgCountMinMax(2, 2)) {
+            checkStringArg(0, "name");
+            checkCallableArg(1, "callback");
+        }
+        return Type::voidType();
+    }
+    if (name == "assertEq" || name == "assertNe") {
+        if (checkArgCountMinMax(2, 3)) {
+            TypePtr t1 = call->getArgs().size() > 0 && call->getArgs()[0].value ? inferType(*call->getArgs()[0].value, scope) : Type::unknownType();
+            TypePtr t2 = call->getArgs().size() > 1 && call->getArgs()[1].value ? inferType(*call->getArgs()[1].value, scope) : Type::unknownType();
+            TypePtr b1 = t1 ? t1->getBaseType() : t1;
+            TypePtr b2 = t2 ? t2->getBaseType() : t2;
+            if (b1 && b2 && !b1->isUnknown() && !b2->isUnknown() && !b1->equals(*b2) && !b1->isAssignableTo(*b2) && !b2->isAssignableTo(*b1)) {
+                reportTypeMismatch(b1, b2, call->getArgs()[1].value->getSpan(), name + " expected argument");
+            }
+            if (call->getArgs().size() > 2) {
+                checkStringArg(2, "message");
+            }
+        }
+        return Type::voidType();
+    }
+    if (name == "assertTrue" || name == "assertFalse") {
+        if (checkArgCountMinMax(1, 2)) {
+            checkBoolArg(0, "condition");
+            if (call->getArgs().size() > 1) {
+                checkStringArg(1, "message");
+            }
+        }
+        return Type::voidType();
+    }
+    if (name == "assertZonks") {
+        if (checkArgCountMinMax(1, 3)) {
+            checkCallableArg(0, "callback");
+            if (call->getArgs().size() > 1) {
+                checkStringArg(1, "expectedErrorName");
+            }
+            if (call->getArgs().size() > 2) {
+                checkStringArg(2, "message");
+            }
+        }
+        return Type::voidType();
+    }
+    if (name == "fail") {
+        if (checkArgCountMinMax(0, 1)) {
+            if (call->getArgs().size() > 0) {
+                checkStringArg(0, "message");
+            }
+        }
+        return Type::voidType();
+    }
+    if (name == "run") {
+        if (checkArgCountMinMax(0, 1)) {
+            if (call->getArgs().size() > 0) {
+                checkStringArg(0, "filter");
+            }
+        }
+        return Type::intType();
+    }
+
+    return Type::unknownType();
+}
+
 bool TypeChecker::checkZeroCoercion(const parser::ModuleAST& module, sema::Scope* rootScope) {
     return checkTypes(module, rootScope);
 }
@@ -4488,6 +4757,46 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                                     "symbol '" + symItem.originalName + "' is not exported by module 'net'",
                                     symItem.span.start).withLabel(symItem.span, "symbol not exported");
                                 attachMemberSuggestions(d, symItem.originalName, kNetCandidates);
+                                emitter_->report(d);
+                            }
+                            hasErrors_ = true;
+                        }
+                    }
+                }
+            } else if (modPath == "test" || modPath == "std.test" || modPath == "keet.test") {
+                if (importDecl->getSymbols().empty()) {
+                    std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "test";
+                    if (!targetScope->lookupCurrent(boundName)) {
+                        auto modSym = std::make_shared<sema::Symbol>(boundName, sema::SymbolKind::Module, importDecl->getSpan());
+                        modSym->setExported(importDecl->isReExported());
+                        auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, modSym, emitter_);
+                        if (!res.success) hasErrors_ = true;
+                    }
+                } else {
+                    auto testScope = sema::createStdlibModuleScope("test");
+                    for (const auto& symItem : importDecl->getSymbols()) {
+                        auto exportedSym = testScope->lookupCurrent(symItem.originalName);
+                        if (exportedSym) {
+                            std::string importAsName = symItem.getEffectiveName();
+                            if (!targetScope->lookupCurrent(importAsName)) {
+                                auto importedSym = std::make_shared<sema::Symbol>(
+                                    importAsName, exportedSym->getKind(), symItem.span
+                                );
+                                importedSym->setExported(importDecl->isReExported());
+                                importedSym->setIsType(exportedSym->isType());
+                                if (exportedSym->isConstant()) {
+                                    importedSym->setConst(true);
+                                }
+                                auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, importedSym, emitter_);
+                                if (!res.success) hasErrors_ = true;
+                            }
+                        } else {
+                            if (emitter_) {
+                                auto d = diag::Diagnostic::makeError(
+                                    diag::ErrorCode::SymbolNotExported,
+                                    "symbol '" + symItem.originalName + "' is not exported by module 'test'",
+                                    symItem.span.start).withLabel(symItem.span, "symbol not exported");
+                                attachMemberSuggestions(d, symItem.originalName, kTestCandidates);
                                 emitter_->report(d);
                             }
                             hasErrors_ = true;
@@ -5549,6 +5858,21 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     }
                     return checkNetMemberCall(member, call, scope);
                 }
+                if (objIdent->getName() == "test" || (sym && sym->isModule() && sym->getName() == "test")) {
+                    if (!sym) {
+                        if (emitter_) {
+                            auto d = diag::Diagnostic::makeError(
+                                diag::ErrorCode::UndeclaredIdentifier,
+                                "undeclared identifier '" + objIdent->getName() + "'",
+                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                            d.withHelp("add 'import test;' at the top of the file");
+                            emitter_->report(d);
+                        }
+                        hasErrors_ = true;
+                        return Type::unknownType();
+                    }
+                    return checkTestMemberCall(member, call, scope);
+                }
             }
 
             auto objType = member->getObject() ? inferType(*member->getObject(), scope) : Type::unknownType();
@@ -5800,6 +6124,11 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     name == "udpBind" || name == "udpLocalPort" || name == "udpSendTo" || name == "udpRecvFrom" ||
                     name == "udpClose") {
                     return checkNetDirectCall(calleeIdent, call, scope);
+                }
+                if (name == "case" || name == "suite" || name == "assertEq" || name == "assertNe" ||
+                    name == "assertTrue" || name == "assertFalse" || name == "assertZonks" ||
+                    name == "fail" || name == "run") {
+                    return checkTestDirectCall(calleeIdent, call, scope);
                 }
             }
             const ast::FnDecl* fnDecl = nullptr;
@@ -6539,6 +6868,49 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                         "module 'net' has no member '" + member->getMemberName() + "'",
                         member->getSpan().start).withLabel(member->getSpan(), "unknown module member");
                     attachMemberSuggestions(d, member->getMemberName(), kNetCandidates);
+                    emitter_->report(d);
+                }
+                hasErrors_ = true;
+                return Type::unknownType();
+            }
+            if (objIdent->getName() == "test" || (sym && sym->isModule() && sym->getName() == "test")) {
+                if (!sym) {
+                    if (emitter_) {
+                        auto d = diag::Diagnostic::makeError(
+                            diag::ErrorCode::UndeclaredIdentifier,
+                            "undeclared identifier '" + objIdent->getName() + "'",
+                            objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                        d.withHelp("add 'import test;' at the top of the file");
+                        emitter_->report(d);
+                    }
+                    hasErrors_ = true;
+                    return Type::unknownType();
+                }
+                const std::string& mName = member->getMemberName();
+                if (mName == "case" || mName == "suite") {
+                    return Type::function({Type::stringType(), Type::function({}, Type::voidType())}, Type::voidType(), false);
+                }
+                if (mName == "assertEq" || mName == "assertNe") {
+                    return Type::function({Type::unknownType(), Type::unknownType()}, Type::voidType(), false);
+                }
+                if (mName == "assertTrue" || mName == "assertFalse") {
+                    return Type::function({Type::boolType()}, Type::voidType(), false);
+                }
+                if (mName == "assertZonks") {
+                    return Type::function({Type::function({}, Type::voidType())}, Type::voidType(), false);
+                }
+                if (mName == "fail") {
+                    return Type::function({Type::stringType()}, Type::voidType(), false);
+                }
+                if (mName == "run") {
+                    return Type::function({}, Type::intType(), false);
+                }
+                if (emitter_) {
+                    auto d = diag::Diagnostic::makeError(
+                        diag::ErrorCode::InvalidMemberAccess,
+                        "module 'test' has no member '" + member->getMemberName() + "'",
+                        member->getSpan().start).withLabel(member->getSpan(), "unknown module member");
+                    attachMemberSuggestions(d, member->getMemberName(), kTestCandidates);
                     emitter_->report(d);
                 }
                 hasErrors_ = true;

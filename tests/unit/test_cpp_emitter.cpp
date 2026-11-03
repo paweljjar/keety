@@ -834,3 +834,29 @@ TEST_CASE("C++ Implementation Emitter supports flow-based union narrowing in ter
         STATIC_REQUIRE(std::is_same_v<keet::branch_type_t<int64_t, int64_t>, int64_t>);
     }
 }
+
+TEST_CASE("C++ Implementation Emitter emits test module calls properly", "[emitter][test]") {
+    SECTION("Translates test.case, test.suite, and assertEq") {
+        const std::string source = R"(
+            import test;
+
+            fn run(): void {
+                test.suite("Sample Suite", fn(): void {
+                    test.case("simple check", fn(): void {
+                        test.assertEq(10, 10);
+                        test.assertTrue(true);
+                    });
+                });
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "test_emitter");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("::keet_module_test::_keet_suite(") != std::string::npos);
+        REQUIRE(cpp.find("::keet_module_test::_keet_case(") != std::string::npos);
+        REQUIRE(cpp.find("::keet_module_test::assertEq(") != std::string::npos);
+        REQUIRE(cpp.find("::keet_module_test::assertTrue(") != std::string::npos);
+    }
+}

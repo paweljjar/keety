@@ -648,6 +648,7 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
     module_scopes["<stdlib>/time"] = sema::createStdlibModuleScope("time", universe);
     module_scopes["<stdlib>/json"] = sema::createStdlibModuleScope("json", universe);
     module_scopes["<stdlib>/net"] = sema::createStdlibModuleScope("net", universe);
+    module_scopes["<stdlib>/test"] = sema::createStdlibModuleScope("test", universe);
 
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
@@ -812,6 +813,7 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
     module_scopes["<stdlib>/time"] = sema::createStdlibModuleScope("time", universe);
     module_scopes["<stdlib>/json"] = sema::createStdlibModuleScope("json", universe);
     module_scopes["<stdlib>/net"] = sema::createStdlibModuleScope("net", universe);
+    module_scopes["<stdlib>/test"] = sema::createStdlibModuleScope("test", universe);
 
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
@@ -1041,6 +1043,7 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     module_scopes["<stdlib>/time"] = sema::createStdlibModuleScope("time", universe);
     module_scopes["<stdlib>/json"] = sema::createStdlibModuleScope("json", universe);
     module_scopes["<stdlib>/net"] = sema::createStdlibModuleScope("net", universe);
+    module_scopes["<stdlib>/test"] = sema::createStdlibModuleScope("test", universe);
 
     // 1. Semantic and type checking across all modules
     for (const auto* node : ordered_nodes) {
