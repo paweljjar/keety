@@ -2,15 +2,18 @@
 
 #include <keet/error.hpp>
 #include <keet/io.hpp>
+#include <keet/sys.hpp>
 #include <keet/time.hpp>
 
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <functional>
 #include <iostream>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -303,6 +306,33 @@ private:
     std::string currentSuite_;
 };
 
+/// Escapes a string for JSON output.
+inline std::string jsonEscape(std::string_view s) {
+    std::string out;
+    out.reserve(s.size() + 8);
+    for (char c : s) {
+        switch (c) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\b': out += "\\b"; break;
+            case '\f': out += "\\f"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
+                    out += buf;
+                } else {
+                    out += c;
+                }
+                break;
+        }
+    }
+    return out;
+}
+
 /// Format test summary into human-readable terminal output.
 inline void printSummary(const TestSummary& summary, std::ostream& out, bool color = true) {
     const char* cPass = color ? "\033[32m" : "";
@@ -372,18 +402,18 @@ inline std::string summaryToJson(const TestSummary& summary) {
     for (size_t i = 0; i < summary.results.size(); ++i) {
         const auto& r = summary.results[i];
         json << "    {\n";
-        json << "      \"name\": \"" << r.name << "\",\n";
-        json << "      \"suite\": \"" << r.suite << "\",\n";
+        json << "      \"name\": \"" << jsonEscape(r.name) << "\",\n";
+        json << "      \"suite\": \"" << jsonEscape(r.suite) << "\",\n";
         json << "      \"passed\": " << (r.passed ? "true" : "false") << ",\n";
         json << "      \"durationNs\": " << r.durationNs;
         if (r.failure) {
             json << ",\n      \"failure\": {\n";
-            json << "        \"message\": \"" << r.failure->message << "\",\n";
-            json << "        \"expected\": \"" << r.failure->expected << "\",\n";
-            json << "        \"actual\": \"" << r.failure->actual << "\",\n";
-            json << "        \"file\": \"" << r.failure->file << "\",\n";
+            json << "        \"message\": \"" << jsonEscape(r.failure->message) << "\",\n";
+            json << "        \"expected\": \"" << jsonEscape(r.failure->expected) << "\",\n";
+            json << "        \"actual\": \"" << jsonEscape(r.failure->actual) << "\",\n";
+            json << "        \"file\": \"" << jsonEscape(r.failure->file) << "\",\n";
             json << "        \"line\": " << r.failure->line << ",\n";
-            json << "        \"errorType\": \"" << r.failure->errorType << "\"\n";
+            json << "        \"errorType\": \"" << jsonEscape(r.failure->errorType) << "\"\n";
             json << "      }\n";
         } else {
             json << "\n";
@@ -456,8 +486,22 @@ inline void fail(const std::string& msg = "test failed explicitly") {
 
 /// Run all registered tests and return exit code (0 if all passed, 1 if any failed)
 inline int64_t run(const std::string& filter = "") {
-    auto summary = keet::test::Registry::instance().runAll(filter);
-    keet::test::printSummary(summary, std::cout, true);
+    std::string activeFilter = filter;
+    bool jsonMode = false;
+    bool failFast = false;
+    const auto& args = keet::sys::args();
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i] == "--json" || args[i] == "--keet-test-json") jsonMode = true;
+        else if (args[i] == "--fail-fast") failFast = true;
+        else if (activeFilter.empty() && args[i] == "--filter" && i + 1 < args.size()) activeFilter = args[++i];
+        else if (activeFilter.empty() && args[i].rfind("--filter=", 0) == 0) activeFilter = args[i].substr(9);
+    }
+    auto summary = keet::test::Registry::instance().runAll(activeFilter, failFast);
+    if (jsonMode) {
+        std::cout << keet::test::summaryToJson(summary) << "\n";
+    } else {
+        keet::test::printSummary(summary, std::cout, true);
+    }
     return summary.failed > 0 ? 1 : 0;
 }
 

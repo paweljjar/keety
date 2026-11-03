@@ -277,6 +277,8 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                         main_returns_int_ = (prim->getKind() == ast::PrimitiveTypeKind::Int);
                     }
                 }
+            } else if (fn->getName().rfind("test", 0) == 0 && fn->getParams().empty()) {
+                test_function_names_.push_back(fn->getName());
             }
             if (fn->getBody()) {
                 add_function_definition(translate_function(*fn));
@@ -312,6 +314,10 @@ void CppEmitter::collect_ir_declarations(const ir::Module& ir_module) {
                 main_has_args_ = !fn->get_parameters().empty();
                 if (fn->get_return_type()) {
                     main_returns_int_ = fn->get_return_type()->isInt();
+                }
+            } else if (fn->get_name().rfind("test", 0) == 0 && fn->get_parameters().empty()) {
+                if (std::find(test_function_names_.begin(), test_function_names_.end(), fn->get_name()) == test_function_names_.end()) {
+                    test_function_names_.push_back(fn->get_name());
                 }
             }
             add_function_definition(translate_ir_function(*fn));
@@ -1516,7 +1522,7 @@ bool CppEmitter::is_root_module() const noexcept {
     if (manual_root_override_) {
         return options_.is_root_module;
     }
-    return options_.is_root_module || has_main_function_;
+    return options_.is_root_module || has_main_function_ || has_test_import_;
 }
 
 std::string CppEmitter::emit_main_wrapper() const {
@@ -1545,8 +1551,18 @@ std::string CppEmitter::emit_main_wrapper() const {
             ss << "        return static_cast<int>(" << call_str.substr(0, call_str.size() - 1) << ");\n";
         } else {
             ss << "        " << call_str << "\n";
+            if (has_test_import_) {
+                ss << "        if (::keet::test::Registry::instance().cases().size() > 0) {\n";
+                ss << "            return static_cast<int>(::keet_module_test::run());\n";
+                ss << "        }\n";
+            }
             ss << "        return 0;\n";
         }
+    } else if (has_test_import_) {
+        for (const auto& fn_name : test_function_names_) {
+            ss << "        ::keet_module_test::_keet_case(\"" << fn_name << "\", []() { " << ns << "::" << fn_name << "(); });\n";
+        }
+        ss << "        return static_cast<int>(::keet_module_test::run());\n";
     } else {
         ss << "        return 0;\n";
     }
