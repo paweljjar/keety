@@ -1,6 +1,7 @@
 #pragma once
 
 #include <keety/ast/decl.hpp>
+#include <keety/emitter/line_directive_tracker.hpp>
 #include <keety/ir/module.hpp>
 #include <keety/parser/parser.hpp>
 
@@ -136,6 +137,8 @@ public:
     [[nodiscard]] const std::vector<std::string>& get_function_templates() const noexcept { return function_templates_; }
     [[nodiscard]] const std::vector<std::string>& get_function_prototypes() const noexcept { return function_prototypes_; }
 
+    [[nodiscard]] std::string format_line(const diag::SourceSpan& span) const;
+
     // Full header generation
     [[nodiscard]] std::string emit() const;
     void emit(std::ostream& os) const;
@@ -158,6 +161,7 @@ private:
     std::vector<std::string> const_views_{};
     std::vector<std::string> function_templates_{};
     std::vector<std::string> function_prototypes_{};
+    mutable LineDirectiveTracker line_tracker_;
 };
 
 } // namespace keety::emitter

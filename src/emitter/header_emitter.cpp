@@ -12,10 +12,10 @@
 namespace keety::emitter {
 
 HeaderEmitter::HeaderEmitter(HeaderEmitterOptions options)
-    : options_(std::move(options)) {}
+    : options_(std::move(options)), line_tracker_(options_.emit_line_directives) {}
 
 HeaderEmitter::HeaderEmitter(const parser::ModuleAST& ast, HeaderEmitterOptions options)
-    : options_(std::move(options)), ast_(&ast) {
+    : options_(std::move(options)), ast_(&ast), line_tracker_(options_.emit_line_directives) {
     if (!ast.moduleName.empty()) {
         module_name_ = ast.moduleName;
     }
@@ -24,7 +24,7 @@ HeaderEmitter::HeaderEmitter(const parser::ModuleAST& ast, HeaderEmitterOptions 
 }
 
 HeaderEmitter::HeaderEmitter(const ir::Module& ir_module, HeaderEmitterOptions options)
-    : options_(std::move(options)), ir_module_(&ir_module) {
+    : options_(std::move(options)), ir_module_(&ir_module), line_tracker_(options_.emit_line_directives) {
     if (!ir_module.get_name().empty()) {
         module_name_ = ir_module.get_name();
     }
@@ -32,7 +32,7 @@ HeaderEmitter::HeaderEmitter(const ir::Module& ir_module, HeaderEmitterOptions o
 }
 
 HeaderEmitter::HeaderEmitter(const parser::ModuleAST& ast, const ir::Module& ir_module, HeaderEmitterOptions options)
-    : options_(std::move(options)), ast_(&ast), ir_module_(&ir_module) {
+    : options_(std::move(options)), ast_(&ast), ir_module_(&ir_module), line_tracker_(options_.emit_line_directives) {
     if (!ast.moduleName.empty()) {
         module_name_ = ast.moduleName;
     } else if (!ir_module.get_name().empty()) {
@@ -49,6 +49,17 @@ HeaderEmitter::HeaderEmitter(const parser::ModuleAST& ast, const ir::Module& ir_
     } else {
         collect_ir_declarations(ir_module);
     }
+}
+
+std::string HeaderEmitter::format_line(const diag::SourceSpan& span) const {
+    if (!options_.emit_line_directives) {
+        return "";
+    }
+    std::string fallback = options_.source_file_path;
+    if (fallback.empty() && !module_name_.empty()) {
+        fallback = module_name_ + ".keet";
+    }
+    return line_tracker_.format_line(span, options_.source_manager, fallback);
 }
 
 void HeaderEmitter::add_standard_header(std::string header) {
@@ -728,29 +739,34 @@ void HeaderEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::
         if (!decl) continue;
 
         if (const auto* def = dynamic_cast<const ast::DefineDecl*>(decl.get())) {
+            std::string line_dir = format_line(def->getSpan());
             std::string cpp_type = def->getType() ? to_cpp_type(def->getType()) : "auto";
             std::string val = def->getValue() ? to_cpp_expr(def->getValue()) : "{}";
-            add_constexpr_def("inline constexpr " + cpp_type + " " + def->getName() + " = " + val + ";");
+            add_constexpr_def(line_dir + (line_dir.empty() ? "" : "    ") + "inline constexpr " + cpp_type + " " + def->getName() + " = " + val + ";");
         } else if (const auto* enm = dynamic_cast<const ast::EnumDecl*>(decl.get())) {
             std::string underlying = enm->getUnderlyingType() ? to_cpp_type(enm->getUnderlyingType()) : "int64_t";
             add_forward_decl("enum class " + enm->getName() + " : " + underlying + ";");
-            add_enum_def(generate_enum_def(*enm));
+            std::string line_dir = format_line(enm->getSpan());
+            add_enum_def(line_dir + generate_enum_def(*enm));
         } else if (const auto* cls = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
             add_forward_decl("struct " + cls->getName() + ";");
-            add_class_def(generate_class_def(*cls));
+            std::string line_dir = format_line(cls->getSpan());
+            add_class_def(line_dir + generate_class_def(*cls));
         } else if (const auto* err = dynamic_cast<const ast::ErrTypeDecl*>(decl.get())) {
             add_forward_decl("struct " + err->getName() + ";");
-            add_errtype_def(generate_errtype_def(*err));
+            std::string line_dir = format_line(err->getSpan());
+            add_errtype_def(line_dir + generate_errtype_def(*err));
         } else if (const auto* var = dynamic_cast<const ast::VarDecl*>(decl.get())) {
             if (var->isExported()) {
                 std::string cpp_type = var->getType() ? to_cpp_type(var->getType()) : "auto";
                 add_const_view(var->getName(), cpp_type);
             }
         } else if (const auto* fn = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+            std::string line_dir = format_line(fn->getSpan());
             if (fn->isGeneric()) {
-                add_function_template(format_function_template(*fn));
+                add_function_template(line_dir + (line_dir.empty() ? "" : "    ") + format_function_template(*fn));
             } else {
-                add_function_prototype(format_function_prototype(*fn));
+                add_function_prototype(line_dir + (line_dir.empty() ? "" : "    ") + format_function_prototype(*fn));
             }
         }
     }
@@ -788,7 +804,11 @@ std::string HeaderEmitter::emit_constexpr_definitions() const {
     std::ostringstream ss;
     ss << "    // --- Compile-Time Constants ---\n";
     for (const auto& def : constexpr_defs_) {
-        ss << "    " << def << "\n";
+        if (def.rfind("#line", 0) == 0) {
+            ss << def << "\n";
+        } else {
+            ss << "    " << def << "\n";
+        }
     }
     return ss.str();
 }
@@ -851,7 +871,11 @@ std::string HeaderEmitter::emit_function_templates() const {
     std::ostringstream ss;
     ss << "    // --- Generic Function Templates ---\n";
     for (const auto& tmpl : function_templates_) {
-        ss << "    " << tmpl << "\n";
+        if (tmpl.rfind("#line", 0) == 0) {
+            ss << tmpl << "\n";
+        } else {
+            ss << "    " << tmpl << "\n";
+        }
     }
     return ss.str();
 }
@@ -863,7 +887,11 @@ std::string HeaderEmitter::emit_function_prototypes() const {
     std::ostringstream ss;
     ss << "    // --- Exported Function Prototypes ---\n";
     for (const auto& proto : function_prototypes_) {
-        ss << "    " << proto << "\n";
+        if (proto.rfind("#line", 0) == 0) {
+            ss << proto << "\n";
+        } else {
+            ss << "    " << proto << "\n";
+        }
     }
     return ss.str();
 }
@@ -893,6 +921,8 @@ std::string HeaderEmitter::emit_namespace_body() const {
 }
 
 std::string HeaderEmitter::emit() const {
+    line_tracker_.reset();
+    line_tracker_.set_enabled(options_.emit_line_directives);
     std::ostringstream ss;
     std::string preamble = emit_preamble();
     ss << preamble;

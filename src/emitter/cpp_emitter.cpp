@@ -40,10 +40,10 @@ struct ScopedNarrowing {
 } // namespace
 
 CppEmitter::CppEmitter(CppEmitterOptions options)
-    : options_(std::move(options)) {}
+    : options_(std::move(options)), line_tracker_(options_.emit_line_directives) {}
 
 CppEmitter::CppEmitter(const parser::ModuleAST& ast, CppEmitterOptions options)
-    : options_(std::move(options)), ast_(&ast) {
+    : options_(std::move(options)), ast_(&ast), line_tracker_(options_.emit_line_directives) {
     if (!ast.moduleName.empty()) {
         module_name_ = ast.moduleName;
     }
@@ -51,7 +51,7 @@ CppEmitter::CppEmitter(const parser::ModuleAST& ast, CppEmitterOptions options)
 }
 
 CppEmitter::CppEmitter(const ir::Module& ir_module, CppEmitterOptions options)
-    : options_(std::move(options)), ir_module_(&ir_module) {
+    : options_(std::move(options)), ir_module_(&ir_module), line_tracker_(options_.emit_line_directives) {
     if (!ir_module.get_name().empty()) {
         module_name_ = ir_module.get_name();
     }
@@ -59,7 +59,7 @@ CppEmitter::CppEmitter(const ir::Module& ir_module, CppEmitterOptions options)
 }
 
 CppEmitter::CppEmitter(const parser::ModuleAST& ast, const ir::Module& ir_module, CppEmitterOptions options)
-    : options_(std::move(options)), ast_(&ast), ir_module_(&ir_module) {
+    : options_(std::move(options)), ast_(&ast), ir_module_(&ir_module), line_tracker_(options_.emit_line_directives) {
     if (!ast.moduleName.empty()) {
         module_name_ = ast.moduleName;
     } else if (!ir_module.get_name().empty()) {
@@ -136,7 +136,18 @@ void CppEmitter::register_module_var(std::string name) {
     module_vars_.push_back(std::move(name));
 }
 
-void CppEmitter::add_storage_allocation(std::string name, std::string cpp_type, std::string initial_value) {
+std::string CppEmitter::format_line(const diag::SourceSpan& span) const {
+    if (!options_.emit_line_directives) {
+        return "";
+    }
+    std::string fallback = options_.source_file_path;
+    if (fallback.empty() && !module_name_.empty()) {
+        fallback = module_name_ + ".keet";
+    }
+    return line_tracker_.format_line(span, options_.source_manager, fallback);
+}
+
+void CppEmitter::add_storage_allocation(std::string name, std::string cpp_type, std::string initial_value, std::string line_directive) {
     register_module_var(name);
     std::string internal_name = make_internal_var_name(name);
     std::string entry;
@@ -144,6 +155,9 @@ void CppEmitter::add_storage_allocation(std::string name, std::string cpp_type, 
         entry = cpp_type + " " + internal_name + " = {};";
     } else {
         entry = cpp_type + " " + internal_name + " = " + initial_value + ";";
+    }
+    if (!line_directive.empty()) {
+        entry = line_directive + "    " + entry;
     }
     for (const auto& existing : storage_allocations_) {
         if (existing == entry) return;
@@ -262,7 +276,8 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
             }
             std::string cpp_type = var->getType() ? HeaderEmitter::to_cpp_type(var->getType()) : "auto";
             std::string init_val = var->getInitializer() ? HeaderEmitter::to_cpp_expr(var->getInitializer()) : "{}";
-            add_storage_allocation(var->getName(), cpp_type, init_val);
+            std::string line_dir = format_line(var->getSpan());
+            add_storage_allocation(var->getName(), cpp_type, init_val, line_dir);
         } else if (const auto* cst = dynamic_cast<const ast::ConstDecl*>(decl.get())) {
             register_module_var(cst->getName());
             if (cst->getType()) {
@@ -270,7 +285,8 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
             }
             std::string cpp_type = cst->getType() ? HeaderEmitter::to_cpp_type(cst->getType()) : "auto";
             std::string init_val = cst->getInitializer() ? HeaderEmitter::to_cpp_expr(cst->getInitializer()) : "{}";
-            add_storage_allocation(cst->getName(), "const " + cpp_type, init_val);
+            std::string line_dir = format_line(cst->getSpan());
+            add_storage_allocation(cst->getName(), "const " + cpp_type, init_val, line_dir);
         }
     }
 
@@ -977,6 +993,8 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
         return translate_block(blk, indent);
     }
 
+    std::string line_dir = (indent > 0) ? format_line(stmt->getSpan()) : "";
+
     if (const auto* decl = dynamic_cast<const ast::DeclStmt*>(stmt)) {
         if (const auto* var = dynamic_cast<const ast::VarDecl*>(decl->getDeclaration())) {
             if (var->getType()) {
@@ -989,7 +1007,7 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
             } else {
                 init_s = "{}";
             }
-            return indent_str + type_s + " " + var->getName() + init_s + ";\n";
+            return line_dir + indent_str + type_s + " " + var->getName() + init_s + ";\n";
         }
         if (const auto* cst = dynamic_cast<const ast::ConstDecl*>(decl->getDeclaration())) {
             if (cst->getType()) {
@@ -997,55 +1015,55 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
             }
             std::string type_s = cst->getType() ? HeaderEmitter::to_cpp_type(cst->getType()) : "auto";
             std::string init_s = cst->getInitializer() ? " = " + translate_expression(cst->getInitializer()) : "{}";
-            return indent_str + "const " + type_s + " " + cst->getName() + init_s + ";\n";
+            return line_dir + indent_str + "const " + type_s + " " + cst->getName() + init_s + ";\n";
         }
         return "";
     }
 
     if (const auto* expr_stmt = dynamic_cast<const ast::ExprStmt*>(stmt)) {
-        return indent_str + translate_expression(expr_stmt->getExpression()) + ";\n";
+        return line_dir + indent_str + translate_expression(expr_stmt->getExpression()) + ";\n";
     }
 
     if (const auto* ret = dynamic_cast<const ast::ReturnStmt*>(stmt)) {
         if (ret->hasValue()) {
-            return indent_str + "return " + translate_expression(ret->getValue()) + ";\n";
+            return line_dir + indent_str + "return " + translate_expression(ret->getValue()) + ";\n";
         }
-        return indent_str + "return;\n";
+        return line_dir + indent_str + "return;\n";
     }
 
     if (const auto* yld = dynamic_cast<const ast::YieldStmt*>(stmt)) {
         if (yld->getValue()) {
-            return indent_str + "return " + translate_expression(yld->getValue()) + ";\n";
+            return line_dir + indent_str + "return " + translate_expression(yld->getValue()) + ";\n";
         }
-        return indent_str + "return;\n";
+        return line_dir + indent_str + "return;\n";
     }
 
     if (const auto* brk = dynamic_cast<const ast::BreakStmt*>(stmt)) {
         if (brk->hasTargetLabel()) {
-            return indent_str + "goto " + brk->getTargetLabel() + "_break;\n";
+            return line_dir + indent_str + "goto " + brk->getTargetLabel() + "_break;\n";
         }
-        return indent_str + "break;\n";
+        return line_dir + indent_str + "break;\n";
     }
 
     if (const auto* cnt = dynamic_cast<const ast::ContinueStmt*>(stmt)) {
         if (cnt->hasTargetLabel()) {
-            return indent_str + "goto " + cnt->getTargetLabel() + "_continue;\n";
+            return line_dir + indent_str + "goto " + cnt->getTargetLabel() + "_continue;\n";
         }
-        return indent_str + "continue;\n";
+        return line_dir + indent_str + "continue;\n";
     }
 
     if (const auto* znk = dynamic_cast<const ast::ZonkStmt*>(stmt)) {
         const auto* err_expr = znk->getErrorExpr();
         if (const auto* lit = dynamic_cast<const ast::LiteralExpr*>(err_expr)) {
             if (lit->getLiteralKind() == lexer::TokenKind::StringLiteral) {
-                return indent_str + "throw keet::error(\"Error\", " + lit->getRawText() + ");\n";
+                return line_dir + indent_str + "throw keet::error(\"Error\", " + lit->getRawText() + ");\n";
             }
         }
-        return indent_str + "throw " + translate_expression(err_expr) + ";\n";
+        return line_dir + indent_str + "throw " + translate_expression(err_expr) + ";\n";
     }
 
     if (const auto* if_stmt = dynamic_cast<const ast::IfStmt*>(stmt)) {
-        std::string res = indent_str + "if (";
+        std::string res = line_dir + indent_str + "if (";
         if (if_stmt->hasInit()) {
             std::string init_s = translate_statement(if_stmt->getInit(), 0);
             if (!init_s.empty() && init_s.back() == '\n') init_s.pop_back();
@@ -1065,12 +1083,24 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
             ScopedNarrowing scope(narrowed_vars_, narrowing.else_facts);
             if (const auto* else_if = dynamic_cast<const ast::IfStmt*>(if_stmt->getElseBranch())) {
                 std::string elif_str = translate_statement(else_if, indent);
-                size_t first_non_space = elif_str.find_first_not_of(' ');
-                if (first_non_space != std::string::npos) {
-                    elif_str = elif_str.substr(first_non_space);
+                if (elif_str.rfind("#line", 0) == 0) {
+                    size_t newline_pos = elif_str.find('\n');
+                    std::string line_part = elif_str.substr(0, newline_pos + 1);
+                    std::string rest = elif_str.substr(newline_pos + 1);
+                    size_t first_non_space = rest.find_first_not_of(' ');
+                    if (first_non_space != std::string::npos) {
+                        rest = rest.substr(first_non_space);
+                    }
+                    res += "\n" + line_part + indent_str + "else " + rest;
+                    return res;
+                } else {
+                    size_t first_non_space = elif_str.find_first_not_of(' ');
+                    if (first_non_space != std::string::npos) {
+                        elif_str = elif_str.substr(first_non_space);
+                    }
+                    res += " else " + elif_str;
+                    return res;
                 }
-                res += " else " + elif_str;
-                return res;
             } else if (const auto* else_block = dynamic_cast<const ast::BlockStmt*>(if_stmt->getElseBranch())) {
                 res += " else {\n";
                 res += translate_block(else_block, indent + 1);
@@ -1083,7 +1113,7 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
     }
 
     if (const auto* while_stmt = dynamic_cast<const ast::WhileStmt*>(stmt)) {
-        std::string res = indent_str + "while (";
+        std::string res = line_dir + indent_str + "while (";
         if (while_stmt->hasInit()) {
             std::string init_s = translate_statement(while_stmt->getInit(), 0);
             if (!init_s.empty() && init_s.back() == '\n') init_s.pop_back();
@@ -1102,7 +1132,7 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
     }
 
     if (const auto* for_stmt = dynamic_cast<const ast::ForStmt*>(stmt)) {
-        std::string res = indent_str + "for (";
+        std::string res = line_dir + indent_str + "for (";
         if (for_stmt->getInit()) {
             std::string init_s = translate_statement(for_stmt->getInit(), 0);
             if (!init_s.empty() && init_s.back() == '\n') init_s.pop_back();
@@ -1133,7 +1163,7 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
     }
 
     if (const auto* for_in = dynamic_cast<const ast::ForInStmt*>(stmt)) {
-        std::string res = indent_str + "for (";
+        std::string res = line_dir + indent_str + "for (";
         std::string binding;
         if (for_in->isKeyValue()) {
             binding = for_in->isConst() ? "const auto& [" + for_in->getKeyName() + ", " + for_in->getValueName() + "]"
@@ -1155,7 +1185,7 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
     }
 
     if (const auto* sw = dynamic_cast<const ast::SwitchStmt*>(stmt)) {
-        std::string res = indent_str + "switch (";
+        std::string res = line_dir + indent_str + "switch (";
         if (sw->hasInit()) {
             std::string init_s = translate_statement(sw->getInit(), 0);
             if (!init_s.empty() && init_s.back() == '\n') init_s.pop_back();
@@ -1209,6 +1239,10 @@ std::string CppEmitter::translate_function(const ast::FnDecl& fn) const {
 
     std::string fn_name = (fn.getName() == "main") ? "_keet_main" : fn.getName();
     std::ostringstream ss;
+    std::string line_dir = format_line(fn.getSpan());
+    if (!line_dir.empty()) {
+        ss << line_dir;
+    }
     if (!fn.getTypeParams().empty()) {
         ss << "    template <";
         for (size_t i = 0; i < fn.getTypeParams().size(); ++i) {
@@ -1260,6 +1294,10 @@ std::string CppEmitter::translate_method(std::string_view class_name, const ast:
     }
 
     std::ostringstream ss;
+    std::string line_dir = format_line(fn.getSpan());
+    if (!line_dir.empty()) {
+        ss << line_dir;
+    }
     ss << "    " << ret_type << " " << class_name << "::" << fn.getName() << "(" << params_str << ") {\n";
     if (fn.getBody()) {
         if (const auto* block = dynamic_cast<const ast::BlockStmt*>(fn.getBody())) {
@@ -1528,7 +1566,11 @@ std::string CppEmitter::emit_storage_allocations() const {
         ss << "    // Storage definitions for module-level variables\n";
     }
     for (const auto& alloc : storage_allocations_) {
-        ss << "    " << alloc << "\n";
+        if (alloc.rfind("#line", 0) == 0) {
+            ss << alloc << "\n";
+        } else {
+            ss << "    " << alloc << "\n";
+        }
     }
     return ss.str();
 }
@@ -1905,6 +1947,8 @@ void CppEmitter::collect_local_var_types(const ast::Stmt* stmt) const {
 }
 
 std::string CppEmitter::emit() const {
+    line_tracker_.reset();
+    line_tracker_.set_enabled(options_.emit_line_directives);
     std::ostringstream ss;
     std::string preamble = emit_preamble();
     ss << preamble;
