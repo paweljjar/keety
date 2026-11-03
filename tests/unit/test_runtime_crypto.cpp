@@ -287,3 +287,117 @@ TEST_CASE("keet::crypto HMAC RFC 4231 test vectors", "[runtime][crypto]") {
     }
 }
 
+TEST_CASE("keet::crypto EncryptedPayload serialization", "[runtime][crypto]") {
+    keet::crypto::EncryptedPayload p;
+    p.iv = "123456789012";
+    p.tag = "abcdefghijklmnop";
+    p.ciphertext = "secret message payload";
+    p.aad = "auth metadata";
+
+    std::string combined = p.toCombinedHex();
+    auto deserialized = keet::crypto::EncryptedPayload::fromCombinedHex(combined, "auth metadata");
+
+    REQUIRE(deserialized.iv == p.iv);
+    REQUIRE(deserialized.tag == p.tag);
+    REQUIRE(deserialized.ciphertext == p.ciphertext);
+    REQUIRE(deserialized.aad == p.aad);
+
+    REQUIRE_THROWS_AS(keet::crypto::EncryptedPayload::fromCombinedHex("invalid_no_colons"), keet::error);
+    REQUIRE_THROWS_AS(keet::crypto::EncryptedPayload::fromCombinedHex("only:one_colon"), keet::error);
+}
+
+TEST_CASE("keet::crypto ChaCha20-Poly1305 RFC 8439 AEAD", "[runtime][crypto]") {
+    std::string key = keet::crypto::fromHex("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f");
+    std::string nonce = keet::crypto::fromHex("070000004041424344454647");
+    std::string aad = keet::crypto::fromHex("50515253c0c1c2c3c4c5c6c7");
+    std::string plaintext = "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.";
+
+    SECTION("RFC 8439 Section 2.8.2 test vector") {
+        auto enc = keet::crypto::encryptChaCha20Poly1305(key, nonce, plaintext, aad);
+
+        std::string expected_ct = "d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b6116";
+        std::string expected_tag = "1ae10b594f09e26a7e902ecbd0600691";
+
+        REQUIRE(keet::crypto::toHex(enc.ciphertext) == expected_ct);
+        REQUIRE(keet::crypto::toHex(enc.tag) == expected_tag);
+
+        std::string dec = keet::crypto::decryptChaCha20Poly1305(key, nonce, enc.ciphertext, enc.tag, aad);
+        REQUIRE(dec == plaintext);
+    }
+
+    SECTION("tamper resistance and authentication failure") {
+        auto enc = keet::crypto::encryptChaCha20Poly1305(key, nonce, plaintext, aad);
+
+        // Tamper ciphertext
+        std::string tampered_ct = enc.ciphertext;
+        tampered_ct[0] ^= 0x01;
+        REQUIRE_THROWS_AS(keet::crypto::decryptChaCha20Poly1305(key, nonce, tampered_ct, enc.tag, aad), keet::error);
+
+        // Tamper tag
+        std::string tampered_tag = enc.tag;
+        tampered_tag[0] ^= 0x01;
+        REQUIRE_THROWS_AS(keet::crypto::decryptChaCha20Poly1305(key, nonce, enc.ciphertext, tampered_tag, aad), keet::error);
+
+        // Tamper AAD
+        std::string tampered_aad = aad + "x";
+        REQUIRE_THROWS_AS(keet::crypto::decryptChaCha20Poly1305(key, nonce, enc.ciphertext, enc.tag, tampered_aad), keet::error);
+
+        // Incorrect key
+        std::string wrong_key = key;
+        wrong_key[0] ^= 0x01;
+        REQUIRE_THROWS_AS(keet::crypto::decryptChaCha20Poly1305(wrong_key, nonce, enc.ciphertext, enc.tag, aad), keet::error);
+    }
+
+    SECTION("parameter validation") {
+        REQUIRE_THROWS_AS(keet::crypto::encryptChaCha20Poly1305("short_key", nonce, plaintext), keet::error);
+        REQUIRE_THROWS_AS(keet::crypto::encryptChaCha20Poly1305(key, "short_nonce", plaintext), keet::error);
+    }
+}
+
+TEST_CASE("keet::crypto AES-256-GCM NIST SP 800-38D AEAD", "[runtime][crypto]") {
+    std::string key = keet::crypto::fromHex("feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308");
+    std::string iv = keet::crypto::fromHex("cafebabefacedbaddecaf888");
+    std::string plaintext = keet::crypto::fromHex("d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b391aafd255");
+
+    SECTION("NIST SP 800-38D Test Case 14 vector") {
+        auto enc = keet::crypto::encryptAesGcm(key, iv, plaintext, "");
+
+        std::string expected_ct = "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662898015ad";
+        std::string expected_tag = "b094dac5d93471bdec1a502270e3cc6c";
+
+        REQUIRE(keet::crypto::toHex(enc.ciphertext) == expected_ct);
+        REQUIRE(keet::crypto::toHex(enc.tag) == expected_tag);
+
+        std::string dec = keet::crypto::decryptAesGcm(key, iv, enc.ciphertext, enc.tag, "");
+        REQUIRE(dec == plaintext);
+    }
+
+    SECTION("roundtrip with non-empty AAD") {
+        std::string aad = "authenticated session headers";
+        std::string secret = "top secret keet payload 2026";
+        auto enc = keet::crypto::encryptAesGcm(key, iv, secret, aad);
+
+        std::string dec = keet::crypto::decryptAesGcm(key, iv, enc.ciphertext, enc.tag, aad);
+        REQUIRE(dec == secret);
+
+        // Tamper ciphertext
+        std::string tampered_ct = enc.ciphertext;
+        tampered_ct[0] ^= 0x01;
+        REQUIRE_THROWS_AS(keet::crypto::decryptAesGcm(key, iv, tampered_ct, enc.tag, aad), keet::error);
+
+        // Tamper AAD
+        REQUIRE_THROWS_AS(keet::crypto::decryptAesGcm(key, iv, enc.ciphertext, enc.tag, "wrong aad"), keet::error);
+
+        // Tamper tag
+        std::string tampered_tag = enc.tag;
+        tampered_tag[0] ^= 0x01;
+        REQUIRE_THROWS_AS(keet::crypto::decryptAesGcm(key, iv, enc.ciphertext, tampered_tag, aad), keet::error);
+    }
+
+    SECTION("parameter validation") {
+        REQUIRE_THROWS_AS(keet::crypto::encryptAesGcm("short_key", iv, plaintext), keet::error);
+        REQUIRE_THROWS_AS(keet::crypto::encryptAesGcm(key, "short_iv", plaintext), keet::error);
+    }
+}
+
+

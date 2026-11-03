@@ -1213,5 +1213,700 @@ inline std::string hmacSha512(const std::string& key, const std::string& message
     return h.digestHex();
 }
 
+// ============================================================================
+// Phase 3.1: Data Structures & Contracts (EncryptedPayload)
+// ============================================================================
+
+/// Container for AEAD authenticated encryption output (ciphertext, tag, IV, optional AAD).
+struct EncryptedPayload {
+    std::string ciphertext;
+    std::string tag;
+    std::string iv;
+    std::string aad;
+
+    /// Serializes IV, Tag, and Ciphertext into colon-separated hex format (ivHex:tagHex:ctHex).
+    std::string toCombinedHex() const {
+        return toHex(iv) + ":" + toHex(tag) + ":" + toHex(ciphertext);
+    }
+
+    /// Deserializes colon-separated hex format back into an EncryptedPayload.
+    static EncryptedPayload fromCombinedHex(const std::string& combined, const std::string& aad = "") {
+        auto first_colon = combined.find(':');
+        if (first_colon == std::string::npos) {
+            throw keet::error("CryptoError", "Invalid combined encrypted hex payload: missing ':' delimiter");
+        }
+        auto second_colon = combined.find(':', first_colon + 1);
+        if (second_colon == std::string::npos) {
+            throw keet::error("CryptoError", "Invalid combined encrypted hex payload: missing second ':' delimiter");
+        }
+        EncryptedPayload p;
+        p.iv = fromHex(combined.substr(0, first_colon));
+        p.tag = fromHex(combined.substr(first_colon + 1, second_colon - first_colon - 1));
+        p.ciphertext = fromHex(combined.substr(second_colon + 1));
+        p.aad = aad;
+        return p;
+    }
+};
+
+// ============================================================================
+// Phase 3.2: ChaCha20-Poly1305 (RFC 8439)
+// ============================================================================
+
+namespace detail {
+
+inline uint32_t load32Le(const uint8_t* p) noexcept {
+    return static_cast<uint32_t>(p[0]) |
+          (static_cast<uint32_t>(p[1]) << 8) |
+          (static_cast<uint32_t>(p[2]) << 16) |
+          (static_cast<uint32_t>(p[3]) << 24);
+}
+
+inline void store32Le(uint8_t* p, uint32_t v) noexcept {
+    p[0] = static_cast<uint8_t>(v);
+    p[1] = static_cast<uint8_t>(v >> 8);
+    p[2] = static_cast<uint8_t>(v >> 16);
+    p[3] = static_cast<uint8_t>(v >> 24);
+}
+
+inline uint64_t load64Be(const uint8_t* p) noexcept {
+    return (static_cast<uint64_t>(p[0]) << 56) |
+           (static_cast<uint64_t>(p[1]) << 48) |
+           (static_cast<uint64_t>(p[2]) << 40) |
+           (static_cast<uint64_t>(p[3]) << 32) |
+           (static_cast<uint64_t>(p[4]) << 24) |
+           (static_cast<uint64_t>(p[5]) << 16) |
+           (static_cast<uint64_t>(p[6]) << 8) |
+           (static_cast<uint64_t>(p[7]));
+}
+
+inline void store64Be(uint8_t* p, uint64_t v) noexcept {
+    p[0] = static_cast<uint8_t>(v >> 56);
+    p[1] = static_cast<uint8_t>(v >> 48);
+    p[2] = static_cast<uint8_t>(v >> 40);
+    p[3] = static_cast<uint8_t>(v >> 32);
+    p[4] = static_cast<uint8_t>(v >> 24);
+    p[5] = static_cast<uint8_t>(v >> 16);
+    p[6] = static_cast<uint8_t>(v >> 8);
+    p[7] = static_cast<uint8_t>(v);
+}
+
+inline void chachaQR(uint32_t& a, uint32_t& b, uint32_t& c, uint32_t& d) noexcept {
+    a += b; d ^= a; d = std::rotl(d, 16);
+    c += d; b ^= c; b = std::rotl(b, 12);
+    a += b; d ^= a; d = std::rotl(d, 8);
+    c += d; b ^= c; b = std::rotl(b, 7);
+}
+
+inline void chacha20Block(const uint8_t key[32], uint32_t counter, const uint8_t nonce[12], uint8_t out[64]) noexcept {
+    uint32_t state[16] = {
+        0x61707865, 0x3320646e, 0x79622d32, 0x6b206574,
+        load32Le(key),      load32Le(key + 4),  load32Le(key + 8),  load32Le(key + 12),
+        load32Le(key + 16), load32Le(key + 20), load32Le(key + 24), load32Le(key + 28),
+        counter,
+        load32Le(nonce),    load32Le(nonce + 4), load32Le(nonce + 8)
+    };
+    uint32_t working[16];
+    std::memcpy(working, state, sizeof(state));
+
+    for (int i = 0; i < 10; ++i) {
+        chachaQR(working[0], working[4], working[8],  working[12]);
+        chachaQR(working[1], working[5], working[9],  working[13]);
+        chachaQR(working[2], working[6], working[10], working[14]);
+        chachaQR(working[3], working[7], working[11], working[15]);
+        chachaQR(working[0], working[5], working[10], working[15]);
+        chachaQR(working[1], working[6], working[11], working[12]);
+        chachaQR(working[2], working[7], working[8],  working[13]);
+        chachaQR(working[3], working[4], working[9],  working[14]);
+    }
+
+    for (int i = 0; i < 16; ++i) {
+        store32Le(out + i * 4, working[i] + state[i]);
+    }
+}
+
+inline std::string chacha20Xor(const uint8_t key[32], uint32_t counter, const uint8_t nonce[12],
+                               const uint8_t* data, size_t len) {
+    std::string res;
+    res.resize(len);
+    uint8_t block[64];
+    for (size_t i = 0; i < len; i += 64) {
+        chacha20Block(key, counter++, nonce, block);
+        size_t chunk = std::min(len - i, size_t{64});
+        for (size_t j = 0; j < chunk; ++j) {
+            res[i + j] = static_cast<char>(data[i + j] ^ block[j]);
+        }
+    }
+    return res;
+}
+
+// ----------------------------------------------------------------------------
+// Poly1305 26-bit limb constant-time accumulator (modulo 2^130 - 5)
+// ----------------------------------------------------------------------------
+struct Poly1305 {
+    uint32_t r0{0}, r1{0}, r2{0}, r3{0}, r4{0};
+    uint32_t s1{0}, s2{0}, s3{0}, s4{0};
+    uint32_t h0{0}, h1{0}, h2{0}, h3{0}, h4{0};
+    uint8_t pad[16]{0};
+    uint8_t buffer[16]{0};
+    size_t buffer_len{0};
+
+    explicit Poly1305(const uint8_t key[32]) {
+        // Clamp r
+        uint32_t t0 = load32Le(key)       & 0x0fffffff;
+        uint32_t t1 = load32Le(key + 4)   & 0x0ffffffc;
+        uint32_t t2 = load32Le(key + 8)   & 0x0ffffffc;
+        uint32_t t3 = load32Le(key + 12)  & 0x0ffffffc;
+
+        r0 = t0 & 0x03ffffff;
+        r1 = ((t0 >> 26) | (t1 << 6)) & 0x03ffffff;
+        r2 = ((t1 >> 20) | (t2 << 12)) & 0x03ffffff;
+        r3 = ((t2 >> 14) | (t3 << 18)) & 0x03ffffff;
+        r4 = (t3 >> 8) & 0x03ffffff;
+
+        s1 = r1 * 5;
+        s2 = r2 * 5;
+        s3 = r3 * 5;
+        s4 = r4 * 5;
+
+        std::memcpy(pad, key + 16, 16);
+    }
+
+    void processBlock(const uint8_t* block, size_t bytes) {
+        uint8_t mp[17]{0};
+        std::memcpy(mp, block, bytes);
+        mp[bytes] = 1;
+
+        uint32_t t0 = load32Le(mp);
+        uint32_t t1 = load32Le(mp + 4);
+        uint32_t t2 = load32Le(mp + 8);
+        uint32_t t3 = load32Le(mp + 12);
+        uint32_t t4 = mp[16];
+
+        uint32_t m0 = t0 & 0x03ffffff;
+        uint32_t m1 = ((t0 >> 26) | (t1 << 6)) & 0x03ffffff;
+        uint32_t m2 = ((t1 >> 20) | (t2 << 12)) & 0x03ffffff;
+        uint32_t m3 = ((t2 >> 14) | (t3 << 18)) & 0x03ffffff;
+        uint32_t m4 = (t3 >> 8) | (t4 << 24);
+
+        h0 += m0;
+        h1 += m1;
+        h2 += m2;
+        h3 += m3;
+        h4 += m4;
+
+        uint64_t d0 = static_cast<uint64_t>(h0) * r0 + static_cast<uint64_t>(h1) * s4 +
+                      static_cast<uint64_t>(h2) * s3 + static_cast<uint64_t>(h3) * s2 +
+                      static_cast<uint64_t>(h4) * s1;
+        uint64_t d1 = static_cast<uint64_t>(h0) * r1 + static_cast<uint64_t>(h1) * r0 +
+                      static_cast<uint64_t>(h2) * s4 + static_cast<uint64_t>(h3) * s3 +
+                      static_cast<uint64_t>(h4) * s2;
+        uint64_t d2 = static_cast<uint64_t>(h0) * r2 + static_cast<uint64_t>(h1) * r1 +
+                      static_cast<uint64_t>(h2) * r0 + static_cast<uint64_t>(h3) * s4 +
+                      static_cast<uint64_t>(h4) * s3;
+        uint64_t d3 = static_cast<uint64_t>(h0) * r3 + static_cast<uint64_t>(h1) * r2 +
+                      static_cast<uint64_t>(h2) * r1 + static_cast<uint64_t>(h3) * r0 +
+                      static_cast<uint64_t>(h4) * s4;
+        uint64_t d4 = static_cast<uint64_t>(h0) * r4 + static_cast<uint64_t>(h1) * r3 +
+                      static_cast<uint64_t>(h2) * r2 + static_cast<uint64_t>(h3) * r1 +
+                      static_cast<uint64_t>(h4) * r0;
+
+        uint64_t c = d0 >> 26; h0 = static_cast<uint32_t>(d0) & 0x03ffffff; d1 += c;
+        c = d1 >> 26; h1 = static_cast<uint32_t>(d1) & 0x03ffffff; d2 += c;
+        c = d2 >> 26; h2 = static_cast<uint32_t>(d2) & 0x03ffffff; d3 += c;
+        c = d3 >> 26; h3 = static_cast<uint32_t>(d3) & 0x03ffffff; d4 += c;
+        c = d4 >> 26; h4 = static_cast<uint32_t>(d4) & 0x03ffffff; h0 += static_cast<uint32_t>(c * 5);
+        c = h0 >> 26; h0 &= 0x03ffffff; h1 += static_cast<uint32_t>(c);
+    }
+
+    void update(const uint8_t* data, size_t len) {
+        while (len > 0) {
+            size_t to_copy = std::min(len, size_t{16} - buffer_len);
+            std::memcpy(buffer + buffer_len, data, to_copy);
+            buffer_len += to_copy;
+            data += to_copy;
+            len -= to_copy;
+            if (buffer_len == 16) {
+                processBlock(buffer, 16);
+                buffer_len = 0;
+            }
+        }
+    }
+
+    std::string finalize() {
+        if (buffer_len > 0) {
+            processBlock(buffer, buffer_len);
+            buffer_len = 0;
+        }
+
+        uint32_t c = h1 >> 26; h1 &= 0x03ffffff; h2 += c;
+        c = h2 >> 26; h2 &= 0x03ffffff; h3 += c;
+        c = h3 >> 26; h3 &= 0x03ffffff; h4 += c;
+        c = h4 >> 26; h4 &= 0x03ffffff; h0 += c * 5;
+        c = h0 >> 26; h0 &= 0x03ffffff; h1 += c;
+
+        // Compute h + -p = h + 5
+        uint32_t g0 = h0 + 5; c = g0 >> 26; g0 &= 0x03ffffff;
+        uint32_t g1 = h1 + c; c = g1 >> 26; g1 &= 0x03ffffff;
+        uint32_t g2 = h2 + c; c = g2 >> 26; g2 &= 0x03ffffff;
+        uint32_t g3 = h3 + c; c = g3 >> 26; g3 &= 0x03ffffff;
+        uint32_t g4 = h4 + c - (1 << 26);
+
+        // Select h if h < p else g
+        uint32_t mask = (g4 >> 31) - 1;
+        g0 &= mask; g1 &= mask; g2 &= mask; g3 &= mask; g4 &= mask;
+        mask = ~mask;
+        h0 = (h0 & mask) | g0;
+        h1 = (h1 & mask) | g1;
+        h2 = (h2 & mask) | g2;
+        h3 = (h3 & mask) | g3;
+        h4 = (h4 & mask) | g4;
+
+        // Reconstruct 128-bit integer
+        uint32_t f0 = (h0) | (h1 << 26);
+        uint32_t f1 = (h1 >> 6) | (h2 << 20);
+        uint32_t f2 = (h2 >> 12) | (h3 << 14);
+        uint32_t f3 = (h3 >> 18) | (h4 << 8);
+
+        // Add pad
+        uint64_t carry = static_cast<uint64_t>(f0) + load32Le(pad);
+        f0 = static_cast<uint32_t>(carry);
+        carry = static_cast<uint64_t>(f1) + load32Le(pad + 4) + (carry >> 32);
+        f1 = static_cast<uint32_t>(carry);
+        carry = static_cast<uint64_t>(f2) + load32Le(pad + 8) + (carry >> 32);
+        f2 = static_cast<uint32_t>(carry);
+        carry = static_cast<uint64_t>(f3) + load32Le(pad + 12) + (carry >> 32);
+        f3 = static_cast<uint32_t>(carry);
+
+        std::string tag(16, '\0');
+        store32Le(reinterpret_cast<uint8_t*>(tag.data()), f0);
+        store32Le(reinterpret_cast<uint8_t*>(tag.data()) + 4, f1);
+        store32Le(reinterpret_cast<uint8_t*>(tag.data()) + 8, f2);
+        store32Le(reinterpret_cast<uint8_t*>(tag.data()) + 12, f3);
+        return tag;
+    }
+};
+
+} // namespace detail
+
+/// Encrypts plaintext using ChaCha20-Poly1305 authenticated encryption (RFC 8439).
+inline EncryptedPayload encryptChaCha20Poly1305(const std::string& key, const std::string& nonce,
+                                                const std::string& plaintext, const std::string& aad = "") {
+    if (key.size() != 32) {
+        throw keet::error("CryptoError", "ChaCha20 key must be exactly 32 bytes (got " + std::to_string(key.size()) + ")");
+    }
+    if (nonce.size() != 12) {
+        throw keet::error("CryptoError", "ChaCha20 nonce must be exactly 12 bytes (got " + std::to_string(nonce.size()) + ")");
+    }
+
+    const uint8_t* k_ptr = reinterpret_cast<const uint8_t*>(key.data());
+    const uint8_t* n_ptr = reinterpret_cast<const uint8_t*>(nonce.data());
+
+    // Generate 32-byte Poly1305 key with counter = 0
+    uint8_t poly_key[64];
+    detail::chacha20Block(k_ptr, 0, n_ptr, poly_key);
+
+    // Encrypt plaintext with counter = 1
+    std::string ciphertext = detail::chacha20Xor(k_ptr, 1, n_ptr,
+                                                 reinterpret_cast<const uint8_t*>(plaintext.data()),
+                                                 plaintext.size());
+
+    // Compute Poly1305 tag over AAD || pad || ciphertext || pad || len(AAD) || len(ciphertext)
+    detail::Poly1305 poly(poly_key);
+    if (!aad.empty()) {
+        poly.update(reinterpret_cast<const uint8_t*>(aad.data()), aad.size());
+        if (aad.size() % 16 != 0) {
+            uint8_t zero_pad[16]{0};
+            poly.update(zero_pad, 16 - (aad.size() % 16));
+        }
+    }
+    if (!ciphertext.empty()) {
+        poly.update(reinterpret_cast<const uint8_t*>(ciphertext.data()), ciphertext.size());
+        if (ciphertext.size() % 16 != 0) {
+            uint8_t zero_pad[16]{0};
+            poly.update(zero_pad, 16 - (ciphertext.size() % 16));
+        }
+    }
+
+    uint8_t len_bytes[16];
+    detail::store32Le(len_bytes, static_cast<uint32_t>(aad.size()));
+    detail::store32Le(len_bytes + 4, static_cast<uint32_t>(static_cast<uint64_t>(aad.size()) >> 32));
+    detail::store32Le(len_bytes + 8, static_cast<uint32_t>(ciphertext.size()));
+    detail::store32Le(len_bytes + 12, static_cast<uint32_t>(static_cast<uint64_t>(ciphertext.size()) >> 32));
+    poly.update(len_bytes, 16);
+
+    std::string tag = poly.finalize();
+
+    EncryptedPayload payload;
+    payload.ciphertext = std::move(ciphertext);
+    payload.tag = std::move(tag);
+    payload.iv = nonce;
+    payload.aad = aad;
+    return payload;
+}
+
+/// Decrypts ciphertext using ChaCha20-Poly1305 authenticated encryption (RFC 8439).
+inline std::string decryptChaCha20Poly1305(const std::string& key, const std::string& nonce,
+                                          const std::string& ciphertext, const std::string& tag,
+                                          const std::string& aad = "") {
+    if (key.size() != 32) {
+        throw keet::error("CryptoError", "ChaCha20 key must be exactly 32 bytes");
+    }
+    if (nonce.size() != 12) {
+        throw keet::error("CryptoError", "ChaCha20 nonce must be exactly 12 bytes");
+    }
+    if (tag.size() != 16) {
+        throw keet::error("CryptoError", "Poly1305 authentication tag must be exactly 16 bytes");
+    }
+
+    const uint8_t* k_ptr = reinterpret_cast<const uint8_t*>(key.data());
+    const uint8_t* n_ptr = reinterpret_cast<const uint8_t*>(nonce.data());
+
+    uint8_t poly_key[64];
+    detail::chacha20Block(k_ptr, 0, n_ptr, poly_key);
+
+    detail::Poly1305 poly(poly_key);
+    if (!aad.empty()) {
+        poly.update(reinterpret_cast<const uint8_t*>(aad.data()), aad.size());
+        if (aad.size() % 16 != 0) {
+            uint8_t zero_pad[16]{0};
+            poly.update(zero_pad, 16 - (aad.size() % 16));
+        }
+    }
+    if (!ciphertext.empty()) {
+        poly.update(reinterpret_cast<const uint8_t*>(ciphertext.data()), ciphertext.size());
+        if (ciphertext.size() % 16 != 0) {
+            uint8_t zero_pad[16]{0};
+            poly.update(zero_pad, 16 - (ciphertext.size() % 16));
+        }
+    }
+
+    uint8_t len_bytes[16];
+    detail::store32Le(len_bytes, static_cast<uint32_t>(aad.size()));
+    detail::store32Le(len_bytes + 4, static_cast<uint32_t>(static_cast<uint64_t>(aad.size()) >> 32));
+    detail::store32Le(len_bytes + 8, static_cast<uint32_t>(ciphertext.size()));
+    detail::store32Le(len_bytes + 12, static_cast<uint32_t>(static_cast<uint64_t>(ciphertext.size()) >> 32));
+    poly.update(len_bytes, 16);
+
+    std::string expected_tag = poly.finalize();
+    if (!timingSafeEqual(expected_tag, tag)) {
+        throw keet::error("CryptoError", "Authentication tag verification failed (ciphertext tampered or incorrect key)");
+    }
+
+    return detail::chacha20Xor(k_ptr, 1, n_ptr,
+                              reinterpret_cast<const uint8_t*>(ciphertext.data()),
+                              ciphertext.size());
+}
+
+// ============================================================================
+// Phase 3.3: AES-256-GCM (NIST SP 800-38D)
+// ============================================================================
+
+namespace detail {
+
+inline constexpr uint8_t AES_SBOX[256] = {
+    0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
+    0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
+    0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
+    0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96, 0x05, 0x9a, 0x07, 0x12, 0x80, 0xe2, 0xeb, 0x27, 0xb2, 0x75,
+    0x09, 0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0, 0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3, 0x2f, 0x84,
+    0x53, 0xd1, 0x00, 0xed, 0x20, 0xfc, 0xb1, 0x5b, 0x6a, 0xcb, 0xbe, 0x39, 0x4a, 0x4c, 0x58, 0xcf,
+    0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85, 0x45, 0xf9, 0x02, 0x7f, 0x50, 0x3c, 0x9f, 0xa8,
+    0x51, 0xa3, 0x40, 0x8f, 0x92, 0x9d, 0x38, 0xf5, 0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3, 0xd2,
+    0xcd, 0x0c, 0x13, 0xec, 0x5f, 0x97, 0x44, 0x17, 0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19, 0x73,
+    0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88, 0x46, 0xee, 0xb8, 0x14, 0xde, 0x5e, 0x0b, 0xdb,
+    0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c, 0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79,
+    0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5, 0x4e, 0xa9, 0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08,
+    0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
+    0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e, 0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e,
+    0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
+    0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16
+};
+
+inline constexpr uint8_t AES_RCON[10] = {
+    0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36
+};
+
+inline uint32_t aesSubWord(uint32_t w) noexcept {
+    return (static_cast<uint32_t>(AES_SBOX[(w >> 24) & 0xFF]) << 24) |
+           (static_cast<uint32_t>(AES_SBOX[(w >> 16) & 0xFF]) << 16) |
+           (static_cast<uint32_t>(AES_SBOX[(w >> 8) & 0xFF]) << 8) |
+           (static_cast<uint32_t>(AES_SBOX[w & 0xFF]));
+}
+
+inline uint8_t aesXtime(uint8_t a) noexcept {
+    return (a & 0x80) ? static_cast<uint8_t>((a << 1) ^ 0x1b) : static_cast<uint8_t>(a << 1);
+}
+
+inline void aes256KeyExpansion(const uint8_t key[32], uint32_t round_keys[60]) noexcept {
+    for (int i = 0; i < 8; ++i) {
+        round_keys[i] = (static_cast<uint32_t>(key[i * 4]) << 24) |
+                        (static_cast<uint32_t>(key[i * 4 + 1]) << 16) |
+                        (static_cast<uint32_t>(key[i * 4 + 2]) << 8) |
+                        (static_cast<uint32_t>(key[i * 4 + 3]));
+    }
+    for (int i = 8; i < 60; ++i) {
+        uint32_t temp = round_keys[i - 1];
+        if (i % 8 == 0) {
+            temp = aesSubWord(std::rotl(temp, 8)) ^ (static_cast<uint32_t>(AES_RCON[(i / 8) - 1]) << 24);
+        } else if (i % 8 == 4) {
+            temp = aesSubWord(temp);
+        }
+        round_keys[i] = round_keys[i - 8] ^ temp;
+    }
+}
+
+inline void aesEncryptBlock(const uint8_t pt[16], const uint32_t round_keys[60], uint8_t ct[16]) noexcept {
+    uint8_t state[16];
+    std::memcpy(state, pt, 16);
+
+    for (int i = 0; i < 16; ++i) {
+        state[i] ^= static_cast<uint8_t>((round_keys[i / 4] >> (24 - 8 * (i % 4))) & 0xFF);
+    }
+
+    for (int r = 1; r <= 14; ++r) {
+        for (int i = 0; i < 16; ++i) {
+            state[i] = AES_SBOX[state[i]];
+        }
+        uint8_t t0 = state[0], t1 = state[5], t2 = state[10], t3 = state[15];
+        uint8_t t4 = state[4], t5 = state[9], t6 = state[14], t7 = state[3];
+        uint8_t t8 = state[8], t9 = state[13], t10 = state[2], t11 = state[7];
+        uint8_t t12 = state[12], t13 = state[1], t14 = state[6], t15 = state[11];
+
+        state[0] = t0; state[1] = t1; state[2] = t2; state[3] = t3;
+        state[4] = t4; state[5] = t5; state[6] = t6; state[7] = t7;
+        state[8] = t8; state[9] = t9; state[10] = t10; state[11] = t11;
+        state[12] = t12; state[13] = t13; state[14] = t14; state[15] = t15;
+
+        if (r < 14) {
+            for (int c = 0; c < 4; ++c) {
+                uint8_t a0 = state[c * 4];
+                uint8_t a1 = state[c * 4 + 1];
+                uint8_t a2 = state[c * 4 + 2];
+                uint8_t a3 = state[c * 4 + 3];
+                uint8_t t = a0 ^ a1 ^ a2 ^ a3;
+                state[c * 4]     = a0 ^ t ^ aesXtime(a0 ^ a1);
+                state[c * 4 + 1] = a1 ^ t ^ aesXtime(a1 ^ a2);
+                state[c * 4 + 2] = a2 ^ t ^ aesXtime(a2 ^ a3);
+                state[c * 4 + 3] = a3 ^ t ^ aesXtime(a3 ^ a0);
+            }
+        }
+
+        for (int i = 0; i < 16; ++i) {
+            state[i] ^= static_cast<uint8_t>((round_keys[r * 4 + (i / 4)] >> (24 - 8 * (i % 4))) & 0xFF);
+        }
+    }
+    std::memcpy(ct, state, 16);
+}
+
+inline void gf128Multiply(const uint8_t x[16], const uint8_t y[16], uint8_t out[16]) noexcept {
+    uint64_t z_hi = 0, z_lo = 0;
+    uint64_t v_hi = load64Be(y);
+    uint64_t v_lo = load64Be(y + 8);
+    constexpr uint64_t R = 0xe100000000000000ULL;
+
+    for (int i = 0; i < 16; ++i) {
+        uint8_t b = x[i];
+        for (int bit = 7; bit >= 0; --bit) {
+            if ((b >> bit) & 1) {
+                z_hi ^= v_hi;
+                z_lo ^= v_lo;
+            }
+            bool lsb = (v_lo & 1) != 0;
+            v_lo = ((v_lo >> 1) | ((v_hi & 1) << 63));
+            v_hi >>= 1;
+            if (lsb) {
+                v_hi ^= R;
+            }
+        }
+    }
+    store64Be(out, z_hi);
+    store64Be(out + 8, z_lo);
+}
+
+inline void ghashBlock(uint8_t y[16], const uint8_t block[16], const uint8_t h[16]) noexcept {
+    uint8_t xor_block[16];
+    for (int i = 0; i < 16; ++i) {
+        xor_block[i] = y[i] ^ block[i];
+    }
+    gf128Multiply(xor_block, h, y);
+}
+
+} // namespace detail
+
+/// Encrypts plaintext using AES-256-GCM authenticated encryption (NIST SP 800-38D).
+inline EncryptedPayload encryptAesGcm(const std::string& key, const std::string& iv,
+                                      const std::string& plaintext, const std::string& aad = "") {
+    if (key.size() != 32) {
+        throw keet::error("CryptoError", "AES-256 key must be exactly 32 bytes (got " + std::to_string(key.size()) + ")");
+    }
+    if (iv.size() != 12) {
+        throw keet::error("CryptoError", "AES-GCM IV must be exactly 12 bytes (got " + std::to_string(iv.size()) + ")");
+    }
+
+    const uint8_t* k_ptr = reinterpret_cast<const uint8_t*>(key.data());
+    uint32_t round_keys[60];
+    detail::aes256KeyExpansion(k_ptr, round_keys);
+
+    // Compute H = AES(0^16)
+    uint8_t zero_block[16]{0};
+    uint8_t H[16];
+    detail::aesEncryptBlock(zero_block, round_keys, H);
+
+    // J0 = IV || 0^31 1
+    uint8_t J0[16];
+    std::memcpy(J0, iv.data(), 12);
+    J0[12] = 0; J0[13] = 0; J0[14] = 0; J0[15] = 1;
+
+    // Tag mask = AES(J0)
+    uint8_t tag_mask[16];
+    detail::aesEncryptBlock(J0, round_keys, tag_mask);
+
+    // CTR1 = inc32(J0)
+    uint8_t ctr[16];
+    std::memcpy(ctr, J0, 16);
+    ctr[15] = 2; // 1 + 1 = 2
+
+    // AES-CTR encrypt plaintext
+    std::string ciphertext;
+    ciphertext.resize(plaintext.size());
+    uint8_t stream[16];
+    for (size_t i = 0; i < plaintext.size(); i += 16) {
+        detail::aesEncryptBlock(ctr, round_keys, stream);
+        size_t chunk = std::min(plaintext.size() - i, size_t{16});
+        for (size_t j = 0; j < chunk; ++j) {
+            ciphertext[i + j] = static_cast<char>(plaintext[i + j] ^ stream[j]);
+        }
+        // inc32(ctr)
+        uint32_t c_val = (static_cast<uint32_t>(ctr[12]) << 24) |
+                         (static_cast<uint32_t>(ctr[13]) << 16) |
+                         (static_cast<uint32_t>(ctr[14]) << 8) |
+                         (static_cast<uint32_t>(ctr[15]));
+        c_val++;
+        ctr[12] = static_cast<uint8_t>(c_val >> 24);
+        ctr[13] = static_cast<uint8_t>(c_val >> 16);
+        ctr[14] = static_cast<uint8_t>(c_val >> 8);
+        ctr[15] = static_cast<uint8_t>(c_val);
+    }
+
+    // GHASH over AAD || pad || ciphertext || pad || len(AAD)_bits || len(ciphertext)_bits
+    uint8_t S[16]{0};
+    for (size_t i = 0; i < aad.size(); i += 16) {
+        uint8_t b[16]{0};
+        size_t chunk = std::min(aad.size() - i, size_t{16});
+        std::memcpy(b, aad.data() + i, chunk);
+        detail::ghashBlock(S, b, H);
+    }
+    for (size_t i = 0; i < ciphertext.size(); i += 16) {
+        uint8_t b[16]{0};
+        size_t chunk = std::min(ciphertext.size() - i, size_t{16});
+        std::memcpy(b, ciphertext.data() + i, chunk);
+        detail::ghashBlock(S, b, H);
+    }
+
+    uint8_t len_block[16];
+    detail::store64Be(len_block, static_cast<uint64_t>(aad.size()) * 8);
+    detail::store64Be(len_block + 8, static_cast<uint64_t>(ciphertext.size()) * 8);
+    detail::ghashBlock(S, len_block, H);
+
+    // Tag = S ^ tag_mask
+    std::string tag(16, '\0');
+    for (int i = 0; i < 16; ++i) {
+        tag[i] = static_cast<char>(S[i] ^ tag_mask[i]);
+    }
+
+    EncryptedPayload payload;
+    payload.ciphertext = std::move(ciphertext);
+    payload.tag = std::move(tag);
+    payload.iv = iv;
+    payload.aad = aad;
+    return payload;
+}
+
+/// Decrypts ciphertext using AES-256-GCM authenticated encryption (NIST SP 800-38D).
+inline std::string decryptAesGcm(const std::string& key, const std::string& iv,
+                                const std::string& ciphertext, const std::string& tag,
+                                const std::string& aad = "") {
+    if (key.size() != 32) {
+        throw keet::error("CryptoError", "AES-256 key must be exactly 32 bytes");
+    }
+    if (iv.size() != 12) {
+        throw keet::error("CryptoError", "AES-GCM IV must be exactly 12 bytes");
+    }
+    if (tag.size() != 16) {
+        throw keet::error("CryptoError", "AES-GCM authentication tag must be exactly 16 bytes");
+    }
+
+    const uint8_t* k_ptr = reinterpret_cast<const uint8_t*>(key.data());
+    uint32_t round_keys[60];
+    detail::aes256KeyExpansion(k_ptr, round_keys);
+
+    uint8_t zero_block[16]{0};
+    uint8_t H[16];
+    detail::aesEncryptBlock(zero_block, round_keys, H);
+
+    uint8_t J0[16];
+    std::memcpy(J0, iv.data(), 12);
+    J0[12] = 0; J0[13] = 0; J0[14] = 0; J0[15] = 1;
+
+    uint8_t tag_mask[16];
+    detail::aesEncryptBlock(J0, round_keys, tag_mask);
+
+    uint8_t S[16]{0};
+    for (size_t i = 0; i < aad.size(); i += 16) {
+        uint8_t b[16]{0};
+        size_t chunk = std::min(aad.size() - i, size_t{16});
+        std::memcpy(b, aad.data() + i, chunk);
+        detail::ghashBlock(S, b, H);
+    }
+    for (size_t i = 0; i < ciphertext.size(); i += 16) {
+        uint8_t b[16]{0};
+        size_t chunk = std::min(ciphertext.size() - i, size_t{16});
+        std::memcpy(b, ciphertext.data() + i, chunk);
+        detail::ghashBlock(S, b, H);
+    }
+
+    uint8_t len_block[16];
+    detail::store64Be(len_block, static_cast<uint64_t>(aad.size()) * 8);
+    detail::store64Be(len_block + 8, static_cast<uint64_t>(ciphertext.size()) * 8);
+    detail::ghashBlock(S, len_block, H);
+
+    std::string expected_tag(16, '\0');
+    for (int i = 0; i < 16; ++i) {
+        expected_tag[i] = static_cast<char>(S[i] ^ tag_mask[i]);
+    }
+
+    if (!timingSafeEqual(expected_tag, tag)) {
+        throw keet::error("CryptoError", "Authentication tag verification failed (ciphertext tampered or incorrect key)");
+    }
+
+    // Decrypt ciphertext using AES-CTR
+    uint8_t ctr[16];
+    std::memcpy(ctr, J0, 16);
+    ctr[15] = 2;
+
+    std::string plaintext;
+    plaintext.resize(ciphertext.size());
+    uint8_t stream[16];
+    for (size_t i = 0; i < ciphertext.size(); i += 16) {
+        detail::aesEncryptBlock(ctr, round_keys, stream);
+        size_t chunk = std::min(ciphertext.size() - i, size_t{16});
+        for (size_t j = 0; j < chunk; ++j) {
+            plaintext[i + j] = static_cast<char>(ciphertext[i + j] ^ stream[j]);
+        }
+        uint32_t c_val = (static_cast<uint32_t>(ctr[12]) << 24) |
+                         (static_cast<uint32_t>(ctr[13]) << 16) |
+                         (static_cast<uint32_t>(ctr[14]) << 8) |
+                         (static_cast<uint32_t>(ctr[15]));
+        c_val++;
+        ctr[12] = static_cast<uint8_t>(c_val >> 24);
+        ctr[13] = static_cast<uint8_t>(c_val >> 16);
+        ctr[14] = static_cast<uint8_t>(c_val >> 8);
+        ctr[15] = static_cast<uint8_t>(c_val);
+    }
+
+    return plaintext;
+}
+
 } // namespace keet::crypto
+
 

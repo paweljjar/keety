@@ -206,7 +206,7 @@ let scannedUrl: string = crypto.decodeQr(qr.matrix) zonk "decode failed";
 ### Part 3: Authenticated Symmetric Encryption (AEAD)
 
 #### Phase 3.1: Data Structures & Contracts
-- [ ] **Task 3.1.1: Encrypted Payload Type**
+- [x] **Task 3.1.1: Encrypted Payload Type**
   - Define standard struct/class:
     ```keet
     class EncryptedPayload {
@@ -219,20 +219,20 @@ let scannedUrl: string = crypto.decodeQr(qr.matrix) zonk "decode failed";
   - Serialization helpers (`payload.toCombinedHex()` and `EncryptedPayload.fromCombinedHex()`).
 
 #### Phase 3.2: ChaCha20-Poly1305 (RFC 8439)
-- [ ] **Task 3.2.1: ChaCha20 Stream Cipher**
+- [x] **Task 3.2.1: ChaCha20 Stream Cipher**
   - Quarter-round quarter-state matrix operations in constant-time (no lookup tables, immune to cache attacks).
-- [ ] **Task 3.2.2: Poly1305 One-Time Authenticator**
+- [x] **Task 3.2.2: Poly1305 One-Time Authenticator**
   - Clamped key derivation and 130-bit polynomial evaluation ($\text{mod } 2^{130} - 5$).
-- [ ] **Task 3.2.3: ChaCha20-Poly1305 AEAD Construction**
+- [x] **Task 3.2.3: ChaCha20-Poly1305 AEAD Construction**
   - `encryptChaCha20Poly1305(key: string, nonce: string, plaintext: string, aad: string = "") -> EncryptedPayload`.
   - `decryptChaCha20Poly1305(key: string, nonce: string, ciphertext: string, tag: string, aad: string = "") -> string`.
 
 #### Phase 3.3: AES-256-GCM (NIST SP 800-38D)
-- [ ] **Task 3.3.1: Constant-Time AES-256 Core**
+- [x] **Task 3.3.1: Constant-Time AES-256 Core**
   - Key expansion for 14 rounds; constant-time / bitsliced S-box to prevent cache timing leaks.
-- [ ] **Task 3.3.2: Galois Counter Mode (GHASH over $\text{GF}(2^{128})$)**
+- [x] **Task 3.3.2: Galois Counter Mode (GHASH over $\text{GF}(2^{128})$)**
   - Carryless multiplication and authentication tag computation.
-- [ ] **Task 3.3.3: AES-256-GCM API**
+- [x] **Task 3.3.3: AES-256-GCM API**
   - `encryptAesGcm(key: string, iv: string, plaintext: string, aad: string = "") -> EncryptedPayload`.
   - `decryptAesGcm(key: string, iv: string, ciphertext: string, tag: string, aad: string = "") -> string`.
 
