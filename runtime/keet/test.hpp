@@ -11,6 +11,7 @@
 #include <functional>
 #include <iostream>
 #include <optional>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -221,16 +222,35 @@ public:
         return cases_;
     }
 
-    /// Execute all registered test cases, optionally filtered by pattern.
+    /// Execute all registered test cases, optionally filtered by pattern (regex with substring fallback).
     TestSummary runAll(const std::string& filter = "", bool failFast = false) {
         TestSummary summary;
         auto startTotal = std::chrono::steady_clock::now();
 
+        std::optional<std::regex> compiledRegex;
+        if (!filter.empty()) {
+            try {
+                compiledRegex = std::regex(filter, std::regex::icase);
+            } catch (const std::regex_error&) {
+                compiledRegex = std::nullopt;
+            }
+        }
+
         for (const auto& tc : cases_) {
-            // Apply filter if specified (substring match across suite or name)
+            // Apply filter if specified (regex or substring match across suite, name, or full identifier)
             if (!filter.empty()) {
                 std::string full = tc.suite.empty() ? tc.name : tc.suite + " > " + tc.name;
-                if (full.find(filter) == std::string::npos) {
+                bool matched = false;
+                if (compiledRegex.has_value()) {
+                    matched = std::regex_search(full, *compiledRegex) ||
+                              std::regex_search(tc.name, *compiledRegex) ||
+                              (!tc.suite.empty() && std::regex_search(tc.suite, *compiledRegex));
+                } else {
+                    matched = (full.find(filter) != std::string::npos) ||
+                              (tc.name.find(filter) != std::string::npos) ||
+                              (!tc.suite.empty() && tc.suite.find(filter) != std::string::npos);
+                }
+                if (!matched) {
                     summary.skipped++;
                     continue;
                 }
@@ -426,6 +446,49 @@ inline std::string summaryToJson(const TestSummary& summary) {
     return json.str();
 }
 
+/// Format test summary as TAP version 13.
+inline std::string summaryToTap(const TestSummary& summary, const std::string& filePrefix = "") {
+    std::ostringstream tap;
+    tap << "TAP version 13\n";
+    tap << "1.." << summary.results.size() << "\n";
+    for (size_t i = 0; i < summary.results.size(); ++i) {
+        const auto& r = summary.results[i];
+        std::string fullName;
+        if (!filePrefix.empty()) {
+            fullName = filePrefix + " > ";
+        }
+        if (!r.suite.empty()) {
+            fullName += r.suite + " > ";
+        }
+        fullName += r.name;
+
+        int64_t caseMs = r.durationNs / 1'000'000;
+        if (r.passed) {
+            tap << "ok " << (i + 1) << " - " << fullName << " # time=" << caseMs << "ms\n";
+        } else {
+            tap << "not ok " << (i + 1) << " - " << fullName << " # time=" << caseMs << "ms\n";
+            if (r.failure) {
+                tap << "  ---\n";
+                tap << "  message: \"" << jsonEscape(r.failure->message) << "\"\n";
+                if (!r.failure->expected.empty()) {
+                    tap << "  expected: \"" << jsonEscape(r.failure->expected) << "\"\n";
+                }
+                if (!r.failure->actual.empty()) {
+                    tap << "  actual: \"" << jsonEscape(r.failure->actual) << "\"\n";
+                }
+                if (!r.failure->file.empty()) {
+                    tap << "  file: \"" << jsonEscape(r.failure->file) << "\"\n";
+                }
+                if (r.failure->line > 0) {
+                    tap << "  line: " << r.failure->line << "\n";
+                }
+                tap << "  ...\n";
+            }
+        }
+    }
+    return tap.str();
+}
+
 } // namespace keet::test
 
 namespace keet_module_test {
@@ -488,17 +551,22 @@ inline void fail(const std::string& msg = "test failed explicitly") {
 inline int64_t run(const std::string& filter = "") {
     std::string activeFilter = filter;
     bool jsonMode = false;
+    bool tapMode = false;
     bool failFast = false;
     const auto& args = keet::sys::args();
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--json" || args[i] == "--keet-test-json") jsonMode = true;
+        else if (args[i] == "--tap") tapMode = true;
         else if (args[i] == "--fail-fast") failFast = true;
-        else if (activeFilter.empty() && args[i] == "--filter" && i + 1 < args.size()) activeFilter = args[++i];
+        else if (activeFilter.empty() && (args[i] == "--filter" || args[i] == "-f") && i + 1 < args.size()) activeFilter = args[++i];
         else if (activeFilter.empty() && args[i].rfind("--filter=", 0) == 0) activeFilter = args[i].substr(9);
+        else if (activeFilter.empty() && args[i].rfind("-f=", 0) == 0) activeFilter = args[i].substr(3);
     }
     auto summary = keet::test::Registry::instance().runAll(activeFilter, failFast);
     if (jsonMode) {
         std::cout << keet::test::summaryToJson(summary) << "\n";
+    } else if (tapMode) {
+        std::cout << keet::test::summaryToTap(summary) << "\n";
     } else {
         keet::test::printSummary(summary, std::cout, true);
     }

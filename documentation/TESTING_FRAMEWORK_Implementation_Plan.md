@@ -237,11 +237,13 @@ flowchart LR
 - Generate test runner compilation harness.
 - Implement ANSI colorized console reporter with test pass/fail indicators and execution timings.
 
-### Phase 4: CLI Options, Filtering & Reporting (`--filter`, `--json`, TAP)
-- Implement `--filter <pattern>` matching against test names and suites.
-- Implement `--json` output format for CI and editor integrations.
-- Implement `--fail-fast` mode.
-- Verify `kattery test` integration.
+### Phase 4: CLI Options, Filtering & Reporting (`--filter`, `--json`, TAP) - [COMPLETED]
+- Implemented `-f, --filter <pattern>` matching with `std::regex` and substring fallback against test names, suites, and identifiers.
+- Implemented `--json` structured reporter emitting aggregated summary and test results to standard output (suppressing terminal ANSI formatting).
+- Implemented `--tap` reporter emitting Test Anything Protocol (TAP version 13) output.
+- Implemented `--fail-fast` mode aborting execution on the first assertion failure across tests and files.
+- Verified seamless `kattery test` integration executing `"test": "keety test"` from `pedigree.json`.
+- Added unit and end-to-end integration tests in `tests/unit/test_cli_driver.cpp` and `tests/unit/test_runtime_test.cpp`.
 
 ### Phase 5: Conformance Test Suite & Documentation
 - Author end-to-end conformance tests in `tests/conformance/positive/13_test/`.

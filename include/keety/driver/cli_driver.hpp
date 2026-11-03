@@ -59,6 +59,8 @@ struct CliOptions {
     bool test_benchmarks{false};
     std::string test_filter{};
     bool test_fail_fast{false};
+    bool test_json{false};
+    bool test_tap{false};
     std::vector<std::string> run_args{};
     diag::ColorMode color_mode{diag::ColorMode::Never};
     DiagnosticFormat diagnostic_format{DiagnosticFormat::Human};

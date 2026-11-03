@@ -475,6 +475,11 @@ CliOptions CliDriver::parse_args(const std::vector<std::string>& args) {
             options.test_filter = arg.substr(3);
         } else if (arg == "--fail-fast") {
             options.test_fail_fast = true;
+        } else if (arg == "--json") {
+            options.test_json = true;
+            options.diagnostic_format = DiagnosticFormat::Json;
+        } else if (arg == "--tap") {
+            options.test_tap = true;
         } else if (arg == "-h" || arg == "--help") {
             options.command = CliCommand::Help;
             return options;
@@ -578,6 +583,8 @@ void CliDriver::print_help(std::ostream& out) {
         << "  --wrapv                              Enforce two's-complement overflow semantics\n"
         << "  -v, --verbose                        Enable verbose diagnostics and phase timings\n"
         << "  -f, --filter <pattern>               Filter test cases by name or suite\n"
+        << "  --json                               Emit structured JSON test summary to standard output\n"
+        << "  --tap                                Emit Test Anything Protocol (TAP version 13) output\n"
         << "  --fail-fast                          Abort test execution on the first failure\n"
         << "  --benchmarks                         Run performance benchmarks suite\n"
         << "  --conformance                        Run conformance test suite\n"
@@ -1498,7 +1505,25 @@ int CliDriver::execute_test(const CliOptions& options, std::ostream& out, std::o
     auto test_files = discover_test_files(target);
 
     if (test_files.empty()) {
-        out << "No test files found in " << target.string() << ".\n";
+        if (options.test_json) {
+            out << "{\n"
+                << "  \"total\": 0,\n"
+                << "  \"passed\": 0,\n"
+                << "  \"failed\": 0,\n"
+                << "  \"skipped\": 0,\n"
+                << "  \"totalDurationNs\": 0,\n"
+                << "  \"testFiles\": {\n"
+                << "    \"total\": 0,\n"
+                << "    \"passed\": 0,\n"
+                << "    \"failed\": 0\n"
+                << "  },\n"
+                << "  \"results\": []\n"
+                << "}\n";
+        } else if (options.test_tap) {
+            out << "TAP version 13\n1..0\n";
+        } else {
+            out << "No test files found in " << target.string() << ".\n";
+        }
         return 0;
     }
 
@@ -1526,11 +1551,18 @@ int CliDriver::execute_test(const CliOptions& options, std::ostream& out, std::o
     const char* cBold = use_color ? "\033[1m" : "";
     const char* cReset = use_color ? "\033[0m" : "";
 
+    struct AggregatedCaseResult {
+        std::string file;
+        keet::test::TestCaseResult result;
+    };
+    std::vector<AggregatedCaseResult> all_results;
+
     int total_files = static_cast<int>(test_files.size());
     int files_passed = 0;
     int files_failed = 0;
     int total_cases_passed = 0;
     int total_cases_failed = 0;
+    int total_cases_skipped = 0;
     int total_cases = 0;
     auto suite_start = std::chrono::steady_clock::now();
 
@@ -1545,10 +1577,27 @@ int CliDriver::execute_test(const CliOptions& options, std::ostream& out, std::o
 
         if (!bin) {
             files_failed++;
-            out << failBadge << " " << test_path.string() << " (compilation failed)\n";
-            std::string err_str = build_err.str();
-            if (!err_str.empty()) {
-                err << err_str << "\n";
+            keet::test::TestCaseResult comp_res;
+            comp_res.name = "compilation";
+            comp_res.suite = "";
+            comp_res.passed = false;
+            comp_res.durationNs = 0;
+            keet::test::TestFailure tf;
+            tf.message = "compilation failed";
+            tf.file = test_path.string();
+            tf.line = 0;
+            tf.errorType = "CompilationError";
+            comp_res.failure = std::move(tf);
+            all_results.push_back({test_path.filename().string(), std::move(comp_res)});
+            total_cases_failed++;
+            total_cases++;
+
+            if (!options.test_json && !options.test_tap) {
+                out << failBadge << " " << test_path.string() << " (compilation failed)\n";
+                std::string err_str = build_err.str();
+                if (!err_str.empty()) {
+                    err << err_str << "\n";
+                }
             }
             if (options.test_fail_fast) {
                 break;
@@ -1575,7 +1624,24 @@ int CliDriver::execute_test(const CliOptions& options, std::ostream& out, std::o
 #endif
         if (!pipe) {
             files_failed++;
-            out << failBadge << " " << test_path.string() << " (failed to launch test process)\n\n";
+            keet::test::TestCaseResult proc_res;
+            proc_res.name = "process";
+            proc_res.suite = "";
+            proc_res.passed = false;
+            proc_res.durationNs = 0;
+            keet::test::TestFailure tf;
+            tf.message = "failed to launch test process";
+            tf.file = test_path.string();
+            tf.line = 0;
+            tf.errorType = "ProcessError";
+            proc_res.failure = std::move(tf);
+            all_results.push_back({test_path.filename().string(), std::move(proc_res)});
+            total_cases_failed++;
+            total_cases++;
+
+            if (!options.test_json && !options.test_tap) {
+                out << failBadge << " " << test_path.string() << " (failed to launch test process)\n\n";
+            }
             if (options.test_fail_fast) break;
             continue;
         }
@@ -1661,51 +1727,81 @@ int CliDriver::execute_test(const CliOptions& options, std::ostream& out, std::o
             }
             total_cases_passed += summary.passed;
             total_cases_failed += summary.failed;
+            total_cases_skipped += summary.skipped;
             total_cases += summary.total;
 
-            int64_t fileDurationMs = summary.totalDurationNs / 1'000'000;
-            if (file_passed) {
-                out << passBadge << " " << test_path.string() << " ("
-                    << summary.total << (summary.total == 1 ? " test, " : " tests, ")
-                    << fileDurationMs << "ms)\n";
-            } else {
-                out << failBadge << " " << test_path.string() << " ("
-                    << summary.failed << " failed, "
-                    << summary.passed << " passed, "
-                    << fileDurationMs << "ms)\n";
+            for (const auto& res : summary.results) {
+                all_results.push_back({test_path.filename().string(), res});
             }
 
-            for (const auto& res : summary.results) {
-                int64_t caseMs = res.durationNs / 1'000'000;
-                if (res.passed) {
-                    out << "   " << cPass << "✓" << cReset << " " << res.name
-                        << " " << cDim << "(" << caseMs << "ms)" << cReset << "\n";
+            if (!options.test_json && !options.test_tap) {
+                int64_t fileDurationMs = summary.totalDurationNs / 1'000'000;
+                if (file_passed) {
+                    out << passBadge << " " << test_path.string() << " ("
+                        << summary.total << (summary.total == 1 ? " test, " : " tests, ");
+                    if (summary.skipped > 0) {
+                        out << summary.skipped << " skipped, ";
+                    }
+                    out << fileDurationMs << "ms)\n";
                 } else {
-                    out << "   " << cFail << "✕" << cReset << " " << res.name
-                        << " " << cDim << "(" << caseMs << "ms)" << cReset << "\n";
-                    if (res.failure) {
-                        const auto& f = *res.failure;
-                        out << "     " << cFail << f.errorType << ": " << f.message << cReset << "\n";
-                        if (!f.expected.empty() || !f.actual.empty()) {
-                            out << "       " << cDim << "Expected: " << cReset << cPass << f.expected << cReset << "\n";
-                            out << "       " << cDim << "Actual:   " << cReset << cFail << f.actual << cReset << "\n";
-                        }
-                        if (!f.file.empty()) {
-                            out << "       " << cDim << "--> " << f.file;
-                            if (f.line > 0) out << ":" << f.line;
-                            out << cReset << "\n";
+                    out << failBadge << " " << test_path.string() << " ("
+                        << summary.failed << " failed, "
+                        << summary.passed << " passed, ";
+                    if (summary.skipped > 0) {
+                        out << summary.skipped << " skipped, ";
+                    }
+                    out << fileDurationMs << "ms)\n";
+                }
+
+                for (const auto& res : summary.results) {
+                    int64_t caseMs = res.durationNs / 1'000'000;
+                    if (res.passed) {
+                        out << "   " << cPass << "✓" << cReset << " " << res.name
+                            << " " << cDim << "(" << caseMs << "ms)" << cReset << "\n";
+                    } else {
+                        out << "   " << cFail << "✕" << cReset << " " << res.name
+                            << " " << cDim << "(" << caseMs << "ms)" << cReset << "\n";
+                        if (res.failure) {
+                            const auto& f = *res.failure;
+                            out << "     " << cFail << f.errorType << ": " << f.message << cReset << "\n";
+                            if (!f.expected.empty() || !f.actual.empty()) {
+                                out << "       " << cDim << "Expected: " << cReset << cPass << f.expected << cReset << "\n";
+                                out << "       " << cDim << "Actual:   " << cReset << cFail << f.actual << cReset << "\n";
+                            }
+                            if (!f.file.empty()) {
+                                out << "       " << cDim << "--> " << f.file;
+                                if (f.line > 0) out << ":" << f.line;
+                                out << cReset << "\n";
+                            }
                         }
                     }
                 }
+                out << "\n";
             }
-            out << "\n";
         } else {
             files_failed++;
-            out << failBadge << " " << test_path.string() << " (execution failed with exit code " << exit_code << ")\n";
-            if (!exec_output.empty()) {
-                out << exec_output << "\n";
+            keet::test::TestCaseResult exec_res;
+            exec_res.name = "execution";
+            exec_res.suite = "";
+            exec_res.passed = false;
+            exec_res.durationNs = 0;
+            keet::test::TestFailure tf;
+            tf.message = "execution failed with exit code " + std::to_string(exit_code);
+            tf.file = test_path.string();
+            tf.line = 0;
+            tf.errorType = "ExecutionError";
+            exec_res.failure = std::move(tf);
+            all_results.push_back({test_path.filename().string(), std::move(exec_res)});
+            total_cases_failed++;
+            total_cases++;
+
+            if (!options.test_json && !options.test_tap) {
+                out << failBadge << " " << test_path.string() << " (execution failed with exit code " << exit_code << ")\n";
+                if (!exec_output.empty()) {
+                    out << exec_output << "\n";
+                }
+                out << "\n";
             }
-            out << "\n";
         }
 
         if (options.test_fail_fast && (files_failed > 0 || total_cases_failed > 0)) {
@@ -1716,25 +1812,101 @@ int CliDriver::execute_test(const CliOptions& options, std::ostream& out, std::o
     auto suite_end = std::chrono::steady_clock::now();
     double suiteDurationMs = std::chrono::duration<double, std::milli>(suite_end - suite_start).count();
 
-    out << cBold << "Test Files  " << cReset;
-    if (files_failed == 0) {
-        out << cPass << files_passed << " passed" << cReset << " (" << total_files << " total)\n";
-    } else {
-        out << cPass << files_passed << " passed" << cReset << ", "
-            << cFail << files_failed << " failed" << cReset << " (" << total_files << " total)\n";
-    }
+    if (options.test_json) {
+        out << "{\n";
+        out << "  \"total\": " << total_cases << ",\n";
+        out << "  \"passed\": " << total_cases_passed << ",\n";
+        out << "  \"failed\": " << total_cases_failed << ",\n";
+        out << "  \"skipped\": " << total_cases_skipped << ",\n";
+        out << "  \"totalDurationNs\": " << static_cast<int64_t>(suiteDurationMs * 1'000'000.0) << ",\n";
+        out << "  \"testFiles\": {\n";
+        out << "    \"total\": " << total_files << ",\n";
+        out << "    \"passed\": " << files_passed << ",\n";
+        out << "    \"failed\": " << files_failed << "\n";
+        out << "  },\n";
+        out << "  \"results\": [\n";
+        for (size_t i = 0; i < all_results.size(); ++i) {
+            const auto& ar = all_results[i];
+            const auto& r = ar.result;
+            out << "    {\n";
+            out << "      \"name\": \"" << keet::test::jsonEscape(r.name) << "\",\n";
+            out << "      \"suite\": \"" << keet::test::jsonEscape(r.suite) << "\",\n";
+            out << "      \"file\": \"" << keet::test::jsonEscape(ar.file) << "\",\n";
+            out << "      \"passed\": " << (r.passed ? "true" : "false") << ",\n";
+            out << "      \"durationNs\": " << r.durationNs;
+            if (r.failure) {
+                out << ",\n      \"failure\": {\n";
+                out << "        \"message\": \"" << keet::test::jsonEscape(r.failure->message) << "\",\n";
+                out << "        \"expected\": \"" << keet::test::jsonEscape(r.failure->expected) << "\",\n";
+                out << "        \"actual\": \"" << keet::test::jsonEscape(r.failure->actual) << "\",\n";
+                out << "        \"file\": \"" << keet::test::jsonEscape(r.failure->file) << "\",\n";
+                out << "        \"line\": " << r.failure->line << ",\n";
+                out << "        \"errorType\": \"" << keet::test::jsonEscape(r.failure->errorType) << "\"\n";
+                out << "      }\n";
+            } else {
+                out << "\n";
+            }
+            out << "    }" << (i + 1 < all_results.size() ? "," : "") << "\n";
+        }
+        out << "  ]\n";
+        out << "}\n";
+    } else if (options.test_tap) {
+        out << "TAP version 13\n";
+        out << "1.." << all_results.size() << "\n";
+        for (size_t i = 0; i < all_results.size(); ++i) {
+            const auto& ar = all_results[i];
+            const auto& r = ar.result;
+            std::string fullName = ar.file;
+            if (!r.suite.empty()) {
+                fullName += " > " + r.suite;
+            }
+            fullName += " > " + r.name;
 
-    out << cBold << "Tests       " << cReset;
-    if (total_cases_failed == 0) {
-        out << cPass << total_cases_passed << " passed" << cReset << " (" << total_cases << " total)\n";
+            int64_t caseMs = r.durationNs / 1'000'000;
+            if (r.passed) {
+                out << "ok " << (i + 1) << " - " << fullName << " # time=" << caseMs << "ms\n";
+            } else {
+                out << "not ok " << (i + 1) << " - " << fullName << " # time=" << caseMs << "ms\n";
+                if (r.failure) {
+                    out << "  ---\n";
+                    out << "  message: \"" << keet::test::jsonEscape(r.failure->message) << "\"\n";
+                    if (!r.failure->expected.empty()) {
+                        out << "  expected: \"" << keet::test::jsonEscape(r.failure->expected) << "\"\n";
+                    }
+                    if (!r.failure->actual.empty()) {
+                        out << "  actual: \"" << keet::test::jsonEscape(r.failure->actual) << "\"\n";
+                    }
+                    if (!r.failure->file.empty()) {
+                        out << "  file: \"" << keet::test::jsonEscape(r.failure->file) << "\"\n";
+                    }
+                    if (r.failure->line > 0) {
+                        out << "  line: " << r.failure->line << "\n";
+                    }
+                    out << "  ...\n";
+                }
+            }
+        }
     } else {
-        out << cPass << total_cases_passed << " passed" << cReset << ", "
-            << cFail << total_cases_failed << " failed" << cReset << " (" << total_cases << " total)\n";
-    }
+        out << cBold << "Test Files  " << cReset;
+        if (files_failed == 0) {
+            out << cPass << files_passed << " passed" << cReset << " (" << total_files << " total)\n";
+        } else {
+            out << cPass << files_passed << " passed" << cReset << ", "
+                << cFail << files_failed << " failed" << cReset << " (" << total_files << " total)\n";
+        }
 
-    std::ostringstream dur_ss;
-    dur_ss << std::fixed << std::setprecision(1) << suiteDurationMs;
-    out << cBold << "Duration    " << cReset << dur_ss.str() << "ms\n";
+        out << cBold << "Tests       " << cReset;
+        if (total_cases_failed == 0) {
+            out << cPass << total_cases_passed << " passed" << cReset << " (" << total_cases << " total)\n";
+        } else {
+            out << cPass << total_cases_passed << " passed" << cReset << ", "
+                << cFail << total_cases_failed << " failed" << cReset << " (" << total_cases << " total)\n";
+        }
+
+        std::ostringstream dur_ss;
+        dur_ss << std::fixed << std::setprecision(1) << suiteDurationMs;
+        out << cBold << "Duration    " << cReset << dur_ss.str() << "ms\n";
+    }
 
     return (files_failed > 0 || total_cases_failed > 0) ? 1 : 0;
 }

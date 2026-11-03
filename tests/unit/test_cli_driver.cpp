@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <keety/driver/cli_driver.hpp>
+#include <keet/json.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -620,6 +621,18 @@ TEST_CASE("CLI test runner options parsing and flag handling", "[driver][cli][te
         CHECK(opts.command == CliCommand::Test);
         CHECK(opts.test_fail_fast);
     }
+
+    SECTION("Parse test command with --json and --tap") {
+        auto opts1 = CliDriver::parse_args({"test", "--json"});
+        CHECK(opts1.command == CliCommand::Test);
+        CHECK(opts1.test_json);
+        CHECK(!opts1.test_tap);
+
+        auto opts2 = CliDriver::parse_args({"test", "--tap"});
+        CHECK(opts2.command == CliCommand::Test);
+        CHECK(!opts2.test_json);
+        CHECK(opts2.test_tap);
+    }
 }
 
 TEST_CASE("CLI test runner auto-discovery heuristics", "[driver][cli][test]") {
@@ -714,25 +727,177 @@ TEST_CASE("CLI test runner end-to-end execution", "[driver][cli][test]") {
             << "}\n";
     }
 
-    CliOptions opts;
-    opts.command = CliCommand::Test;
-    opts.input_file = test_file;
-    opts.color_mode = keety::diag::ColorMode::Never;
+    SECTION("Default human-readable terminal reporter") {
+        CliOptions opts;
+        opts.command = CliCommand::Test;
+        opts.input_file = test_file;
+        opts.color_mode = keety::diag::ColorMode::Never;
 
-    std::ostringstream out;
-    std::ostringstream err;
-    int code = CliDriver::execute_test(opts, out, err);
+        std::ostringstream out;
+        std::ostringstream err;
+        int code = CliDriver::execute_test(opts, out, err);
 
-    CHECK(code == 0);
-    std::string output = out.str();
-    CHECK(output.find("PASS") != std::string::npos);
-    CHECK(output.find("sample.test.keet (2 tests") != std::string::npos);
-    CHECK(output.find("addition check") != std::string::npos);
-    CHECK(output.find("inequality check") != std::string::npos);
-    CHECK(output.find("Test Files") != std::string::npos);
-    CHECK(output.find("1 passed (1 total)") != std::string::npos);
-    CHECK(output.find("Tests") != std::string::npos);
-    CHECK(output.find("2 passed (2 total)") != std::string::npos);
+        CHECK(code == 0);
+        std::string output = out.str();
+        CHECK(output.find("PASS") != std::string::npos);
+        CHECK(output.find("sample.test.keet (2 tests") != std::string::npos);
+        CHECK(output.find("addition check") != std::string::npos);
+        CHECK(output.find("inequality check") != std::string::npos);
+        CHECK(output.find("Test Files") != std::string::npos);
+        CHECK(output.find("1 passed (1 total)") != std::string::npos);
+        CHECK(output.find("Tests") != std::string::npos);
+        CHECK(output.find("2 passed (2 total)") != std::string::npos);
+    }
+
+    SECTION("Structured JSON reporter (--json)") {
+        CliOptions opts;
+        opts.command = CliCommand::Test;
+        opts.input_file = test_file;
+        opts.test_json = true;
+
+        std::ostringstream out;
+        std::ostringstream err;
+        int code = CliDriver::execute_test(opts, out, err);
+
+        CHECK(code == 0);
+        std::string json_str = out.str();
+        CHECK(json_str.find("PASS") == std::string::npos); // Suppresses ANSI output
+        CHECK(json_str.find("Test Files") == std::string::npos);
+
+        ::keet::json::detail::Parser parser(json_str);
+        auto root = parser.parse_document();
+        REQUIRE(root.is_object());
+        const auto& obj = std::get<keet::json::detail::JsonNode::Object>(root.value);
+
+        REQUIRE(obj.count("total"));
+        CHECK(std::get<int64_t>(obj.at("total").value) == 2);
+        REQUIRE(obj.count("passed"));
+        CHECK(std::get<int64_t>(obj.at("passed").value) == 2);
+        REQUIRE(obj.count("failed"));
+        CHECK(std::get<int64_t>(obj.at("failed").value) == 0);
+
+        REQUIRE(obj.count("testFiles"));
+        const auto& tf_obj = std::get<keet::json::detail::JsonNode::Object>(obj.at("testFiles").value);
+        CHECK(std::get<int64_t>(tf_obj.at("total").value) == 1);
+        CHECK(std::get<int64_t>(tf_obj.at("passed").value) == 1);
+
+        REQUIRE(obj.count("results"));
+        const auto& res_arr = std::get<keet::json::detail::JsonNode::Array>(obj.at("results").value);
+        REQUIRE(res_arr.size() == 2);
+        const auto& r0 = std::get<keet::json::detail::JsonNode::Object>(res_arr[0].value);
+        CHECK(std::get<std::string>(r0.at("name").value) == "addition check");
+        CHECK(std::get<bool>(r0.at("passed").value) == true);
+    }
+
+    SECTION("TAP version 13 reporter (--tap)") {
+        CliOptions opts;
+        opts.command = CliCommand::Test;
+        opts.input_file = test_file;
+        opts.test_tap = true;
+
+        std::ostringstream out;
+        std::ostringstream err;
+        int code = CliDriver::execute_test(opts, out, err);
+
+        CHECK(code == 0);
+        std::string tap_str = out.str();
+        CHECK(tap_str.rfind("TAP version 13\n", 0) == 0);
+        CHECK(tap_str.find("1..2\n") != std::string::npos);
+        CHECK(tap_str.find("ok 1 - sample.test.keet > Arithmetic > addition check # time=") != std::string::npos);
+        CHECK(tap_str.find("ok 2 - sample.test.keet > Arithmetic > inequality check # time=") != std::string::npos);
+    }
+
+    SECTION("Regex filtering (--filter)") {
+        CliOptions opts;
+        opts.command = CliCommand::Test;
+        opts.input_file = test_file;
+        opts.test_filter = "add.*"; // Regex matching addition check
+        opts.test_json = true;
+
+        std::ostringstream out;
+        std::ostringstream err;
+        int code = CliDriver::execute_test(opts, out, err);
+
+        CHECK(code == 0);
+        std::string json_str = out.str();
+        ::keet::json::detail::Parser parser(json_str);
+        auto root = parser.parse_document();
+        REQUIRE(root.is_object());
+        const auto& obj = std::get<keet::json::detail::JsonNode::Object>(root.value);
+
+        CHECK(std::get<int64_t>(obj.at("total").value) == 1);
+        CHECK(std::get<int64_t>(obj.at("passed").value) == 1);
+        CHECK(std::get<int64_t>(obj.at("skipped").value) == 1);
+
+        const auto& res_arr = std::get<keet::json::detail::JsonNode::Array>(obj.at("results").value);
+        REQUIRE(res_arr.size() == 1);
+        const auto& r0 = std::get<keet::json::detail::JsonNode::Object>(res_arr[0].value);
+        CHECK(std::get<std::string>(r0.at("name").value) == "addition check");
+    }
+
+    SECTION("Fail-fast mode (--fail-fast)") {
+        auto failing_file = temp_dir / "failing.test.keet";
+        {
+            std::ofstream f_out(failing_file);
+            f_out << "import test;\n"
+                  << "fn main(): void {\n"
+                  << "    test.case(\"will fail\", fn(): void {\n"
+                  << "        test.assertEq(1, 2);\n"
+                  << "    });\n"
+                  << "    test.case(\"should be skipped\", fn(): void {\n"
+                  << "        test.assertTrue(true);\n"
+                  << "    });\n"
+                  << "}\n";
+        }
+
+        CliOptions opts;
+        opts.command = CliCommand::Test;
+        opts.input_file = failing_file;
+        opts.test_fail_fast = true;
+        opts.test_json = true;
+
+        std::ostringstream out;
+        std::ostringstream err;
+        int code = CliDriver::execute_test(opts, out, err);
+
+        CHECK(code == 1);
+        std::string json_str = out.str();
+        ::keet::json::detail::Parser parser(json_str);
+        auto root = parser.parse_document();
+        REQUIRE(root.is_object());
+        const auto& obj = std::get<keet::json::detail::JsonNode::Object>(root.value);
+
+        // Aborted on first failure: total executed 1, failed 1
+        CHECK(std::get<int64_t>(obj.at("total").value) == 1);
+        CHECK(std::get<int64_t>(obj.at("failed").value) == 1);
+    }
+
+    SECTION("Empty directory reporting for --json and --tap") {
+        auto empty_dir = temp_dir / "empty_dir";
+        std::filesystem::create_directories(empty_dir, ec);
+
+        CliOptions json_opts;
+        json_opts.command = CliCommand::Test;
+        json_opts.input_file = empty_dir;
+        json_opts.test_json = true;
+
+        std::ostringstream json_out;
+        std::ostringstream json_err;
+        int code1 = CliDriver::execute_test(json_opts, json_out, json_err);
+        CHECK(code1 == 0);
+        CHECK(json_out.str().find("\"total\": 0") != std::string::npos);
+
+        CliOptions tap_opts;
+        tap_opts.command = CliCommand::Test;
+        tap_opts.input_file = empty_dir;
+        tap_opts.test_tap = true;
+
+        std::ostringstream tap_out;
+        std::ostringstream tap_err;
+        int code2 = CliDriver::execute_test(tap_opts, tap_out, tap_err);
+        CHECK(code2 == 0);
+        CHECK(tap_out.str() == "TAP version 13\n1..0\n");
+    }
 
     std::filesystem::remove_all(temp_dir, ec);
 }

@@ -169,11 +169,29 @@ TEST_CASE("keet::test Registry filtering and json serialization", "[runtime][tes
     REQUIRE(summaryThree.passed == 1);
     REQUIRE(summaryThree.skipped == 2);
 
+    // Regex filter matching
+    auto summaryRegex = reg.runAll("^test_t.*");
+    REQUIRE(summaryRegex.total == 2); // test_two and test_three
+    REQUIRE(summaryRegex.passed == 2);
+    REQUIRE(summaryRegex.skipped == 1);
+
+    // Malformed regex fallback to substring search
+    auto summaryFallback = reg.runAll("[invalid-regex");
+    REQUIRE(summaryFallback.total == 0);
+    REQUIRE(summaryFallback.skipped == 3);
+
     // Test JSON serialization
     std::string jsonStr = keet::test::summaryToJson(summaryThree);
     REQUIRE(jsonStr.find("\"total\": 1") != std::string::npos);
     REQUIRE(jsonStr.find("\"passed\": 1") != std::string::npos);
     REQUIRE(jsonStr.find("\"name\": \"test_three\"") != std::string::npos);
+
+    // Test TAP version 13 serialization
+    std::string tapStr = keet::test::summaryToTap(summaryAlpha, "math.test.keet");
+    REQUIRE(tapStr.find("TAP version 13") != std::string::npos);
+    REQUIRE(tapStr.find("1..2") != std::string::npos);
+    REQUIRE(tapStr.find("ok 1 - math.test.keet > Alpha > test_one") != std::string::npos);
+    REQUIRE(tapStr.find("ok 2 - math.test.keet > Alpha > test_two") != std::string::npos);
 
     // Test text summary formatting
     std::ostringstream out;
@@ -182,6 +200,57 @@ TEST_CASE("keet::test Registry filtering and json serialization", "[runtime][tes
     REQUIRE(textOut.find("Alpha") != std::string::npos);
     REQUIRE(textOut.find("test_one") != std::string::npos);
     REQUIRE(textOut.find("2 passed") != std::string::npos);
+
+    reg.clear();
+}
+
+TEST_CASE("keet::test TAP serialization on failure", "[runtime][test]") {
+    auto& reg = keet::test::Registry::instance();
+    reg.clear();
+
+    keet_module_test::_keet_suite("Auth Suite", [&]() {
+        keet_module_test::_keet_case("token validation", []() {
+            keet_module_test::assertEq(std::string("valid"), std::string("expired"), "token expired");
+        });
+    });
+
+    auto summary = reg.runAll();
+    REQUIRE(summary.total == 1);
+    REQUIRE(summary.failed == 1);
+
+    std::string tapStr = keet::test::summaryToTap(summary, "auth.test.keet");
+    REQUIRE(tapStr.find("TAP version 13") != std::string::npos);
+    REQUIRE(tapStr.find("1..1") != std::string::npos);
+    REQUIRE(tapStr.find("not ok 1 - auth.test.keet > Auth Suite > token validation") != std::string::npos);
+    REQUIRE(tapStr.find("  ---") != std::string::npos);
+    REQUIRE(tapStr.find("  message: \"token expired\"") != std::string::npos);
+    REQUIRE(tapStr.find("  expected: \"\\\"expired\\\"\"") != std::string::npos);
+    REQUIRE(tapStr.find("  actual: \"\\\"valid\\\"\"") != std::string::npos);
+    REQUIRE(tapStr.find("  ...") != std::string::npos);
+
+    reg.clear();
+}
+
+TEST_CASE("keet::test Registry failFast stops execution on first failure", "[runtime][test]") {
+    auto& reg = keet::test::Registry::instance();
+    reg.clear();
+
+    int executedCount = 0;
+    keet_module_test::_keet_case("first_fail", [&]() {
+        executedCount++;
+        keet_module_test::fail("boom");
+    });
+    keet_module_test::_keet_case("second_case", [&]() {
+        executedCount++;
+    });
+    keet_module_test::_keet_case("third_case", [&]() {
+        executedCount++;
+    });
+
+    auto summary = reg.runAll("", /*failFast=*/true);
+    REQUIRE(executedCount == 1);
+    REQUIRE(summary.total == 1);
+    REQUIRE(summary.failed == 1);
 
     reg.clear();
 }
