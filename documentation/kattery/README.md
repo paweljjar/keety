@@ -198,6 +198,7 @@ The `pedigree.json` file defines project metadata, dependencies, and build scrip
   "version": "1.0.0",
   "description": "High-performance microservice written in KeetScript",
   "entry": "src/main.keet",
+  "buildDir": "build",
   "keety": ">=0.1.0",
   "dependencies": {
     "mathx": "git+https://github.com/keetscript/mathx.git#v1.2.0",
@@ -207,7 +208,7 @@ The `pedigree.json` file defines project metadata, dependencies, and build scrip
     "test-runner": "git+https://github.com/keetscript/test-runner.git#main"
   },
   "scripts": {
-    "start": "keety run src/main.keet --output-dir build",
+    "start": "keety run src/main.keet",
     "test": "keety test",
     "build": "keety build src/main.keet -O3"
   },
@@ -225,6 +226,7 @@ The `pedigree.json` file defines project metadata, dependencies, and build scrip
 | `version` | string | Yes | Semver version string (`MAJOR.MINOR.PATCH`). |
 | `description` | string | No | Descriptive summary. |
 | `entry` | string | No | Application entry `.keet` file (defaults to `src/main.keet`). |
+| `buildDir` | string | No | Target build output directory for compiled binaries and intermediate artifacts (defaults to `build` in `kattery init`). When present, `keety build`, `keety run`, and `keety test` automatically build into this folder without littering `src/`. |
 | `keety` | string | No | Compiler version constraint in `^>=X.Y.Z$` format. |
 | `dependencies` | object | No | Map of package name to source specification. |
 | `devDependencies` | object | No | Development-only dependencies (skipped with `--production`). |

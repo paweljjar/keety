@@ -899,6 +899,46 @@ TEST_CASE("CLI test runner end-to-end execution", "[driver][cli][test]") {
         CHECK(tap_out.str() == "TAP version 13\n1..0\n");
     }
 
+    SECTION("BuildDir in pedigree.json routes build artifacts into buildDir and leaves src clean") {
+        std::filesystem::path proj_dir = temp_dir / "proj_with_builddir";
+        std::filesystem::create_directories(proj_dir / "src", ec);
+
+        std::ofstream ped(proj_dir / "pedigree.json");
+        ped << "{\n"
+            << "  \"name\": \"builddir-test\",\n"
+            << "  \"version\": \"0.1.0\",\n"
+            << "  \"buildDir\": \"build\"\n"
+            << "}\n";
+        ped.close();
+
+        std::filesystem::path src_test = proj_dir / "src" / "math.test.keet";
+        std::ofstream test_fs(src_test);
+        test_fs << "import test;\n"
+                << "from \"test\" import assertEq;\n\n"
+                << "fn test_simple(): void {\n"
+                << "    assertEq(10, 10);\n"
+                << "}\n";
+        test_fs.close();
+
+        CliOptions opts;
+        opts.command = CliCommand::Test;
+        opts.input_file = proj_dir / "src";
+        opts.color_mode = keety::diag::ColorMode::Never;
+
+        std::ostringstream out, err;
+        int code = CliDriver::execute_test(opts, out, err);
+        CHECK(code == 0);
+        CHECK(out.str().find("PASS") != std::string::npos);
+
+        // Verify that build artifacts are inside proj_dir / "build"
+        CHECK(std::filesystem::exists(proj_dir / "build"));
+        CHECK(std::filesystem::exists(proj_dir / "build" / ".keety_build"));
+
+        // Verify that src/ has no .keety_build directory or compiled binary
+        CHECK(!std::filesystem::exists(proj_dir / "src" / ".keety_build"));
+        CHECK(!std::filesystem::exists(proj_dir / "src" / "math.test"));
+    }
+
     std::filesystem::remove_all(temp_dir, ec);
 }
 

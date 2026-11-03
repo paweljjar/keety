@@ -41,6 +41,7 @@ TEST_CASE("Manifest parsing: valid pedigree.json", "[kattery][manifest]") {
   "version": "1.2.3",
   "description": "My test app",
   "entry": "src/main.keet",
+  "buildDir": "dist",
   "keety": ">=0.1.0",
   "dependencies": {
     "mathx": "git+https://github.com/user/mathx.git#v1.0.0",
@@ -64,6 +65,7 @@ TEST_CASE("Manifest parsing: valid pedigree.json", "[kattery][manifest]") {
     REQUIRE(m.version == "1.2.3");
     REQUIRE(m.description == "My test app");
     REQUIRE(m.entry == "src/main.keet");
+    REQUIRE(m.buildDir == "dist");
     REQUIRE(m.keety == ">=0.1.0");
 
     REQUIRE(m.dependencies.size() == 2);
@@ -156,6 +158,7 @@ TEST_CASE("Manifest file load, save, and round-trip", "[kattery][manifest]") {
     m.version = "0.5.1";
     m.description = "Manifest disk test";
     m.entry = "src/index.keet";
+    m.buildDir = "target/bin";
     m.keety = ">=0.1.0";
     m.dependencies["dep-a"] = SourceSpec::parse("git+https://github.com/u/dep-a.git#v1.0.0");
     m.scripts["build"] = "keety build src/index.keet";
@@ -169,6 +172,7 @@ TEST_CASE("Manifest file load, save, and round-trip", "[kattery][manifest]") {
     REQUIRE(loaded.version == m.version);
     REQUIRE(loaded.description == m.description);
     REQUIRE(loaded.entry == m.entry);
+    REQUIRE(loaded.buildDir == m.buildDir);
     REQUIRE(loaded.keety == m.keety);
     REQUIRE(loaded.dependencies.size() == 1);
     REQUIRE(loaded.dependencies.at("dep-a") == m.dependencies.at("dep-a"));

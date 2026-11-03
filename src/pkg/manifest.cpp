@@ -204,6 +204,11 @@ Manifest Manifest::parse(std::string_view jsonText, const std::filesystem::path&
         m.entry = *entry;
     }
 
+    // buildDir (optional)
+    if (auto bd = getStringField(root, "buildDir", sourcePath)) {
+        m.buildDir = *bd;
+    }
+
     // keety (optional)
     if (auto k = getStringField(root, "keety", sourcePath)) {
         validateKeetyConstraint(*k, formatContext(sourcePath, "keety"));
@@ -266,6 +271,9 @@ std::string Manifest::toJsonString(int indent) const {
     }
     if (!entry.empty()) {
         root["entry"] = JsonNode(entry);
+    }
+    if (!buildDir.empty()) {
+        root["buildDir"] = JsonNode(buildDir);
     }
     if (!keety.empty()) {
         root["keety"] = JsonNode(keety);

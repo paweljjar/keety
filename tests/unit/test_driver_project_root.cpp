@@ -88,3 +88,48 @@ TEST_CASE("driver::findProjectRoot discovers nearest project root", "[driver][pr
         REQUIRE(fs::equivalent(root, fs::current_path()));
     }
 }
+
+TEST_CASE("driver::resolveBuildDirectory discovers buildDir from pedigree.json", "[driver][project_root]") {
+    TempDirectory temp("test_resolve_build_dir");
+
+    SECTION("Discovers buildDir when pedigree.json specifies buildDir") {
+        temp.createFile("project/pedigree.json", "{\"name\":\"app\",\"version\":\"0.1.0\",\"buildDir\":\"build\"}");
+        temp.createFile("project/src/main.keet", "fn main(): void {}");
+
+        fs::path entry = temp.path / "project" / "src" / "main.keet";
+        auto buildDirOpt = keety::driver::resolveBuildDirectory(entry);
+
+        REQUIRE(buildDirOpt.has_value());
+        REQUIRE(*buildDirOpt == (temp.path / "project" / "build").lexically_normal());
+    }
+
+    SECTION("Discovers custom buildDir like dist/bin") {
+        temp.createFile("project/pedigree.json", "{\"name\":\"app\",\"version\":\"0.1.0\",\"buildDir\":\"dist/bin\"}");
+        temp.createFile("project/src/sub/main.keet", "fn main(): void {}");
+
+        fs::path entry = temp.path / "project" / "src" / "sub" / "main.keet";
+        auto buildDirOpt = keety::driver::resolveBuildDirectory(entry);
+
+        REQUIRE(buildDirOpt.has_value());
+        REQUIRE(*buildDirOpt == (temp.path / "project" / "dist" / "bin").lexically_normal());
+    }
+
+    SECTION("Returns nullopt when pedigree.json does not specify buildDir") {
+        temp.createFile("project/pedigree.json", "{\"name\":\"app\",\"version\":\"0.1.0\"}");
+        temp.createFile("project/src/main.keet", "fn main(): void {}");
+
+        fs::path entry = temp.path / "project" / "src" / "main.keet";
+        auto buildDirOpt = keety::driver::resolveBuildDirectory(entry);
+
+        REQUIRE_FALSE(buildDirOpt.has_value());
+    }
+
+    SECTION("Returns nullopt when no pedigree.json exists") {
+        temp.createFile("standalone/src/main.keet", "fn main(): void {}");
+
+        fs::path entry = temp.path / "standalone" / "src" / "main.keet";
+        auto buildDirOpt = keety::driver::resolveBuildDirectory(entry);
+
+        REQUIRE_FALSE(buildDirOpt.has_value());
+    }
+}

@@ -1145,17 +1145,28 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
 
     std::string exec_ext = ToolchainDriver::get_executable_extension();
 
-    if (!options.output_dir.empty()) {
+    std::filesystem::path effective_output_dir = options.output_dir;
+    bool effective_output_is_dir = options.output_is_dir;
+
+    if (effective_output_dir.empty()) {
+        auto configured_build_dir = resolveBuildDirectory(options.input_file);
+        if (configured_build_dir.has_value() && !configured_build_dir->empty()) {
+            effective_output_dir = *configured_build_dir;
+            effective_output_is_dir = true;
+        }
+    }
+
+    if (!effective_output_dir.empty()) {
         std::error_code ec;
-        if (options.output_is_dir ||
-            std::filesystem::is_directory(options.output_dir) ||
-            options.output_dir.string().back() == '/' ||
-            options.output_dir.string().back() == '\\') {
-            std::filesystem::create_directories(options.output_dir, ec);
-            target_binary = options.output_dir / (options.input_file.stem().string() + exec_ext);
-            build_dir = options.output_dir / ".keety_build";
+        if (effective_output_is_dir ||
+            std::filesystem::is_directory(effective_output_dir) ||
+            effective_output_dir.string().back() == '/' ||
+            effective_output_dir.string().back() == '\\') {
+            std::filesystem::create_directories(effective_output_dir, ec);
+            target_binary = effective_output_dir / (options.input_file.stem().string() + exec_ext);
+            build_dir = effective_output_dir / ".keety_build";
         } else {
-            target_binary = options.output_dir;
+            target_binary = effective_output_dir;
             build_dir = target_binary.has_parent_path()
                 ? (target_binary.parent_path() / ".keety_build")
                 : (std::filesystem::current_path() / ".keety_build");

@@ -16,6 +16,7 @@ struct Manifest {
     std::string version;
     std::string description;
     std::string entry;
+    std::string buildDir; // Configured build output directory, e.g. "build"
     std::string keety; // Minimum compiler constraint, e.g. ">=0.1.0"
 
     // Lexicographically sorted dependencies
