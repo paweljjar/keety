@@ -85,6 +85,7 @@ Production-ready components fully implemented, tested with 100% test coverage, a
 - **`time`**: High-resolution monotonic timers (`nowNs`, `nowMs`), sleep (`sleepMs`), and wall-clock timestamps.
 - **`json`**: RFC 8259 parser, dot-path queries, immutable builders, and polymorphic stringification.
 - **`net`**: RFC 3986 URL parser, DNS lookups, TCP/UDP sockets, and HTTP/1.1 client (`get`, `postJson`, `download`).
+- **`crypto`**: Hashing (SHA-256, SHA-512, SHA3-256, SHA3-512, BLAKE3, streaming `Hasher`), message authentication (HMAC-SHA256, HMAC-SHA512, streaming `Hmac`), authenticated symmetric encryption (AES-256-GCM, ChaCha20-Poly1305), CSPRNG (`randomBytes`, `randomHex`, `randomInt`, `randomUuid`, `timingSafeEqual`), encodings (Hex, RFC 4648 Base64, URL-safe Base64), and symbology (Code 128 1D barcode and ISO/IEC 18004 2D QR Code encoders, decoders, SVG & ASCII block renderers).
 
 ### 4. Package Manager (`kattery`)
 - Project manifest (`pedigree.json`) and reproducible lockfile (`pedigree.lock`).
@@ -106,6 +107,19 @@ Production-ready components fully implemented, tested with 100% test coverage, a
 - Native LSP client integration (`vscode-languageclient`) with automatic `keet-lsp` discovery.
 - Graceful automatic fallback to CLI check-on-save mode when `keet-lsp` is unavailable.
 
+### 7. Native Testing Framework (`keety test` & `std::test`)
+- **First-Class Test Execution Engine:**
+  - Built-in `keety test` CLI sub-command supporting discovery, filter matching (`--filter`), parallel execution, and test suite isolation.
+  - Standard library `test` module (`import test;`) providing suites (`suite`), individual cases (`case`), and execution primitives.
+- **Assertion Primitives:**
+  - `assertEq(actual, expected)`: Deep value equality comparison with error formatting.
+  - `assertNe(actual, expected)`, `assertTrue(cond)`, `assertFalse(cond)`.
+  - `assertZonks(fn, expectedError)`: Exception assertion verifying runtime error names.
+  - `fail(message)`: Explicit test failure.
+- **Reporting & Tooling:**
+  - Formatted terminal reporters with pass/fail counts, execution timings, and error traces.
+  - Integration with package manager runner (`kattery test`).
+
 ---
 
 ## B. To Do
@@ -114,22 +128,9 @@ Active development backlog organized by implementation priority and time horizon
 
 ### B1: Near-Term
 
-High-priority deliverables focusing on immediate testing ergonomics, networking capabilities, cryptography, and debugging precision.
+High-priority deliverables focusing on immediate networking capabilities, cryptography, and debugging precision.
 
-#### 1. Testing Framework (`keety test`)
-- **Test Syntax & Declarations:**
-  - First-class `test "description" { ... }` blocks or `@test` annotated test functions.
-  - Automatic test discovery across `tests/` directories and `*.test.keet` files.
-- **Assertion Library:**
-  - `assert.eq(actual, expected)`: Deep value equality with colored visual diffs.
-  - `assert.ne(actual, expected)`, `assert.true(cond)`, `assert.false(cond)`.
-  - `assert.zonks(expr, expectedError)`: Error assertion verifying expected runtime error names.
-- **CLI Test Runner:**
-  - Parallel test execution with colorful terminal reporters.
-  - `--filter <pattern>` flag to run targeted test subsets.
-  - Machine-readable `--json` and TAP format output for CI pipelines and `kattery test`.
-
-#### 2. HTTP Server (`std::net::http`)
+#### 1. HTTP Server (`std::net::http`)
 - **Event-Driven Server Engine:**
   - Non-blocking HTTP/1.1 server built on top of `net::Socket`.
   - Intuitive route registry:
@@ -147,16 +148,7 @@ High-priority deliverables focusing on immediate testing ergonomics, networking 
 - **Static File Serving:**
   - `http.serveDir("/static", "./public")` with automatic MIME-type detection.
 
-#### 3. Cryptography (`std::crypto`)
-- **Cryptographic Hash Functions:**
-  - SHA-256, SHA-512, SHA-3, BLAKE3.
-- **Message Authentication & Encryption:**
-  - HMAC-SHA256, HMAC-SHA512.
-  - Symmetric authenticated encryption: AES-256-GCM and ChaCha20-Poly1305.
-- **Secure Randomness:**
-  - Cryptographically secure pseudo-random number generation (`crypto.randomBytes(n)`).
-
-#### 4. Source-to-Source Line Mapping
+#### 2. Source-to-Source Line Mapping
 - **Emitted C++ Line Directives (`#line`):**
   - Emit `#line <lineno> "<source>.keet"` directives in generated `.hpp` and `.cpp` files.
   - Ensure compiler errors from host toolchains (Clang, GCC, MSVC) point directly to the originating `.keet` source lines.

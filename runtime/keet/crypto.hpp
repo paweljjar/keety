@@ -2175,6 +2175,9 @@ struct QrCode {
     }
 
     /// Renders QR code in terminal using Unicode half-block characters (2 rows per character).
+    /// Uses true white background (\033[47m) and black foreground (\033[30m) so it renders
+    /// with correct contrast in any terminal (Dark Mode or Light Mode) and can be scanned
+    /// directly from computer displays using mobile phone cameras.
     std::string toAscii(int margin = 2) const {
         int total = size + margin * 2;
         std::vector<std::vector<bool>> full(total, std::vector<bool>(total, false));
@@ -2186,20 +2189,21 @@ struct QrCode {
 
         std::string out;
         for (int y = 0; y < total; y += 2) {
+            out.append("\033[47m\033[30m"); // White background, Black foreground
             for (int x = 0; x < total; ++x) {
                 bool top = full[y][x];
                 bool bot = (y + 1 < total) ? full[y + 1][x] : false;
                 if (top && bot) {
-                    out.append("█");
+                    out.append("█"); // Both dark
                 } else if (top && !bot) {
-                    out.append("▀");
+                    out.append("▀"); // Top dark, bottom light
                 } else if (!top && bot) {
-                    out.append("▄");
+                    out.append("▄"); // Top light, bottom dark
                 } else {
-                    out.push_back(' ');
+                    out.append(" "); // Both light
                 }
             }
-            out.push_back('\n');
+            out.append("\033[0m\n"); // Reset colors at end of row
         }
         return out;
     }
@@ -2472,74 +2476,135 @@ inline QrCode generateQr(const std::string& text, const std::string& ecLevel = "
     // Dark module
     matrix[4 * version + 9][8] = true;
 
-    // 4. Place Data and evaluate mask (standard mask 0: (x+y)%2 == 0)
-    int mask_choice = 0;
-    size_t bit_idx = 0;
-    bool upward = true;
+    // 4. Evaluate all 8 masks and select the one with the lowest ISO 18004 penalty score
+    int best_mask = 0;
+    int min_penalty = 10000000;
+    std::vector<std::vector<BoolByte>> best_matrix;
 
-    for (int right = size - 1; right > 0; right -= 2) {
-        if (right == 6) {
-            right--; // Skip vertical timing pattern column
+    for (int mask_choice = 0; mask_choice < 8; ++mask_choice) {
+        std::vector<std::vector<BoolByte>> cur = matrix;
+        size_t bit_idx = 0;
+        bool upward = true;
+
+        for (int right = size - 1; right > 0; right -= 2) {
+            if (right == 6) {
+                right--; // Skip vertical timing pattern column
+            }
+            for (int vert = 0; vert < size; ++vert) {
+                int y = upward ? (size - 1 - vert) : vert;
+                for (int col = 0; col < 2; ++col) {
+                    int x = right - col;
+                    if (!detail::isReservedModule(x, y, size, version)) {
+                        bool data_bit = (bit_idx < final_bits.size()) ? (final_bits[bit_idx++] == '1') : false;
+                        bool mask = detail::maskBit(mask_choice, x, y);
+                        cur[y][x] = data_bit ^ mask;
+                    }
+                }
+            }
+            upward = !upward;
         }
-        for (int vert = 0; vert < size; ++vert) {
-            int y = upward ? (size - 1 - vert) : vert;
-            for (int col = 0; col < 2; ++col) {
-                int x = right - col;
-                if (!detail::isReservedModule(x, y, size, version)) {
-                    bool data_bit = (bit_idx < final_bits.size()) ? (final_bits[bit_idx++] == '1') : false;
-                    bool mask = detail::maskBit(mask_choice, x, y);
-                    matrix[y][x] = data_bit ^ mask;
+
+        // Draw Format Information (EC Level M = 00_2, mask_choice)
+        uint16_t fmt = detail::computeFormatBits(0, mask_choice);
+
+        // Copy 1 (Around Top-Left Finder per ISO/IEC 18004 § 8.9):
+        // Bits 0..5: (0, 8) to (5, 8)
+        for (int i = 0; i <= 5; ++i) {
+            cur[i][8] = (fmt >> i) & 1;
+        }
+        // Bit 6: (7, 8)
+        cur[7][8] = (fmt >> 6) & 1;
+        // Bit 7: (8, 8)
+        cur[8][8] = (fmt >> 7) & 1;
+        // Bit 8: (8, 7)
+        cur[8][7] = (fmt >> 8) & 1;
+        // Bits 9..14: (8, 5) down to (8, 0)
+        for (int i = 9; i < 15; ++i) {
+            cur[8][14 - i] = (fmt >> i) & 1;
+        }
+
+        // Copy 2 (Split across Upper-Right and Lower-Left):
+        // Bits 0..7: Upper-Right along row 8: (8, size - 1) down to (8, size - 8)
+        for (int i = 0; i < 8; ++i) {
+            cur[8][size - 1 - i] = (fmt >> i) & 1;
+        }
+        // Bits 8..14: Lower-Left along col 8: (size - 7, 8) down to (size - 1, 8)
+        for (int i = 8; i < 15; ++i) {
+            cur[size - 15 + i][8] = (fmt >> i) & 1;
+        }
+
+        // Penalty evaluation:
+        // N1: runs of 5 or more modules of same color
+        int penalty = 0;
+        for (int y = 0; y < size; ++y) {
+            int run = 1;
+            for (int x = 1; x < size; ++x) {
+                if (cur[y][x] == cur[y][x - 1]) {
+                    run++;
+                } else {
+                    if (run >= 5) penalty += 3 + (run - 5);
+                    run = 1;
+                }
+            }
+            if (run >= 5) penalty += 3 + (run - 5);
+        }
+        for (int x = 0; x < size; ++x) {
+            int run = 1;
+            for (int y = 1; y < size; ++y) {
+                if (cur[y][x] == cur[y - 1][x]) {
+                    run++;
+                } else {
+                    if (run >= 5) penalty += 3 + (run - 5);
+                    run = 1;
+                }
+            }
+            if (run >= 5) penalty += 3 + (run - 5);
+        }
+
+        // N2: 2x2 same color blocks
+        for (int y = 0; y < size - 1; ++y) {
+            for (int x = 0; x < size - 1; ++x) {
+                bool c = cur[y][x];
+                if (cur[y + 1][x] == c && cur[y][x + 1] == c && cur[y + 1][x + 1] == c) {
+                    penalty += 3;
                 }
             }
         }
-        upward = !upward;
-    }
 
-    // 5. Draw Format Information (EC Level M = 00_2, Mask 0 = 000_2)
-    uint16_t fmt = detail::computeFormatBits(0, mask_choice);
-
-    // Place around top-left finder and divided across top-right / bottom-left
-    int fmt_coords_tl[15][2] = {
-        {8, 0}, {8, 1}, {8, 2}, {8, 3}, {8, 4}, {8, 5}, {8, 7}, {8, 8},
-        {7, 8}, {5, 8}, {4, 8}, {3, 8}, {2, 8}, {1, 8}, {0, 8}
-    };
-    for (int i = 0; i < 15; ++i) {
-        bool bit = (fmt >> i) & 1;
-        matrix[fmt_coords_tl[i][0]][fmt_coords_tl[i][1]] = bit;
+        if (penalty < min_penalty) {
+            min_penalty = penalty;
+            best_mask = mask_choice;
+            best_matrix = std::move(cur);
+        }
     }
-
-    for (int i = 0; i < 7; ++i) {
-        matrix[size - 1 - i][8] = (fmt >> i) & 1;
-    }
-    for (int i = 7; i < 15; ++i) {
-        matrix[8][size - 15 + i] = (fmt >> i) & 1;
-    }
+    (void)best_mask;
 
     QrCode qr;
     qr.size = size;
     qr.version = version;
-    qr.matrix = std::move(matrix);
+    qr.matrix = std::move(best_matrix);
     return qr;
 }
 
 /// Scans a 2D QR Code matrix and decodes the embedded text payload.
-inline std::string decodeQr(const std::vector<std::vector<BoolByte>>& matrix) {
+template <typename MatrixT>
+inline std::string decodeQr(const MatrixT& matrix) {
     int size = static_cast<int>(matrix.size());
     if (size < 21 || (size - 17) % 4 != 0) {
         throw keet::error("CryptoError", "Invalid QR code matrix dimensions (" + std::to_string(size) + ")");
     }
     int version = (size - 17) / 4;
 
-    // Read format information from around top-left finder
-    int fmt_coords_tl[15][2] = {
-        {8, 0}, {8, 1}, {8, 2}, {8, 3}, {8, 4}, {8, 5}, {8, 7}, {8, 8},
-        {7, 8}, {5, 8}, {4, 8}, {3, 8}, {2, 8}, {1, 8}, {0, 8}
-    };
+    // Read format information according to ISO/IEC 18004
     uint16_t raw_fmt = 0;
-    for (int i = 0; i < 15; ++i) {
-        if (matrix[fmt_coords_tl[i][0]][fmt_coords_tl[i][1]]) {
-            raw_fmt |= (1 << i);
-        }
+    for (int i = 0; i <= 5; ++i) {
+        if (matrix[i][8]) raw_fmt |= (1 << i);
+    }
+    if (matrix[7][8]) raw_fmt |= (1 << 6);
+    if (matrix[8][8]) raw_fmt |= (1 << 7);
+    if (matrix[8][7]) raw_fmt |= (1 << 8);
+    for (int i = 9; i < 15; ++i) {
+        if (matrix[8][14 - i]) raw_fmt |= (1 << i);
     }
     uint16_t unmasked_fmt = raw_fmt ^ 0x5412;
     int mask_choice = (unmasked_fmt >> 10) & 0x07;

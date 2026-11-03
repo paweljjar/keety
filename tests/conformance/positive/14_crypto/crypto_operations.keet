@@ -1,0 +1,188 @@
+import crypto;
+import crypto as c;
+import io;
+from "crypto" import sha256, toHex, fromHex, toBase64, fromBase64, randomUuid;
+
+fn main(): int {
+    io.println("Running KeetScript crypto conformance tests...");
+
+    // 1. Data Encodings (qualified, aliased, and selective imports)
+    let raw: string = "KeetScript Crypto!";
+    let hexStr: string = toHex(raw);
+    if (fromHex(hexStr) != raw) {
+        return 1;
+    }
+    if (crypto.fromHex("48656c6c6f") != "Hello") {
+        return 2;
+    }
+
+    let b64: string = c.toBase64(raw);
+    if (fromBase64(b64) != raw) {
+        return 3;
+    }
+
+    let urlSafe: string = crypto.toBase64Url("KeetScript?Crypto&Safe");
+    if (crypto.fromBase64Url(urlSafe) != "KeetScript?Crypto&Safe") {
+        return 4;
+    }
+
+    // 2. CSPRNG & Security Utilities
+    let uuid: string = randomUuid();
+    if (uuid.length() != 36) {
+        return 5;
+    }
+
+    let rbytes: string = crypto.randomBytes(16);
+    if (rbytes.length() != 16) {
+        return 6;
+    }
+
+    let rhex: string = crypto.randomHex(8);
+    if (rhex.length() != 16) {
+        return 7;
+    }
+
+    let rint: int = crypto.randomInt(10, 20);
+    if (rint < 10 || rint > 20) {
+        return 8;
+    }
+
+    if (!crypto.timingSafeEqual("constant_time_token", "constant_time_token")) {
+        return 9;
+    }
+    if (crypto.timingSafeEqual("constant_time_token", "different_time_token")) {
+        return 10;
+    }
+
+    // 3. Cryptographic Hashes & Streaming API
+    let h256: string = sha256("hello world");
+    if (h256 != "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9") {
+        return 11;
+    }
+
+    let h512: string = crypto.sha512("hello world");
+    if (h512.length() != 128) {
+        return 12;
+    }
+
+    let h3: string = c.sha3_256("hello world");
+    if (h3.length() != 64) {
+        return 13;
+    }
+
+    let h3_512: string = crypto.sha3_512("hello world");
+    if (h3_512.length() != 128) {
+        return 14;
+    }
+
+    let b3: string = crypto.blake3("hello world");
+    if (b3.length() != 64) {
+        return 15;
+    }
+
+    // Streaming Hasher
+    let hasher: crypto.Hasher = crypto.createHash("sha256");
+    hasher.update("hello ");
+    hasher.update("world");
+    if (hasher.digestHex() != "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9") {
+        return 16;
+    }
+
+    // 4. Message Authentication (HMAC)
+    let mac: string = crypto.hmacSha256("secret_key", "authenticated message");
+    if (mac.length() != 64) {
+        return 17;
+    }
+
+    let mac512: string = crypto.hmacSha512("secret_key", "authenticated message");
+    if (mac512.length() != 128) {
+        return 18;
+    }
+
+    let hmacStream: crypto.Hmac = crypto.createHmac("sha256", "secret_key");
+    hmacStream.update("authenticated ");
+    hmacStream.update("message");
+    if (hmacStream.digestHex() != mac) {
+        return 19;
+    }
+
+    // 5. Authenticated Symmetric Encryption (AEAD)
+    // 5a. ChaCha20-Poly1305 (RFC 8439)
+    let chaKey: string = "01234567890123456789012345678901"; // 32 bytes
+    let chaNonce: string = "012345678901"; // 12 bytes
+    let chaPayload: crypto.EncryptedPayload = crypto.encryptChaCha20Poly1305(chaKey, chaNonce, "TopSecretChaCha", "header_aad");
+    let chaDec: string = crypto.decryptChaCha20Poly1305(chaKey, chaNonce, chaPayload.ciphertext, chaPayload.tag, "header_aad");
+    if (chaDec != "TopSecretChaCha") {
+        return 20;
+    }
+
+    // 5b. AES-256-GCM (NIST SP 800-38D)
+    let aesKey: string = "01234567890123456789012345678901"; // 32 bytes
+    let aesIv: string = "012345678901"; // 12 bytes
+    let aesPayload: crypto.EncryptedPayload = crypto.encryptAesGcm(aesKey, aesIv, "TopSecretAesGcm", "meta_aad");
+    let aesDec: string = crypto.decryptAesGcm(aesKey, aesIv, aesPayload.ciphertext, aesPayload.tag, "meta_aad");
+    if (aesDec != "TopSecretAesGcm") {
+        return 21;
+    }
+
+    // 6. Symbology (1D Barcode & 2D QR Code)
+    // 6a. Code 128 Barcode
+    let bcBits: string = crypto.encodeCode128("TEST-128");
+    if (bcBits.length() == 0) {
+        return 22;
+    }
+    let bcSvg: string = crypto.encodeCode128Svg("TEST-128", 40);
+    if (bcSvg.length() == 0) {
+        return 23;
+    }
+    let bcAscii: string = crypto.encodeCode128Ascii("TEST-128");
+    if (bcAscii.length() == 0) {
+        return 24;
+    }
+    let bcDecoded: string = crypto.decodeCode128(bcBits);
+    if (bcDecoded != "TEST-128") {
+        return 25;
+    }
+
+    // 6b. 2D QR Code (ISO/IEC 18004)
+    let qr: crypto.QrCode = crypto.generateQr("https://keetscript.dev", "M");
+    if (qr.size < 21) {
+        return 26;
+    }
+    let qrSvg: string = qr.toSvg(4);
+    if (qrSvg.length() == 0) {
+        return 27;
+    }
+    let qrAscii: string = qr.toAscii(2);
+    if (qrAscii.length() == 0) {
+        return 28;
+    }
+    let scannedQr: string = crypto.decodeQr(qr.matrix);
+    if (scannedQr != "https://keetscript.dev") {
+        return 29;
+    }
+
+    // 7. Zonk Error Recovery
+    let recoveredHex: string = crypto.fromHex("invalid_hex_string_zzz") zonk "hex_recovered";
+    if (recoveredHex != "hex_recovered") {
+        return 30;
+    }
+
+    let recoveredB64: string = crypto.fromBase64("invalid!base64!%%%") zonk "b64_recovered";
+    if (recoveredB64 != "b64_recovered") {
+        return 31;
+    }
+
+    let recoveredBarcode: string = crypto.decodeCode128("00000000000000") zonk "bc_recovered";
+    if (recoveredBarcode != "bc_recovered") {
+        return 32;
+    }
+
+    let tamperedAes: string = crypto.decryptAesGcm(aesKey, aesIv, "corrupted_ciphertext", aesPayload.tag, "meta_aad") zonk "tamper_recovered";
+    if (tamperedAes != "tamper_recovered") {
+        return 33;
+    }
+
+    io.println("All KeetScript crypto conformance tests passed successfully!");
+    return 0;
+}
