@@ -28,6 +28,9 @@ struct CppEmitterOptions {
         "<iostream>"
     };
     bool is_root_module{false};                 ///< Emits main() process entry wrapper if true
+    bool emit_line_directives{true};            ///< Emits #line directives for source-to-source mapping
+    const diag::SourceManager* source_manager{nullptr}; ///< SourceManager to resolve FileId to paths
+    std::string source_file_path{""};           ///< Fallback or override source file path
 };
 
 /// Emits standard-compliant C++17 module implementation files (<module>.cpp).
@@ -48,6 +51,10 @@ public:
     // Configuration accessors
     [[nodiscard]] const CppEmitterOptions& get_options() const noexcept { return options_; }
     CppEmitterOptions& get_options() noexcept { return options_; }
+    [[nodiscard]] bool emits_line_directives() const noexcept { return options_.emit_line_directives; }
+    void set_emit_line_directives(bool emit) noexcept { options_.emit_line_directives = emit; }
+    void set_source_manager(const diag::SourceManager* sm) noexcept { options_.source_manager = sm; }
+    void set_source_file_path(std::string path) { options_.source_file_path = std::move(path); }
 
     // Header include management
     [[nodiscard]] std::string get_header_include() const;

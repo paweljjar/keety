@@ -30,6 +30,7 @@ add_library(keety_core STATIC
     ir/recursive_boxing.cpp
     emitter/header_emitter.cpp
     emitter/cpp_emitter.cpp
+    emitter/line_directive_tracker.cpp
     driver/toolchain_detector.cpp
     driver/toolchain_driver.cpp
     driver/cli_driver.cpp
