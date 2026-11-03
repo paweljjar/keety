@@ -144,6 +144,10 @@ std::vector<std::string> ToolchainDriver::build_compile_args(
         args.push_back("/std:" + options.cpp_standard);
         args.push_back(std::string(to_compiler_flag(options.opt_level, CompilerKind::MSVC)));
 
+        if (options.debug_symbols) {
+            args.push_back("/Z7");
+        }
+
         if (options.compile_only) {
             args.push_back("/c");
         }
@@ -171,6 +175,10 @@ std::vector<std::string> ToolchainDriver::build_compile_args(
         // Clang, GCC, and compatible toolchains
         args.push_back("-std=" + options.cpp_standard);
         args.push_back(std::string(to_compiler_flag(options.opt_level, toolchain_.kind)));
+
+        if (options.debug_symbols) {
+            args.push_back("-g");
+        }
 
         if (options.wrapv) {
             args.push_back("-fwrapv");
@@ -321,6 +329,10 @@ std::vector<std::string> ToolchainDriver::build_link_args(
         args.push_back("/Fe:" + output_file.string());
 
         args.push_back("/link");
+        if (options.debug_symbols) {
+            args.push_back("/DEBUG");
+        }
+
         for (const auto& dir : options.library_directories) {
             args.push_back("/LIBPATH:" + dir.string());
         }
@@ -338,6 +350,10 @@ std::vector<std::string> ToolchainDriver::build_link_args(
         }
     } else {
         // Clang, GCC, and compatible toolchains
+        if (options.debug_symbols) {
+            args.push_back("-g");
+        }
+
         if (options.kind == BinaryKind::SharedLibrary) {
 #if defined(__APPLE__)
             args.push_back("-dynamiclib");

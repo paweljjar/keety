@@ -210,6 +210,44 @@ TEST_CASE("Toolchain driver builds linker arguments for MSVC", "[driver][toolcha
     CHECK(contains_arg(sh_args, "/Fe:lib.dll"));
 }
 
+TEST_CASE("Toolchain driver emits debug flags for Clang and MSVC", "[driver][toolchain]") {
+    // Clang compile & link with debug_symbols
+    {
+        ToolchainInfo info;
+        info.kind = CompilerKind::Clang;
+        info.compiler_path = "/usr/bin/clang++";
+        ToolchainDriver driver(info);
+
+        CompileOptions comp_opts;
+        comp_opts.debug_symbols = true;
+        auto comp_args = driver.build_compile_args("main.cpp", "main.o", comp_opts);
+        CHECK(std::find(comp_args.begin(), comp_args.end(), "-g") != comp_args.end());
+
+        LinkOptions link_opts;
+        link_opts.debug_symbols = true;
+        auto link_args = driver.build_link_args({"main.o"}, "bin/app", link_opts);
+        CHECK(std::find(link_args.begin(), link_args.end(), "-g") != link_args.end());
+    }
+
+    // MSVC compile & link with debug_symbols
+    {
+        ToolchainInfo info;
+        info.kind = CompilerKind::MSVC;
+        info.compiler_path = "C:\\Program Files\\MSVC\\cl.exe";
+        ToolchainDriver driver(info);
+
+        CompileOptions comp_opts;
+        comp_opts.debug_symbols = true;
+        auto comp_args = driver.build_compile_args("main.cpp", "main.obj", comp_opts);
+        CHECK(std::find(comp_args.begin(), comp_args.end(), "/Z7") != comp_args.end());
+
+        LinkOptions link_opts;
+        link_opts.debug_symbols = true;
+        auto link_args = driver.build_link_args({"main.obj"}, "app.exe", link_opts);
+        CHECK(std::find(link_args.begin(), link_args.end(), "/DEBUG") != link_args.end());
+    }
+}
+
 TEST_CASE("Toolchain driver quotes paths containing spaces", "[driver][toolchain]") {
     ToolchainInfo info;
     info.kind = CompilerKind::Clang;

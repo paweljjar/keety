@@ -39,6 +39,7 @@ struct CompileOptions {
     std::string cpp_standard{"c++17"};         ///< Target C++ standard (default: c++17)
     bool compile_only{true};                   ///< Compile to object file without linking (-c / /c)
     bool position_independent_code{false};     ///< Position-independent code (-fPIC)
+    bool debug_symbols{false};                 ///< Generate debug symbols (-g / /Z7)
     std::vector<std::filesystem::path> include_directories{};
     std::vector<std::string> defines{};
     std::vector<std::string> extra_flags{};
@@ -49,6 +50,7 @@ struct CompileOptions {
 /// Configuration options for native toolchain linker invocation
 struct LinkOptions {
     BinaryKind kind{BinaryKind::Executable};
+    bool debug_symbols{false};                 ///< Generate debug symbols (-g / /DEBUG)
     std::vector<std::filesystem::path> library_directories{};
     std::vector<std::string> libraries{};
     std::vector<std::string> extra_linker_flags{};

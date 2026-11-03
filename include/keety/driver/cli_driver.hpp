@@ -55,6 +55,8 @@ struct CliOptions {
     bool wrapv{true};
     bool verbose{false};
     bool verbose_cpp{false};
+    bool debug_info{false};
+    bool emit_line_directives{true};
     bool test_conformance{false};
     bool test_benchmarks{false};
     std::string test_filter{};
