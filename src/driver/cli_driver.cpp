@@ -18,7 +18,9 @@
 #include <keet/json.hpp>
 #include <keet/test.hpp>
 
+#include <array>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
