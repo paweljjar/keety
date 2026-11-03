@@ -1548,7 +1548,16 @@ std::string CppEmitter::emit_main_wrapper() const {
         call_str += ");";
 
         if (main_returns_int_) {
-            ss << "        return static_cast<int>(" << call_str.substr(0, call_str.size() - 1) << ");\n";
+            if (has_test_import_) {
+                ss << "        auto user_ret = static_cast<int>(" << call_str.substr(0, call_str.size() - 1) << ");\n";
+                ss << "        if (user_ret != 0) return user_ret;\n";
+                ss << "        if (::keet::test::Registry::instance().cases().size() > 0) {\n";
+                ss << "            return static_cast<int>(::keet_module_test::run());\n";
+                ss << "        }\n";
+                ss << "        return user_ret;\n";
+            } else {
+                ss << "        return static_cast<int>(" << call_str.substr(0, call_str.size() - 1) << ");\n";
+            }
         } else {
             ss << "        " << call_str << "\n";
             if (has_test_import_) {

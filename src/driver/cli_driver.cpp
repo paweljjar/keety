@@ -708,6 +708,9 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
             } else if (edge.toCanonicalPath == "<stdlib>/net" || edge.rawImportPath == "net") {
                 auto netModSym = std::make_shared<sema::Symbol>("net", sema::SymbolKind::Module, edge.importSpan);
                 module_scope->define(netModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/test" || edge.rawImportPath == "test") {
+                auto testModSym = std::make_shared<sema::Symbol>("test", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(testModSym, false);
             }
             if (edge.toCanonicalPath.rfind("<stdlib>/", 0) != 0) {
                 auto it = module_scopes.find(edge.toCanonicalPath);
@@ -873,6 +876,9 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
             } else if (edge.toCanonicalPath == "<stdlib>/net" || edge.rawImportPath == "net") {
                 auto netModSym = std::make_shared<sema::Symbol>("net", sema::SymbolKind::Module, edge.importSpan);
                 module_scope->define(netModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/test" || edge.rawImportPath == "test") {
+                auto testModSym = std::make_shared<sema::Symbol>("test", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(testModSym, false);
             }
             if (edge.toCanonicalPath.rfind("<stdlib>/", 0) != 0) {
                 auto it = module_scopes.find(edge.toCanonicalPath);
@@ -1100,6 +1106,9 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
             } else if (edge.toCanonicalPath == "<stdlib>/net" || edge.rawImportPath == "net") {
                 auto netModSym = std::make_shared<sema::Symbol>("net", sema::SymbolKind::Module, edge.importSpan);
                 module_scope->define(netModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/test" || edge.rawImportPath == "test") {
+                auto testModSym = std::make_shared<sema::Symbol>("test", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(testModSym, false);
             }
             if (edge.toCanonicalPath.rfind("<stdlib>/", 0) != 0) {
                 auto it = module_scopes.find(edge.toCanonicalPath);

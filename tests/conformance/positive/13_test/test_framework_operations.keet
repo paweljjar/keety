@@ -1,0 +1,42 @@
+import test;
+from "test" import assertEq, assertNe, assertTrue, assertFalse, assertZonks, fail;
+
+fn main(): void {
+    // 1. Suite and Case Registration
+    test.suite("Core Assertions", fn(): void {
+        test.case("primitive equality and inequality", fn(): void {
+            assertEq(42, 42);
+            assertEq(10 + 15, 25);
+            assertNe(10, 20);
+            let strA: string = "keet";
+            let strB: string = "script";
+            assertEq(strA + strB, "keetscript");
+            assertNe("hello", "world");
+        });
+
+        test.case("boolean conditions", fn(): void {
+            assertTrue(true);
+            assertTrue(10 > 5);
+            assertFalse(false);
+            assertFalse(5 > 10);
+        });
+
+        test.case("collection equality", fn(): void {
+            let arr1: array<int> = [1, 2, 3];
+            let arr2: array<int> = [1, 2, 3];
+            assertEq(arr1, arr2);
+
+            let map1: map<string, int> = {"alpha": 1, "beta": 2};
+            let map2: map<string, int> = {"alpha": 1, "beta": 2};
+            assertEq(map1, map2);
+        });
+    });
+
+    test.suite("Error Handling", fn(): void {
+        test.case("assertZonks catches errors", fn(): void {
+            assertZonks(fn(): void {
+                fail("intentional error inside zonk check");
+            }, "AssertionError");
+        });
+    });
+}

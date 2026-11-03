@@ -68,30 +68,33 @@ struct TestSummary {
     std::vector<TestCaseResult> results;
 };
 
+namespace detail {
+template <typename T, typename U, typename = void>
+struct is_equality_comparable : std::false_type {};
+
+template <typename T, typename U>
+struct is_equality_comparable<T, U, std::void_t<decltype(std::declval<const T&>() == std::declval<const U&>())>> : std::true_type {};
+
+template <typename T, typename U>
+inline constexpr bool is_equality_comparable_v = is_equality_comparable<T, U>::value;
+} // namespace detail
+
 /// Helper to stringify any value for assertion error messages using keet::io formatting.
 template <typename T>
 [[nodiscard]] std::string stringifyValue(const T& val) {
-    std::ostringstream oss;
-    keet::io::detail::print_single_arg(oss, val);
-    return oss.str();
-}
-
-// Specialization for std::string to wrap in quotes for clarity
-template <>
-[[nodiscard]] inline std::string stringifyValue<std::string>(const std::string& val) {
-    return "\"" + val + "\"";
-}
-
-template <>
-[[nodiscard]] inline std::string stringifyValue<const char*>(const char* const& val) {
-    if (!val) return "null";
-    return "\"" + std::string(val) + "\"";
+    if constexpr (std::is_convertible_v<T, std::string_view>) {
+        return "\"" + std::string(std::string_view(val)) + "\"";
+    } else {
+        std::ostringstream oss;
+        keet::io::detail::print_single_arg(oss, val);
+        return oss.str();
+    }
 }
 
 /// Assert that two values are deeply equal.
 template <typename T, typename U>
 void assert_eq(const T& actual, const U& expected, const std::string& msg = "", const std::string& file = "", int line = 0) {
-    if constexpr (std::is_same_v<T, U> || (std::is_convertible_v<T, U> && std::is_convertible_v<U, T>)) {
+    if constexpr (detail::is_equality_comparable_v<T, U>) {
         if (actual == expected) {
             return;
         }
@@ -112,7 +115,7 @@ void assert_eq(const T& actual, const U& expected, const std::string& msg = "", 
 template <typename T, typename U>
 void assert_ne(const T& actual, const U& expected, const std::string& msg = "", const std::string& file = "", int line = 0) {
     bool equal = false;
-    if constexpr (std::is_same_v<T, U> || (std::is_convertible_v<T, U> && std::is_convertible_v<U, T>)) {
+    if constexpr (detail::is_equality_comparable_v<T, U>) {
         equal = (actual == expected);
     } else {
         equal = (stringifyValue(actual) == stringifyValue(expected));
