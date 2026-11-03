@@ -175,18 +175,18 @@ let scannedUrl: string = crypto.decodeQr(qr.matrix) zonk "decode failed";
 ### Part 2: Cryptographic Hashes & Message Authentication
 
 #### Phase 2.1: Modern Cryptographic Hashes
-- [ ] **Task 2.1.1: SHA-2 Family (SHA-256 & SHA-512)**
+- [x] **Task 2.1.1: SHA-2 Family (SHA-256 & SHA-512)**
   - Pure C++20 standard implementations with big-endian message scheduling and 64-round (256) / 80-round (512) compression.
   - Provide one-shot `sha256(data: string) -> string` and `sha512(data: string) -> string` (hex output).
-- [ ] **Task 2.1.2: SHA-3 / Keccak (SHA3-256 & SHA3-512)**
+- [x] **Task 2.1.2: SHA-3 / Keccak (SHA3-256 & SHA3-512)**
   - Implement the Keccak-$f[1600]$ permutation state with sponge construction and domain separation.
   - Expose `sha3_256(data: string)` and `sha3_512(data: string)`.
-- [ ] **Task 2.1.3: BLAKE3**
+- [x] **Task 2.1.3: BLAKE3**
   - Implement chunk-based tree-hashing, 7 rounds of permutations, and chaining value compression.
   - Expose `blake3(data: string) -> string` (high-throughput cryptographic hashing).
 
 #### Phase 2.2: Streaming Digest API (`crypto.Hasher`)
-- [ ] **Task 2.2.1: Incremental Hasher Engine**
+- [x] **Task 2.2.1: Incremental Hasher Engine**
   - Define `class Hasher`:
     - `hasher.update(chunk: string) -> void`
     - `hasher.digestHex() -> string`
@@ -195,7 +195,7 @@ let scannedUrl: string = crypto.decodeQr(qr.matrix) zonk "decode failed";
   - Factory function `createHash(algorithm: string) -> Hasher`.
 
 #### Phase 2.3: Message Authentication Codes (HMAC)
-- [ ] **Task 2.3.1: RFC 2104 HMAC Implementation**
+- [x] **Task 2.3.1: RFC 2104 HMAC Implementation**
   - Inner and outer padded hashing (`H((K' ^ opad) || H((K' ^ ipad) || m))`).
   - Implement one-shot `hmacSha256(key: string, message: string) -> string`.
   - Implement one-shot `hmacSha512(key: string, message: string) -> string`.
