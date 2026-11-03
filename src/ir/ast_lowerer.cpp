@@ -103,6 +103,14 @@ std::unique_ptr<Module> AstLowerer::lower_module(const parser::ModuleAST& module
                 for (const auto& s : imp->getSymbols()) {
                     imported_net_symbols_.insert(s.getEffectiveName());
                 }
+            } else if (p == "crypto" || p == "std.crypto" || p == "keet.crypto" || p == "crypto.hash") {
+                has_crypto_import_ = true;
+                if (!imp->getModuleAlias().empty()) {
+                    crypto_aliases_.insert(imp->getModuleAlias());
+                }
+                for (const auto& s : imp->getSymbols()) {
+                    imported_crypto_symbols_.insert(s.getEffectiveName());
+                }
             }
         } else if (const auto* var_decl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
             typechecker::TypePtr type = typechecker::Type::fromAnnotation(var_decl->getType());
@@ -880,6 +888,12 @@ Operand AstLowerer::lower_call_expr(const ast::CallExpr& expr) {
                 emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
                 return dest;
             }
+            if (obj_id->getName() == "crypto" || crypto_aliases_.count(obj_id->getName())) {
+                const std::string& m_name = member->getMemberName();
+                std::string callee_name = "@keet.crypto." + m_name;
+                emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
+                return dest;
+            }
         }
         Operand receiver = lower_expression(*member->getObject());
         emit(std::make_unique<MethodCallInst>(dest, receiver, member->getMemberName(), std::move(args)));
@@ -995,6 +1009,20 @@ Operand AstLowerer::lower_call_expr(const ast::CallExpr& expr) {
             name == "udpBind" || name == "udpLocalPort" || name == "udpSendTo" || name == "udpRecvFrom" ||
             name == "udpClose")) {
             std::string callee_name = "@keet.net." + name;
+            emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
+            return dest;
+        }
+        if (has_crypto_import_ && (imported_crypto_symbols_.count(name) ||
+            name == "toHex" || name == "fromHex" || name == "toBase64" || name == "fromBase64" ||
+            name == "toBase64Url" || name == "fromBase64Url" || name == "randomBytes" || name == "randomHex" ||
+            name == "randomInt" || name == "randomUuid" || name == "timingSafeEqual" || name == "sha256" ||
+            name == "sha512" || name == "sha3_256" || name == "sha3_512" || name == "blake3" ||
+            name == "createHash" || name == "hmacSha256" || name == "hmacSha512" || name == "createHmac" ||
+            name == "encryptChaCha20Poly1305" || name == "decryptChaCha20Poly1305" ||
+            name == "encryptAesGcm" || name == "decryptAesGcm" ||
+            name == "encodeCode128" || name == "encodeCode128Svg" || name == "encodeCode128Ascii" ||
+            name == "decodeCode128" || name == "generateQr" || name == "decodeQr")) {
+            std::string callee_name = "@keet.crypto." + name;
             emit(std::make_unique<CallInst>(dest, callee_name, std::move(args)));
             return dest;
         }

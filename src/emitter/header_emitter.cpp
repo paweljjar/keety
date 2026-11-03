@@ -314,6 +314,12 @@ std::string HeaderEmitter::to_cpp_type(const ast::TypeAnnotation* type, const st
             (!cust->isQualified() && cust->getName() == "Color")) {
             return "::keet::io::Color";
         }
+        if ((cust->isQualified() && cust->getModuleQualifier() == "crypto" &&
+             (cust->getName() == "EncryptedPayload" || cust->getName() == "QrCode" || cust->getName() == "Hasher" || cust->getName() == "Hmac")) ||
+            (!cust->isQualified() &&
+             (cust->getName() == "EncryptedPayload" || cust->getName() == "QrCode" || cust->getName() == "Hasher" || cust->getName() == "Hmac"))) {
+            return "::keet::crypto::" + cust->getName();
+        }
         std::string prefix;
         if (cust->isQualified()) {
             prefix = make_module_namespace(cust->getModuleQualifier()) + "::";
@@ -393,8 +399,13 @@ std::string HeaderEmitter::to_cpp_type(const typechecker::TypePtr& type, const s
     }
     case typechecker::TypeKind::Custom: {
         const auto* cust = dynamic_cast<const typechecker::CustomType*>(type.get());
-        if (cust && (cust->getName() == "Color" || cust->getName() == "io.Color")) {
-            return "::keet::io::Color";
+        if (cust) {
+            const auto& n = cust->getName();
+            if (n == "Color" || n == "io.Color") return "::keet::io::Color";
+            if (n == "EncryptedPayload" || n == "crypto.EncryptedPayload") return "::keet::crypto::EncryptedPayload";
+            if (n == "QrCode" || n == "crypto.QrCode") return "::keet::crypto::QrCode";
+            if (n == "Hasher" || n == "crypto.Hasher") return "::keet::crypto::Hasher";
+            if (n == "Hmac" || n == "crypto.Hmac") return "::keet::crypto::Hmac";
         }
         return cust ? cust->getName() : "auto";
     }

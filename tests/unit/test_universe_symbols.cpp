@@ -243,3 +243,50 @@ TEST_CASE("Standard library test module scope population", "[sema][universe][tes
     CHECK(testScope->lookupCurrent("unknown") == nullptr);
 }
 
+TEST_CASE("Standard library crypto module scope population", "[sema][universe][crypto]") {
+    auto universe = Scope::createUniverse();
+    REQUIRE(universe != nullptr);
+
+    CHECK(isStdlibModule("crypto"));
+    CHECK(isStdlibModule("std.crypto"));
+    CHECK(isStdlibModule("keet.crypto"));
+    CHECK(isStdlibModule("crypto.hash"));
+    auto cryptoScope = createStdlibModuleScope("crypto", universe);
+    REQUIRE(cryptoScope != nullptr);
+
+    const std::vector<std::string> expectedFunctions = {
+        "toHex", "fromHex", "toBase64", "fromBase64", "toBase64Url", "fromBase64Url",
+        "randomBytes", "randomHex", "randomInt", "randomUuid", "timingSafeEqual",
+        "sha256", "sha512", "sha3_256", "sha3_512", "blake3", "createHash",
+        "hmacSha256", "hmacSha512", "createHmac",
+        "encryptChaCha20Poly1305", "decryptChaCha20Poly1305",
+        "encryptAesGcm", "decryptAesGcm",
+        "encodeCode128", "encodeCode128Svg", "encodeCode128Ascii", "decodeCode128",
+        "generateQr", "decodeQr"
+    };
+
+    for (const auto& fnName : expectedFunctions) {
+        auto sym = cryptoScope->lookupCurrent(fnName);
+        REQUIRE(sym != nullptr);
+        CHECK(sym->getName() == fnName);
+        CHECK(sym->getKind() == SymbolKind::Function);
+        CHECK(sym->isExported());
+    }
+
+    const std::vector<std::string> expectedTypes = {
+        "EncryptedPayload", "QrCode", "Hasher", "Hmac"
+    };
+
+    for (const auto& typeName : expectedTypes) {
+        auto sym = cryptoScope->lookupCurrent(typeName);
+        REQUIRE(sym != nullptr);
+        CHECK(sym->getName() == typeName);
+        CHECK(sym->getKind() == SymbolKind::Class);
+        CHECK(sym->isType());
+        CHECK(sym->isExported());
+    }
+
+    CHECK(cryptoScope->size() == expectedFunctions.size() + expectedTypes.size());
+    CHECK(cryptoScope->lookupCurrent("unknown_crypto") == nullptr);
+}
+

@@ -233,6 +233,15 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                 for (const auto& s : imp->getSymbols()) {
                     imported_test_symbols_.insert(s.getEffectiveName());
                 }
+            } else if (p == "crypto" || p == "std.crypto" || p == "keet.crypto" || p == "crypto.hash") {
+                has_crypto_import_ = true;
+                add_standard_header("<keet/runtime.hpp>");
+                if (!imp->getModuleAlias().empty()) {
+                    crypto_aliases_.insert(imp->getModuleAlias());
+                }
+                for (const auto& s : imp->getSymbols()) {
+                    imported_crypto_symbols_.insert(s.getEffectiveName());
+                }
             } else {
                 std::string mod_id = !imp->getModuleAlias().empty() ? imp->getModuleAlias() : p;
                 if (mod_id.find('/') != std::string::npos || mod_id.find('\\') != std::string::npos) {
@@ -519,6 +528,9 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
                 if (m == "suite") return "::keet_module_test::_keet_suite";
                 return "::keet_module_test::" + m;
             }
+            if (obj_id->getName() == "crypto" || crypto_aliases_.count(obj_id->getName())) {
+                return "::keet::crypto::" + mem->getMemberName();
+            }
         }
         if (const auto* obj_mem = dynamic_cast<const ast::MemberExpr*>(mem->getObject())) {
             if (const auto* root_id = dynamic_cast<const ast::IdentExpr*>(obj_mem->getObject())) {
@@ -621,6 +633,9 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
                 if (m_name == "case") return "::keet_module_test::_keet_case(" + args_str + ")";
                 if (m_name == "suite") return "::keet_module_test::_keet_suite(" + args_str + ")";
                 return "::keet_module_test::" + m_name + "(" + args_str + ")";
+            }
+            if (obj_s == "crypto" || crypto_aliases_.count(obj_s)) {
+                return "::keet::crypto::" + m_name + "(" + args_str + ")";
             }
             // Container member mapping
             if (m_name == "push") {
@@ -780,6 +795,18 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
                 if (name == "case") return "::keet_module_test::_keet_case(" + args_str + ")";
                 if (name == "suite") return "::keet_module_test::_keet_suite(" + args_str + ")";
                 return "::keet_module_test::" + name + "(" + args_str + ")";
+            }
+            if (has_crypto_import_ && (imported_crypto_symbols_.count(name) ||
+                name == "toHex" || name == "fromHex" || name == "toBase64" || name == "fromBase64" ||
+                name == "toBase64Url" || name == "fromBase64Url" || name == "randomBytes" || name == "randomHex" ||
+                name == "randomInt" || name == "randomUuid" || name == "timingSafeEqual" || name == "sha256" ||
+                name == "sha512" || name == "sha3_256" || name == "sha3_512" || name == "blake3" ||
+                name == "createHash" || name == "hmacSha256" || name == "hmacSha512" || name == "createHmac" ||
+                name == "encryptChaCha20Poly1305" || name == "decryptChaCha20Poly1305" ||
+                name == "encryptAesGcm" || name == "decryptAesGcm" ||
+                name == "encodeCode128" || name == "encodeCode128Svg" || name == "encodeCode128Ascii" ||
+                name == "decodeCode128" || name == "generateQr" || name == "decodeQr")) {
+                return "::keet::crypto::" + name + "(" + args_str + ")";
             }
         }
 

@@ -106,6 +106,7 @@ bool isStdlibModule(std::string_view name) noexcept {
            name == "time" || name == "std.time" || name == "keet.time" ||
            name == "json" || name == "std.json" || name == "keet.json" ||
            name == "net" || name == "std.net" || name == "keet.net" ||
+           name == "crypto" || name == "std.crypto" || name == "keet.crypto" || name == "crypto.hash" ||
            name == "test" || name == "std.test" || name == "keet.test";
 }
 
@@ -501,6 +502,68 @@ void populateTestModuleScope(Scope& testScope) {
     makeFn("run");
 }
 
+void populateCryptoModuleScope(Scope& cryptoScope) {
+    diag::SourceSpan span{};
+
+    auto makeFn = [&](const char* name) {
+        auto sym = std::make_shared<Symbol>(name, SymbolKind::Function, span);
+        sym->setExported(true);
+        sym->setConst(true);
+        cryptoScope.define(sym, false);
+    };
+
+    auto makeType = [&](const char* name) {
+        auto sym = std::make_shared<Symbol>(name, SymbolKind::Class, span);
+        sym->setExported(true);
+        sym->setIsType(true);
+        cryptoScope.define(sym, false);
+    };
+
+    // Types
+    makeType("EncryptedPayload");
+    makeType("QrCode");
+    makeType("Hasher");
+    makeType("Hmac");
+
+    // Phase 1: Encodings, CSPRNG & Security Utilities
+    makeFn("toHex");
+    makeFn("fromHex");
+    makeFn("toBase64");
+    makeFn("fromBase64");
+    makeFn("toBase64Url");
+    makeFn("fromBase64Url");
+    makeFn("randomBytes");
+    makeFn("randomHex");
+    makeFn("randomInt");
+    makeFn("randomUuid");
+    makeFn("timingSafeEqual");
+
+    // Phase 2: Cryptographic Hashes & HMAC
+    makeFn("sha256");
+    makeFn("sha512");
+    makeFn("sha3_256");
+    makeFn("sha3_512");
+    makeFn("blake3");
+    makeFn("createHash");
+    makeFn("hmacSha256");
+    makeFn("hmacSha512");
+    makeFn("createHmac");
+
+    // Phase 3: Authenticated Symmetric Encryption (AEAD)
+    makeFn("encryptChaCha20Poly1305");
+    makeFn("decryptChaCha20Poly1305");
+    makeFn("encryptAesGcm");
+    makeFn("decryptAesGcm");
+
+    // Phase 4: Symbology & 2D Matrix Codes (QR & Barcodes)
+    makeFn("encodeCode128");
+    makeFn("encodeCode128Svg");
+    makeFn("encodeCode128Ascii");
+    makeFn("decodeCode128");
+    makeFn("generateQr");
+    makeFn("decodeQr");
+}
+
 std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, const std::shared_ptr<Scope>& universe) {
     auto scope = std::make_shared<Scope>(ScopeKind::Module, universe);
     if (moduleName == "io" || moduleName == "std.io" || moduleName == "keet.io") {
@@ -517,6 +580,8 @@ std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, cons
         populateJsonModuleScope(*scope);
     } else if (moduleName == "net" || moduleName == "std.net" || moduleName == "keet.net") {
         populateNetModuleScope(*scope);
+    } else if (moduleName == "crypto" || moduleName == "std.crypto" || moduleName == "keet.crypto" || moduleName == "crypto.hash") {
+        populateCryptoModuleScope(*scope);
     } else if (moduleName == "test" || moduleName == "std.test" || moduleName == "keet.test") {
         populateTestModuleScope(*scope);
     }
