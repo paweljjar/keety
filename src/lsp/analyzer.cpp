@@ -254,6 +254,14 @@ std::optional<StdlibDoc> getStdlibMemberDoc(const std::string& name) {
         {"parse", {"fn parse(text: string): any", "Parses a JSON string into KeetScript data structures."}},
         {"stringify", {"fn stringify(value: any): string", "Serializes a KeetScript value into a JSON string."}},
         {"fetch", {"fn fetch(url: string): string", "Performs an HTTP GET request and returns the response body."}},
+        {"case", {"fn case(name: string, fn: (): void): void", "Registers a test case with the test runner."}},
+        {"suite", {"fn suite(name: string, fn: (): void): void", "Groups related test cases into a suite."}},
+        {"assertEq", {"fn assertEq(actual: any, expected: any, msg?: string): void", "Asserts that two values are deeply equal."}},
+        {"assertNe", {"fn assertNe(actual: any, expected: any, msg?: string): void", "Asserts that two values are not equal."}},
+        {"assertTrue", {"fn assertTrue(condition: bool, msg?: string): void", "Asserts that a boolean condition is true."}},
+        {"assertFalse", {"fn assertFalse(condition: bool, msg?: string): void", "Asserts that a boolean condition is false."}},
+        {"assertZonks", {"fn assertZonks(fn: (): void, expectedError?: string, msg?: string): void", "Asserts that a callback throws a KeetScript zonk error."}},
+        {"fail", {"fn fail(msg?: string): void", "Explicitly fails the current test case."}},
     };
     auto it = docs.find(name);
     if (it != docs.end()) return it->second;
@@ -592,15 +600,6 @@ std::vector<Diagnostic> Analyzer::analyze(const Document& doc) {
 
     auto moduleScope = std::make_shared<sema::Scope>(sema::ScopeKind::Module, universe);
 
-    // Register standard library modules in scope
-    diag::SourceSpan dummySpan{};
-    moduleScope->define(std::make_shared<sema::Symbol>("io", sema::SymbolKind::Module, dummySpan), false);
-    moduleScope->define(std::make_shared<sema::Symbol>("fs", sema::SymbolKind::Module, dummySpan), false);
-    moduleScope->define(std::make_shared<sema::Symbol>("sys", sema::SymbolKind::Module, dummySpan), false);
-    moduleScope->define(std::make_shared<sema::Symbol>("math", sema::SymbolKind::Module, dummySpan), false);
-    moduleScope->define(std::make_shared<sema::Symbol>("time", sema::SymbolKind::Module, dummySpan), false);
-    moduleScope->define(std::make_shared<sema::Symbol>("json", sema::SymbolKind::Module, dummySpan), false);
-    moduleScope->define(std::make_shared<sema::Symbol>("net", sema::SymbolKind::Module, dummySpan), false);
 
     // Validate module imports against project root
     std::filesystem::path projectRoot = driver::findProjectRoot(fsPath);
@@ -921,6 +920,9 @@ std::optional<Hover> Analyzer::getHover(
     }
     if (ident == "net") {
         return Hover{MarkupContent{"markdown", "```keet\nimport net;\n```\n**Standard Library Module: `net`**\n\nNetworking, HTTP requests, TCP/UDP sockets."}, tokRange};
+    }
+    if (ident == "test") {
+        return Hover{MarkupContent{"markdown", "```keet\nimport test;\n```\n**Standard Library Module: `test`**\n\nUnit testing framework, assertion primitives, and test suite runner."}, tokRange};
     }
 
     // 3b. Standard Library Built-in Functions/Constants
@@ -1458,7 +1460,8 @@ CompletionList Analyzer::getCompletions(
         {"math", "Standard Library Module: `math` (Mathematical functions and constants)"},
         {"time", "Standard Library Module: `time` (Time measurement and formatting)"},
         {"json", "Standard Library Module: `json` (JSON serialization and parsing)"},
-        {"net", "Standard Library Module: `net` (Networking, HTTP and sockets)"}
+        {"net", "Standard Library Module: `net` (Networking, HTTP and sockets)"},
+        {"test", "Standard Library Module: `test` (Unit testing and assertions)"}
     };
     for (const auto& [mod, desc] : stdModules) {
         if (seen.insert(mod).second) {

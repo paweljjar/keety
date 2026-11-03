@@ -15,21 +15,28 @@
 #include <keety/typechecker/type_checker.hpp>
 #include <keety/version.hpp>
 
+#include <keet/json.hpp>
+#include <keet/test.hpp>
+
+#include <array>
+#include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 
 #if !defined(_WIN32)
 #include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
 #elif defined(_WIN32)
+#include <io.h>
 #include <windows.h>
-#else
-#include <unistd.h>
 #endif
 
 namespace keety::driver {
@@ -460,6 +467,21 @@ CliOptions CliDriver::parse_args(const std::vector<std::string>& args) {
             options.test_benchmarks = true;
         } else if (arg == "--conformance") {
             options.test_conformance = true;
+        } else if (arg == "-f" || arg == "--filter") {
+            if (idx + 1 < args.size()) {
+                options.test_filter = args[++idx];
+            }
+        } else if (arg.rfind("--filter=", 0) == 0) {
+            options.test_filter = arg.substr(9);
+        } else if (arg.rfind("-f=", 0) == 0) {
+            options.test_filter = arg.substr(3);
+        } else if (arg == "--fail-fast") {
+            options.test_fail_fast = true;
+        } else if (arg == "--json") {
+            options.test_json = true;
+            options.diagnostic_format = DiagnosticFormat::Json;
+        } else if (arg == "--tap") {
+            options.test_tap = true;
         } else if (arg == "-h" || arg == "--help") {
             options.command = CliCommand::Help;
             return options;
@@ -547,13 +569,13 @@ void CliDriver::print_version(std::ostream& out) {
 }
 
 void CliDriver::print_help(std::ostream& out) {
-    out << "Usage: keety <command> [options] <file.keet>\n\n"
+    out << "Usage: keety <command> [options] [file.keet]\n\n"
         << "Commands:\n"
         << "  check <file>                         Fast IDE-grade semantic and type validation\n"
         << "  emit <file> (--cpp|--hpp|--ast|--ir) Emit generated C++ or intermediate representations\n"
         << "  build <file>                         Compile KeetScript source into a native binary\n"
         << "  run <file> [-- args]                 Compile and immediately execute the target binary\n"
-        << "  test [--benchmarks|--conformance]    Run performance benchmarks or conformance test suite\n"
+        << "  test [path] [options]                Auto-discover and run unit tests, or run benchmarks/conformance\n"
         << "  version                              Display keety version information\n"
         << "  help                                 Display this help message\n\n"
         << "Options:\n"
@@ -562,6 +584,12 @@ void CliDriver::print_help(std::ostream& out) {
         << "  -O, --opt <0|1|2|3|s|z>              Optimization level (default: 3)\n"
         << "  --wrapv                              Enforce two's-complement overflow semantics\n"
         << "  -v, --verbose                        Enable verbose diagnostics and phase timings\n"
+        << "  -f, --filter <pattern>               Filter test cases by name or suite\n"
+        << "  --json                               Emit structured JSON test summary to standard output\n"
+        << "  --tap                                Emit Test Anything Protocol (TAP version 13) output\n"
+        << "  --fail-fast                          Abort test execution on the first failure\n"
+        << "  --benchmarks                         Run performance benchmarks suite\n"
+        << "  --conformance                        Run conformance test suite\n"
         << "  --no-color                           Disable ANSI color escape sequences in output\n"
         << "  --diagnostic-format <human|json>     Format diagnostics as human-readable terminal text or JSON array\n"
         << "  --json-diagnostics                   Shorthand for --diagnostic-format=json\n"
@@ -648,6 +676,7 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
     module_scopes["<stdlib>/time"] = sema::createStdlibModuleScope("time", universe);
     module_scopes["<stdlib>/json"] = sema::createStdlibModuleScope("json", universe);
     module_scopes["<stdlib>/net"] = sema::createStdlibModuleScope("net", universe);
+    module_scopes["<stdlib>/test"] = sema::createStdlibModuleScope("test", universe);
 
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
@@ -681,6 +710,9 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
             } else if (edge.toCanonicalPath == "<stdlib>/net" || edge.rawImportPath == "net") {
                 auto netModSym = std::make_shared<sema::Symbol>("net", sema::SymbolKind::Module, edge.importSpan);
                 module_scope->define(netModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/test" || edge.rawImportPath == "test") {
+                auto testModSym = std::make_shared<sema::Symbol>("test", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(testModSym, false);
             }
             if (edge.toCanonicalPath.rfind("<stdlib>/", 0) != 0) {
                 auto it = module_scopes.find(edge.toCanonicalPath);
@@ -812,6 +844,7 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
     module_scopes["<stdlib>/time"] = sema::createStdlibModuleScope("time", universe);
     module_scopes["<stdlib>/json"] = sema::createStdlibModuleScope("json", universe);
     module_scopes["<stdlib>/net"] = sema::createStdlibModuleScope("net", universe);
+    module_scopes["<stdlib>/test"] = sema::createStdlibModuleScope("test", universe);
 
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
@@ -845,6 +878,9 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
             } else if (edge.toCanonicalPath == "<stdlib>/net" || edge.rawImportPath == "net") {
                 auto netModSym = std::make_shared<sema::Symbol>("net", sema::SymbolKind::Module, edge.importSpan);
                 module_scope->define(netModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/test" || edge.rawImportPath == "test") {
+                auto testModSym = std::make_shared<sema::Symbol>("test", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(testModSym, false);
             }
             if (edge.toCanonicalPath.rfind("<stdlib>/", 0) != 0) {
                 auto it = module_scopes.find(edge.toCanonicalPath);
@@ -1041,6 +1077,7 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     module_scopes["<stdlib>/time"] = sema::createStdlibModuleScope("time", universe);
     module_scopes["<stdlib>/json"] = sema::createStdlibModuleScope("json", universe);
     module_scopes["<stdlib>/net"] = sema::createStdlibModuleScope("net", universe);
+    module_scopes["<stdlib>/test"] = sema::createStdlibModuleScope("test", universe);
 
     // 1. Semantic and type checking across all modules
     for (const auto* node : ordered_nodes) {
@@ -1071,6 +1108,9 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
             } else if (edge.toCanonicalPath == "<stdlib>/net" || edge.rawImportPath == "net") {
                 auto netModSym = std::make_shared<sema::Symbol>("net", sema::SymbolKind::Module, edge.importSpan);
                 module_scope->define(netModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/test" || edge.rawImportPath == "test") {
+                auto testModSym = std::make_shared<sema::Symbol>("test", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(testModSym, false);
             }
             if (edge.toCanonicalPath.rfind("<stdlib>/", 0) != 0) {
                 auto it = module_scopes.find(edge.toCanonicalPath);
@@ -1107,17 +1147,28 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
 
     std::string exec_ext = ToolchainDriver::get_executable_extension();
 
-    if (!options.output_dir.empty()) {
+    std::filesystem::path effective_output_dir = options.output_dir;
+    bool effective_output_is_dir = options.output_is_dir;
+
+    if (effective_output_dir.empty()) {
+        auto configured_build_dir = resolveBuildDirectory(options.input_file);
+        if (configured_build_dir.has_value() && !configured_build_dir->empty()) {
+            effective_output_dir = *configured_build_dir;
+            effective_output_is_dir = true;
+        }
+    }
+
+    if (!effective_output_dir.empty()) {
         std::error_code ec;
-        if (options.output_is_dir ||
-            std::filesystem::is_directory(options.output_dir) ||
-            options.output_dir.string().back() == '/' ||
-            options.output_dir.string().back() == '\\') {
-            std::filesystem::create_directories(options.output_dir, ec);
-            target_binary = options.output_dir / (options.input_file.stem().string() + exec_ext);
-            build_dir = options.output_dir / ".keety_build";
+        if (effective_output_is_dir ||
+            std::filesystem::is_directory(effective_output_dir) ||
+            effective_output_dir.string().back() == '/' ||
+            effective_output_dir.string().back() == '\\') {
+            std::filesystem::create_directories(effective_output_dir, ec);
+            target_binary = effective_output_dir / (options.input_file.stem().string() + exec_ext);
+            build_dir = effective_output_dir / ".keety_build";
         } else {
-            target_binary = options.output_dir;
+            target_binary = effective_output_dir;
             build_dir = target_binary.has_parent_path()
                 ? (target_binary.parent_path() / ".keety_build")
                 : (std::filesystem::current_path() / ".keety_build");
@@ -1327,68 +1378,559 @@ int CliDriver::execute_run(const CliOptions& options, std::ostream& out, std::os
     return exit_code;
 }
 
+std::vector<std::filesystem::path> CliDriver::discover_test_files(const std::filesystem::path& target_path) {
+    std::vector<std::filesystem::path> results;
+    std::error_code ec;
+
+    std::filesystem::path target = target_path.empty() ? std::filesystem::current_path() : target_path;
+    if (!std::filesystem::exists(target, ec)) {
+        return results;
+    }
+
+    if (std::filesystem::is_regular_file(target, ec)) {
+        if (target.extension() == ".keet") {
+            results.push_back(target);
+        }
+        return results;
+    }
+
+    if (!std::filesystem::is_directory(target, ec)) {
+        return results;
+    }
+
+    for (std::filesystem::recursive_directory_iterator it(target, std::filesystem::directory_options::skip_permission_denied, ec), end;
+         it != end && !ec; it.increment(ec)) {
+        if (ec) break;
+
+        const auto& entry = *it;
+        auto filename = entry.path().filename().string();
+
+        if (entry.is_directory(ec)) {
+            // Skip hidden directories (.git, .keety_build, etc.), build, node_modules, cmake-build-*
+            if (!filename.empty() && filename[0] == '.') {
+                it.disable_recursion_pending();
+                continue;
+            }
+            if (filename == "build" || filename == "node_modules" || filename.rfind("cmake-build-", 0) == 0) {
+                it.disable_recursion_pending();
+                continue;
+            }
+            continue;
+        }
+
+        if (entry.is_regular_file(ec) && entry.path().extension() == ".keet") {
+            bool matches = false;
+            // 1. *.test.keet
+            if (filename.size() > 10 && filename.rfind(".test.keet") == filename.size() - 10) {
+                matches = true;
+            }
+            // 2. test_*.keet
+            else if (filename.rfind("test_", 0) == 0) {
+                matches = true;
+            }
+            // 3. Inside a tests/ directory containing import test;
+            else {
+                bool inside_tests_dir = false;
+                for (const auto& part : entry.path()) {
+                    if (part == "tests") {
+                        inside_tests_dir = true;
+                        break;
+                    }
+                }
+                if (inside_tests_dir) {
+                    std::ifstream ifs(entry.path());
+                    if (ifs.is_open()) {
+                        std::string line;
+                        while (std::getline(ifs, line)) {
+                            if (line.find("import test") != std::string::npos ||
+                                line.find("from \"test\"") != std::string::npos ||
+                                line.find("from 'test'") != std::string::npos) {
+                                matches = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (matches) {
+                results.push_back(entry.path());
+            }
+        }
+    }
+
+    std::sort(results.begin(), results.end());
+    return results;
+}
+
 int CliDriver::execute_test(const CliOptions& options, std::ostream& out, std::ostream& err) {
-    (void)err;
     bool run_benchmarks = options.test_benchmarks;
     bool run_conformance = options.test_conformance;
 
-    if (!run_benchmarks && !run_conformance) {
-        run_benchmarks = true;
-        run_conformance = true;
+    if (run_benchmarks || run_conformance) {
+        int overall_status = 0;
+
+        if (run_benchmarks) {
+            if (options.verbose) {
+                out << "[verbose] Running reference performance benchmarks...\n";
+            }
+            std::vector<std::filesystem::path> candidates = {
+                "./build/benchmarks/keety_benchmarks",
+                "./benchmarks/keety_benchmarks",
+                "keety_benchmarks"
+            };
+            std::filesystem::path bench_bin;
+            for (const auto& c : candidates) {
+                if (std::filesystem::exists(c)) {
+                    bench_bin = c;
+                    break;
+                }
+            }
+
+            if (!bench_bin.empty()) {
+                std::string cmd = quote_arg(bench_bin.string());
+                if (options.verbose) {
+                    cmd += " --verbose";
+                }
+                for (const auto& a : options.run_args) {
+                    cmd += " " + quote_arg(a);
+                }
+                int status = std::system(cmd.c_str());
+                if (status != 0) {
+                    overall_status = 1;
+                }
+            } else {
+                std::string cmd = "ctest --test-dir build -R bench_numeric_vector --output-on-failure";
+                int status = std::system(cmd.c_str());
+                if (status != 0) {
+                    overall_status = 1;
+                }
+            }
+        }
+
+        if (run_conformance) {
+            if (options.verbose) {
+                out << "[verbose] Running conformance test suite...\n";
+            }
+            std::string cmd = "ctest --test-dir build -R conformance --output-on-failure";
+            int status = std::system(cmd.c_str());
+            if (status != 0) {
+                overall_status = 1;
+            }
+        }
+
+        return overall_status;
     }
 
-    int overall_status = 0;
+    // Native KeetScript Test Discovery and Runner
+    std::filesystem::path target = options.input_file.empty() ? std::filesystem::current_path() : options.input_file;
+    auto test_files = discover_test_files(target);
 
-    if (run_benchmarks) {
-        if (options.verbose) {
-            out << "[verbose] Running reference performance benchmarks...\n";
+    if (test_files.empty()) {
+        if (options.test_json) {
+            out << "{\n"
+                << "  \"total\": 0,\n"
+                << "  \"passed\": 0,\n"
+                << "  \"failed\": 0,\n"
+                << "  \"skipped\": 0,\n"
+                << "  \"totalDurationNs\": 0,\n"
+                << "  \"testFiles\": {\n"
+                << "    \"total\": 0,\n"
+                << "    \"passed\": 0,\n"
+                << "    \"failed\": 0\n"
+                << "  },\n"
+                << "  \"results\": []\n"
+                << "}\n";
+        } else if (options.test_tap) {
+            out << "TAP version 13\n1..0\n";
+        } else {
+            out << "No test files found in " << target.string() << ".\n";
         }
-        std::vector<std::filesystem::path> candidates = {
-            "./build/benchmarks/keety_benchmarks",
-            "./benchmarks/keety_benchmarks",
-            "keety_benchmarks"
-        };
-        std::filesystem::path bench_bin;
-        for (const auto& c : candidates) {
-            if (std::filesystem::exists(c)) {
-                bench_bin = c;
+        return 0;
+    }
+
+    bool use_color = false;
+    if (options.color_mode == diag::ColorMode::Always) {
+        use_color = true;
+    } else if (options.color_mode == diag::ColorMode::Never) {
+        use_color = false;
+    } else {
+        const char* no_color = std::getenv("NO_COLOR");
+        if (!no_color || no_color[0] == '\0') {
+#if defined(_WIN32)
+            use_color = _isatty(_fileno(stdout)) != 0;
+#else
+            use_color = isatty(fileno(stdout)) != 0;
+#endif
+        }
+    }
+
+    const char* passBadge = use_color ? "\033[30;42m PASS \033[0m" : " PASS ";
+    const char* failBadge = use_color ? "\033[30;41m FAIL \033[0m" : " FAIL ";
+    const char* cPass = use_color ? "\033[32m" : "";
+    const char* cFail = use_color ? "\033[31m" : "";
+    const char* cDim = use_color ? "\033[90m" : "";
+    const char* cBold = use_color ? "\033[1m" : "";
+    const char* cReset = use_color ? "\033[0m" : "";
+
+    struct AggregatedCaseResult {
+        std::string file;
+        keet::test::TestCaseResult result;
+    };
+    std::vector<AggregatedCaseResult> all_results;
+
+    int total_files = static_cast<int>(test_files.size());
+    int files_passed = 0;
+    int files_failed = 0;
+    int total_cases_passed = 0;
+    int total_cases_failed = 0;
+    int total_cases_skipped = 0;
+    int total_cases = 0;
+    auto suite_start = std::chrono::steady_clock::now();
+
+    for (const auto& test_path : test_files) {
+        CliOptions single_opts = options;
+        single_opts.command = CliCommand::Build;
+        single_opts.input_file = test_path;
+
+        std::ostringstream build_out;
+        std::ostringstream build_err;
+        auto bin = build_binary(single_opts, build_out, build_err);
+
+        if (!bin) {
+            files_failed++;
+            keet::test::TestCaseResult comp_res;
+            comp_res.name = "compilation";
+            comp_res.suite = "";
+            comp_res.passed = false;
+            comp_res.durationNs = 0;
+            keet::test::TestFailure tf;
+            tf.message = "compilation failed";
+            tf.file = test_path.string();
+            tf.line = 0;
+            tf.errorType = "CompilationError";
+            comp_res.failure = std::move(tf);
+            all_results.push_back({test_path.filename().string(), std::move(comp_res)});
+            total_cases_failed++;
+            total_cases++;
+
+            if (!options.test_json && !options.test_tap) {
+                out << failBadge << " " << test_path.string() << " (compilation failed)\n";
+                std::string err_str = build_err.str();
+                if (!err_str.empty()) {
+                    err << err_str << "\n";
+                }
+            }
+            if (options.test_fail_fast) {
                 break;
             }
+            continue;
         }
 
-        if (!bench_bin.empty()) {
-            std::string cmd = quote_arg(bench_bin.string());
-            if (options.verbose) {
-                cmd += " --verbose";
+        std::string cmd = quote_arg(bin->string()) + " --keet-test-json";
+        if (!options.test_filter.empty()) {
+            cmd += " --filter " + quote_arg(options.test_filter);
+        }
+        if (options.test_fail_fast) {
+            cmd += " --fail-fast";
+        }
+
+        std::string exec_output;
+        int exit_code = 0;
+#if defined(_WIN32)
+        std::string full_cmd = "\"" + cmd + " 2>&1\"";
+        FILE* pipe = _popen(full_cmd.c_str(), "r");
+#else
+        std::string full_cmd = cmd + " 2>&1";
+        FILE* pipe = popen(full_cmd.c_str(), "r");
+#endif
+        if (!pipe) {
+            files_failed++;
+            keet::test::TestCaseResult proc_res;
+            proc_res.name = "process";
+            proc_res.suite = "";
+            proc_res.passed = false;
+            proc_res.durationNs = 0;
+            keet::test::TestFailure tf;
+            tf.message = "failed to launch test process";
+            tf.file = test_path.string();
+            tf.line = 0;
+            tf.errorType = "ProcessError";
+            proc_res.failure = std::move(tf);
+            all_results.push_back({test_path.filename().string(), std::move(proc_res)});
+            total_cases_failed++;
+            total_cases++;
+
+            if (!options.test_json && !options.test_tap) {
+                out << failBadge << " " << test_path.string() << " (failed to launch test process)\n\n";
             }
-            for (const auto& a : options.run_args) {
-                cmd += " " + quote_arg(a);
+            if (options.test_fail_fast) break;
+            continue;
+        }
+
+        std::array<char, 512> buf;
+        while (fgets(buf.data(), static_cast<int>(buf.size()), pipe) != nullptr) {
+            exec_output += buf.data();
+        }
+#if defined(_WIN32)
+        int raw_status = _pclose(pipe);
+        exit_code = raw_status;
+#else
+        int raw_status = pclose(pipe);
+        exit_code = WIFEXITED(raw_status) ? WEXITSTATUS(raw_status) : raw_status;
+#endif
+
+        bool parsed_ok = false;
+        keet::test::TestSummary summary;
+        try {
+            size_t json_start = exec_output.find('{');
+            if (json_start != std::string::npos) {
+                std::string_view json_view = std::string_view(exec_output).substr(json_start);
+                ::keet::json::detail::Parser json_p(json_view);
+                auto root = json_p.parse_document();
+                if (root.is_object()) {
+                    const auto& obj = std::get<keet::json::detail::JsonNode::Object>(root.value);
+                    if (obj.count("total") && obj.count("passed") && obj.count("results")) {
+                        summary.total = static_cast<int>(std::get<int64_t>(obj.at("total").value));
+                        summary.passed = static_cast<int>(std::get<int64_t>(obj.at("passed").value));
+                        summary.failed = static_cast<int>(std::get<int64_t>(obj.at("failed").value));
+                        if (obj.count("skipped")) {
+                            summary.skipped = static_cast<int>(std::get<int64_t>(obj.at("skipped").value));
+                        }
+                        if (obj.count("totalDurationNs")) {
+                            summary.totalDurationNs = std::get<int64_t>(obj.at("totalDurationNs").value);
+                        }
+                        if (obj.at("results").is_array()) {
+                            const auto& res_arr = std::get<keet::json::detail::JsonNode::Array>(obj.at("results").value);
+                            for (const auto& item : res_arr) {
+                                if (!item.is_object()) continue;
+                                const auto& r_obj = std::get<keet::json::detail::JsonNode::Object>(item.value);
+                                keet::test::TestCaseResult r;
+                                if (r_obj.count("name") && r_obj.at("name").is_string()) {
+                                    r.name = std::get<std::string>(r_obj.at("name").value);
+                                }
+                                if (r_obj.count("suite") && r_obj.at("suite").is_string()) {
+                                    r.suite = std::get<std::string>(r_obj.at("suite").value);
+                                }
+                                if (r_obj.count("passed") && r_obj.at("passed").is_bool()) {
+                                    r.passed = std::get<bool>(r_obj.at("passed").value);
+                                }
+                                if (r_obj.count("durationNs") && r_obj.at("durationNs").is_int()) {
+                                    r.durationNs = std::get<int64_t>(r_obj.at("durationNs").value);
+                                }
+                                if (r_obj.count("failure") && r_obj.at("failure").is_object()) {
+                                    const auto& f_obj = std::get<keet::json::detail::JsonNode::Object>(r_obj.at("failure").value);
+                                    keet::test::TestFailure tf;
+                                    if (f_obj.count("message") && f_obj.at("message").is_string()) tf.message = std::get<std::string>(f_obj.at("message").value);
+                                    if (f_obj.count("expected") && f_obj.at("expected").is_string()) tf.expected = std::get<std::string>(f_obj.at("expected").value);
+                                    if (f_obj.count("actual") && f_obj.at("actual").is_string()) tf.actual = std::get<std::string>(f_obj.at("actual").value);
+                                    if (f_obj.count("file") && f_obj.at("file").is_string()) tf.file = std::get<std::string>(f_obj.at("file").value);
+                                    if (f_obj.count("line") && f_obj.at("line").is_int()) tf.line = static_cast<int>(std::get<int64_t>(f_obj.at("line").value));
+                                    if (f_obj.count("errorType") && f_obj.at("errorType").is_string()) tf.errorType = std::get<std::string>(f_obj.at("errorType").value);
+                                    r.failure = std::move(tf);
+                                }
+                                summary.results.push_back(std::move(r));
+                            }
+                        }
+                        parsed_ok = true;
+                    }
+                }
             }
-            int status = std::system(cmd.c_str());
-            if (status != 0) {
-                overall_status = 1;
+        } catch (...) {
+            parsed_ok = false;
+        }
+
+        if (parsed_ok) {
+            bool file_passed = (exit_code == 0 && summary.failed == 0);
+            if (file_passed) {
+                files_passed++;
+            } else {
+                files_failed++;
+            }
+            total_cases_passed += summary.passed;
+            total_cases_failed += summary.failed;
+            total_cases_skipped += summary.skipped;
+            total_cases += summary.total;
+
+            for (const auto& res : summary.results) {
+                all_results.push_back({test_path.filename().string(), res});
+            }
+
+            if (!options.test_json && !options.test_tap) {
+                int64_t fileDurationMs = summary.totalDurationNs / 1'000'000;
+                if (file_passed) {
+                    out << passBadge << " " << test_path.string() << " ("
+                        << summary.total << (summary.total == 1 ? " test, " : " tests, ");
+                    if (summary.skipped > 0) {
+                        out << summary.skipped << " skipped, ";
+                    }
+                    out << fileDurationMs << "ms)\n";
+                } else {
+                    out << failBadge << " " << test_path.string() << " ("
+                        << summary.failed << " failed, "
+                        << summary.passed << " passed, ";
+                    if (summary.skipped > 0) {
+                        out << summary.skipped << " skipped, ";
+                    }
+                    out << fileDurationMs << "ms)\n";
+                }
+
+                for (const auto& res : summary.results) {
+                    int64_t caseMs = res.durationNs / 1'000'000;
+                    if (res.passed) {
+                        out << "   " << cPass << "✓" << cReset << " " << res.name
+                            << " " << cDim << "(" << caseMs << "ms)" << cReset << "\n";
+                    } else {
+                        out << "   " << cFail << "✕" << cReset << " " << res.name
+                            << " " << cDim << "(" << caseMs << "ms)" << cReset << "\n";
+                        if (res.failure) {
+                            const auto& f = *res.failure;
+                            out << "     " << cFail << f.errorType << ": " << f.message << cReset << "\n";
+                            if (!f.expected.empty() || !f.actual.empty()) {
+                                out << "       " << cDim << "Expected: " << cReset << cPass << f.expected << cReset << "\n";
+                                out << "       " << cDim << "Actual:   " << cReset << cFail << f.actual << cReset << "\n";
+                            }
+                            if (!f.file.empty()) {
+                                out << "       " << cDim << "--> " << f.file;
+                                if (f.line > 0) out << ":" << f.line;
+                                out << cReset << "\n";
+                            }
+                        }
+                    }
+                }
+                out << "\n";
             }
         } else {
-            std::string cmd = "ctest --test-dir build -R bench_numeric_vector --output-on-failure";
-            int status = std::system(cmd.c_str());
-            if (status != 0) {
-                overall_status = 1;
+            files_failed++;
+            keet::test::TestCaseResult exec_res;
+            exec_res.name = "execution";
+            exec_res.suite = "";
+            exec_res.passed = false;
+            exec_res.durationNs = 0;
+            keet::test::TestFailure tf;
+            tf.message = "execution failed with exit code " + std::to_string(exit_code);
+            tf.file = test_path.string();
+            tf.line = 0;
+            tf.errorType = "ExecutionError";
+            exec_res.failure = std::move(tf);
+            all_results.push_back({test_path.filename().string(), std::move(exec_res)});
+            total_cases_failed++;
+            total_cases++;
+
+            if (!options.test_json && !options.test_tap) {
+                out << failBadge << " " << test_path.string() << " (execution failed with exit code " << exit_code << ")\n";
+                if (!exec_output.empty()) {
+                    out << exec_output << "\n";
+                }
+                out << "\n";
             }
         }
-    }
 
-    if (run_conformance) {
-        if (options.verbose) {
-            out << "[verbose] Running conformance test suite...\n";
-        }
-        std::string cmd = "ctest --test-dir build -R conformance --output-on-failure";
-        int status = std::system(cmd.c_str());
-        if (status != 0) {
-            overall_status = 1;
+        if (options.test_fail_fast && (files_failed > 0 || total_cases_failed > 0)) {
+            break;
         }
     }
 
-    return overall_status;
+    auto suite_end = std::chrono::steady_clock::now();
+    double suiteDurationMs = std::chrono::duration<double, std::milli>(suite_end - suite_start).count();
+
+    if (options.test_json) {
+        out << "{\n";
+        out << "  \"total\": " << total_cases << ",\n";
+        out << "  \"passed\": " << total_cases_passed << ",\n";
+        out << "  \"failed\": " << total_cases_failed << ",\n";
+        out << "  \"skipped\": " << total_cases_skipped << ",\n";
+        out << "  \"totalDurationNs\": " << static_cast<int64_t>(suiteDurationMs * 1'000'000.0) << ",\n";
+        out << "  \"testFiles\": {\n";
+        out << "    \"total\": " << total_files << ",\n";
+        out << "    \"passed\": " << files_passed << ",\n";
+        out << "    \"failed\": " << files_failed << "\n";
+        out << "  },\n";
+        out << "  \"results\": [\n";
+        for (size_t i = 0; i < all_results.size(); ++i) {
+            const auto& ar = all_results[i];
+            const auto& r = ar.result;
+            out << "    {\n";
+            out << "      \"name\": \"" << keet::test::jsonEscape(r.name) << "\",\n";
+            out << "      \"suite\": \"" << keet::test::jsonEscape(r.suite) << "\",\n";
+            out << "      \"file\": \"" << keet::test::jsonEscape(ar.file) << "\",\n";
+            out << "      \"passed\": " << (r.passed ? "true" : "false") << ",\n";
+            out << "      \"durationNs\": " << r.durationNs;
+            if (r.failure) {
+                out << ",\n      \"failure\": {\n";
+                out << "        \"message\": \"" << keet::test::jsonEscape(r.failure->message) << "\",\n";
+                out << "        \"expected\": \"" << keet::test::jsonEscape(r.failure->expected) << "\",\n";
+                out << "        \"actual\": \"" << keet::test::jsonEscape(r.failure->actual) << "\",\n";
+                out << "        \"file\": \"" << keet::test::jsonEscape(r.failure->file) << "\",\n";
+                out << "        \"line\": " << r.failure->line << ",\n";
+                out << "        \"errorType\": \"" << keet::test::jsonEscape(r.failure->errorType) << "\"\n";
+                out << "      }\n";
+            } else {
+                out << "\n";
+            }
+            out << "    }" << (i + 1 < all_results.size() ? "," : "") << "\n";
+        }
+        out << "  ]\n";
+        out << "}\n";
+    } else if (options.test_tap) {
+        out << "TAP version 13\n";
+        out << "1.." << all_results.size() << "\n";
+        for (size_t i = 0; i < all_results.size(); ++i) {
+            const auto& ar = all_results[i];
+            const auto& r = ar.result;
+            std::string fullName = ar.file;
+            if (!r.suite.empty()) {
+                fullName += " > " + r.suite;
+            }
+            fullName += " > " + r.name;
+
+            int64_t caseMs = r.durationNs / 1'000'000;
+            if (r.passed) {
+                out << "ok " << (i + 1) << " - " << fullName << " # time=" << caseMs << "ms\n";
+            } else {
+                out << "not ok " << (i + 1) << " - " << fullName << " # time=" << caseMs << "ms\n";
+                if (r.failure) {
+                    out << "  ---\n";
+                    out << "  message: \"" << keet::test::jsonEscape(r.failure->message) << "\"\n";
+                    if (!r.failure->expected.empty()) {
+                        out << "  expected: \"" << keet::test::jsonEscape(r.failure->expected) << "\"\n";
+                    }
+                    if (!r.failure->actual.empty()) {
+                        out << "  actual: \"" << keet::test::jsonEscape(r.failure->actual) << "\"\n";
+                    }
+                    if (!r.failure->file.empty()) {
+                        out << "  file: \"" << keet::test::jsonEscape(r.failure->file) << "\"\n";
+                    }
+                    if (r.failure->line > 0) {
+                        out << "  line: " << r.failure->line << "\n";
+                    }
+                    out << "  ...\n";
+                }
+            }
+        }
+    } else {
+        out << cBold << "Test Files  " << cReset;
+        if (files_failed == 0) {
+            out << cPass << files_passed << " passed" << cReset << " (" << total_files << " total)\n";
+        } else {
+            out << cPass << files_passed << " passed" << cReset << ", "
+                << cFail << files_failed << " failed" << cReset << " (" << total_files << " total)\n";
+        }
+
+        out << cBold << "Tests       " << cReset;
+        if (total_cases_failed == 0) {
+            out << cPass << total_cases_passed << " passed" << cReset << " (" << total_cases << " total)\n";
+        } else {
+            out << cPass << total_cases_passed << " passed" << cReset << ", "
+                << cFail << total_cases_failed << " failed" << cReset << " (" << total_cases << " total)\n";
+        }
+
+        std::ostringstream dur_ss;
+        dur_ss << std::fixed << std::setprecision(1) << suiteDurationMs;
+        out << cBold << "Duration    " << cReset << dur_ss.str() << "ms\n";
+    }
+
+    return (files_failed > 0 || total_cases_failed > 0) ? 1 : 0;
 }
 
 int CliDriver::run(const CliOptions& options, std::ostream& out, std::ostream& err) {

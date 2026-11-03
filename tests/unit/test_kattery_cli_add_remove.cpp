@@ -68,8 +68,9 @@ TEST_CASE("Cli: kattery init", "[kattery][cli]") {
         Manifest m = Manifest::load(temp.path / "pedigree.json");
         REQUIRE(m.version == "0.1.0");
         REQUIRE(m.entry == "src/main.keet");
+        REQUIRE(m.buildDir == "build");
         REQUIRE(m.scripts.find("start") != m.scripts.end());
-        REQUIRE(m.scripts.at("start") == "keety run src/main.keet --output-dir build");
+        REQUIRE(m.scripts.at("start") == "keety run src/main.keet");
 
         REQUIRE(fs::exists(temp.path / ".gitignore"));
         std::ifstream ifs(temp.path / ".gitignore");

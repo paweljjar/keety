@@ -57,6 +57,10 @@ struct CliOptions {
     bool verbose_cpp{false};
     bool test_conformance{false};
     bool test_benchmarks{false};
+    std::string test_filter{};
+    bool test_fail_fast{false};
+    bool test_json{false};
+    bool test_tap{false};
     std::vector<std::string> run_args{};
     diag::ColorMode color_mode{diag::ColorMode::Never};
     DiagnosticFormat diagnostic_format{DiagnosticFormat::Human};
@@ -89,7 +93,10 @@ public:
     /// Executes `keety run <file> [-- args]` compilation, linking, and execution pipeline
     static int execute_run(const CliOptions& options, std::ostream& out = std::cout, std::ostream& err = std::cerr);
 
-    /// Executes `keety test [--benchmarks | --conformance]` test and benchmark suite
+    /// Discovers KeetScript test files (*.test.keet, test_*.keet, tests/* with import test)
+    [[nodiscard]] static std::vector<std::filesystem::path> discover_test_files(const std::filesystem::path& target_path);
+
+    /// Executes `keety test [path] [options]` test runner or benchmark/conformance suite
     static int execute_test(const CliOptions& options, std::ostream& out = std::cout, std::ostream& err = std::cerr);
 
     /// Helper to compile and link to a binary, returning target binary path if successful

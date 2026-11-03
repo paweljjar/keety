@@ -216,3 +216,30 @@ TEST_CASE("Standard library net module scope population", "[sema][universe][net]
     CHECK(netScope->lookupCurrent("tcp_connect") == nullptr);
 }
 
+TEST_CASE("Standard library test module scope population", "[sema][universe][test]") {
+    auto universe = Scope::createUniverse();
+    REQUIRE(universe != nullptr);
+
+    CHECK(isStdlibModule("test"));
+    CHECK(isStdlibModule("std.test"));
+    CHECK(isStdlibModule("keet.test"));
+    auto testScope = createStdlibModuleScope("test", universe);
+    REQUIRE(testScope != nullptr);
+
+    const std::vector<std::string> expectedFunctions = {
+        "case", "suite", "assertEq", "assertNe", "assertTrue", "assertFalse", "assertZonks", "fail", "run"
+    };
+
+    CHECK(testScope->size() == expectedFunctions.size());
+    for (const auto& fnName : expectedFunctions) {
+        auto sym = testScope->lookupCurrent(fnName);
+        REQUIRE(sym != nullptr);
+        CHECK(sym->getName() == fnName);
+        CHECK(sym->getKind() == SymbolKind::Function);
+        CHECK(sym->isExported());
+    }
+
+    CHECK(testScope->lookupCurrent("assert_eq") == nullptr);
+    CHECK(testScope->lookupCurrent("unknown") == nullptr);
+}
+

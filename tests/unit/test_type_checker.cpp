@@ -3634,6 +3634,74 @@ TEST_CASE("Standard net module type checking and semantic validation", "[typeche
     }
 }
 
+TEST_CASE("TypeChecker: Standard Library test Module", "[typechecker][test]") {
+    SECTION("Valid test module member calls and assertions pass type checking") {
+        ParseResult res(
+            "import test;\n"
+            "fn runTests(): void {\n"
+            "    test.suite(\"Math Tests\", fn(): void {\n"
+            "        test.case(\"addition\", fn(): void {\n"
+            "            test.assertEq(10 + 20, 30);\n"
+            "            test.assertNe(10, 20, \"should not be equal\");\n"
+            "            test.assertTrue(true);\n"
+            "            test.assertFalse(false);\n"
+            "            test.assertZonks(fn(): void {\n"
+            "                let zero: int = 0;\n"
+            "                let div: int = 1 / zero;\n"
+            "            }, \"DivisionByZero\");\n"
+            "        });\n"
+            "    });\n"
+            "    let code: int = test.run(\"Math\");\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+    }
+
+    SECTION("Valid selective import from test module") {
+        ParseResult res(
+            "from \"test\" import assertEq, assertTrue, case;\n"
+            "fn runTests(): void {\n"
+            "    case(\"simple\", fn(): void {\n"
+            "        assertEq(\"hello\", \"hello\");\n"
+            "        assertTrue(5 > 2);\n"
+            "    });\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+    }
+
+    SECTION("Reject unknown member on test with E3011") {
+        ParseResult res(
+            "import test;\n"
+            "fn test_invalid(): void {\n"
+            "    test.nonExistentTestHelper();\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::InvalidMemberAccess));
+    }
+
+    SECTION("Reject wrong argument count on test.case with E3001") {
+        ParseResult res(
+            "import test;\n"
+            "fn test_invalid(): void {\n"
+            "    test.case(\"only-name\");\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Reject non-exported symbol from test with E1005") {
+        ParseResult res(
+            "from \"test\" import unknownTestSymbol;\n"
+            "fn test_invalid(): void {}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::SymbolNotExported));
+    }
+}
+
 
 
 

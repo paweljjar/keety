@@ -89,8 +89,63 @@
   "Import Module": {
     "prefix": "import",
     "body": [
-      "import ${1|io,fs,sys,math,time|};"
+      "import ${1|io,fs,sys,math,time,json,net,test|};"
     ],
     "description": "Import standard library module"
+  },
+  "Test Suite": {
+    "prefix": "testsuite",
+    "body": [
+      "test.suite(\"${1:SuiteName}\", fn(): void {",
+      "\t$0",
+      "});"
+    ],
+    "description": "Register a test suite"
+  },
+  "Test Case": {
+    "prefix": "testcase",
+    "body": [
+      "test.case(\"${1:test description}\", fn(): void {",
+      "\t$0",
+      "});"
+    ],
+    "description": "Register a test case"
+  },
+  "Assert Equal": {
+    "prefix": "assertEq",
+    "body": [
+      "test.assertEq(${1:actual}, ${2:expected});"
+    ],
+    "description": "Assert that two values are deeply equal"
+  },
+  "Assert Not Equal": {
+    "prefix": "assertNe",
+    "body": [
+      "test.assertNe(${1:actual}, ${2:expected});"
+    ],
+    "description": "Assert that two values are not equal"
+  },
+  "Assert True": {
+    "prefix": "assertTrue",
+    "body": [
+      "test.assertTrue(${1:condition});"
+    ],
+    "description": "Assert that a boolean condition is true"
+  },
+  "Assert False": {
+    "prefix": "assertFalse",
+    "body": [
+      "test.assertFalse(${1:condition});"
+    ],
+    "description": "Assert that a boolean condition is false"
+  },
+  "Assert Zonks": {
+    "prefix": "assertZonks",
+    "body": [
+      "test.assertZonks(fn(): void {",
+      "\t${1:expression};",
+      "}, \"${2:ErrorName}\");"
+    ],
+    "description": "Assert that a callback throws a KeetScript error"
   }
 }

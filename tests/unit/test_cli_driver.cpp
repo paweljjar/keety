@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <keety/driver/cli_driver.hpp>
+#include <keet/json.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -596,3 +597,348 @@ TEST_CASE("CLI configuration flags behavior in compilation and execution", "[dri
     std::error_code ec;
     std::filesystem::remove_all(temp_dir, ec);
 }
+
+TEST_CASE("CLI test runner options parsing and flag handling", "[driver][cli][test]") {
+    SECTION("Parse test command with positional target path") {
+        auto opts = CliDriver::parse_args({"test", "tests/my_suite.test.keet"});
+        CHECK(opts.command == CliCommand::Test);
+        CHECK(opts.input_file == "tests/my_suite.test.keet");
+    }
+
+    SECTION("Parse test command with -f and --filter flags") {
+        auto opts1 = CliDriver::parse_args({"test", "-f", "Math"});
+        CHECK(opts1.command == CliCommand::Test);
+        CHECK(opts1.test_filter == "Math");
+
+        auto opts2 = CliDriver::parse_args({"test", "--filter=Crypto", "tests/"});
+        CHECK(opts2.command == CliCommand::Test);
+        CHECK(opts2.test_filter == "Crypto");
+        CHECK(opts2.input_file == "tests/");
+    }
+
+    SECTION("Parse test command with --fail-fast") {
+        auto opts = CliDriver::parse_args({"test", "--fail-fast"});
+        CHECK(opts.command == CliCommand::Test);
+        CHECK(opts.test_fail_fast);
+    }
+
+    SECTION("Parse test command with --json and --tap") {
+        auto opts1 = CliDriver::parse_args({"test", "--json"});
+        CHECK(opts1.command == CliCommand::Test);
+        CHECK(opts1.test_json);
+        CHECK(!opts1.test_tap);
+
+        auto opts2 = CliDriver::parse_args({"test", "--tap"});
+        CHECK(opts2.command == CliCommand::Test);
+        CHECK(!opts2.test_json);
+        CHECK(opts2.test_tap);
+    }
+}
+
+TEST_CASE("CLI test runner auto-discovery heuristics", "[driver][cli][test]") {
+    std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "keety_test_discovery";
+    std::error_code ec;
+    std::filesystem::remove_all(temp_dir, ec);
+    std::filesystem::create_directories(temp_dir, ec);
+
+    // 1. *.test.keet
+    auto f1 = temp_dir / "math.test.keet";
+    { std::ofstream out(f1); out << "import test;\n"; }
+
+    // 2. test_*.keet
+    auto f2 = temp_dir / "test_auth.keet";
+    { std::ofstream out(f2); out << "import test;\n"; }
+
+    // 3. Regular non-test file
+    auto f3 = temp_dir / "app.keet";
+    { std::ofstream out(f3); out << "fn main(): void {}\n"; }
+
+    // 4. File in tests/ with import test
+    auto tests_dir = temp_dir / "tests";
+    std::filesystem::create_directories(tests_dir, ec);
+    auto f4 = tests_dir / "custom.keet";
+    { std::ofstream out(f4); out << "import test;\nfn run(): void {}\n"; }
+
+    // 5. File in tests/ WITHOUT import test
+    auto f5 = tests_dir / "helper.keet";
+    { std::ofstream out(f5); out << "export fn help(): void {}\n"; }
+
+    // 6. Hidden dir (should be skipped)
+    auto hidden_dir = temp_dir / ".git";
+    std::filesystem::create_directories(hidden_dir, ec);
+    auto f6 = hidden_dir / "ignored.test.keet";
+    { std::ofstream out(f6); out << "import test;\n"; }
+
+    // 7. build dir (should be skipped)
+    auto build_dir = temp_dir / "build";
+    std::filesystem::create_directories(build_dir, ec);
+    auto f7 = build_dir / "ignored.test.keet";
+    { std::ofstream out(f7); out << "import test;\n"; }
+
+    auto discovered = CliDriver::discover_test_files(temp_dir);
+    REQUIRE(discovered.size() == 3);
+
+    std::vector<std::string> filenames;
+    for (const auto& p : discovered) {
+        filenames.push_back(p.filename().string());
+    }
+    std::sort(filenames.begin(), filenames.end());
+
+    CHECK(filenames[0] == "custom.keet");
+    CHECK(filenames[1] == "math.test.keet");
+    CHECK(filenames[2] == "test_auth.keet");
+
+    SECTION("Direct single file target discovery") {
+        auto single = CliDriver::discover_test_files(f1);
+        REQUIRE(single.size() == 1);
+        CHECK(single[0] == f1);
+    }
+
+    std::filesystem::remove_all(temp_dir, ec);
+}
+
+TEST_CASE("CLI test runner end-to-end execution", "[driver][cli][test]") {
+    ToolchainDriver driver;
+    if (!driver.has_valid_toolchain()) {
+        SUCCEED("Skipping CLI test runner execution test: no C++ toolchain found.");
+        return;
+    }
+
+    std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "keety_test_runner_e2e";
+    std::error_code ec;
+    std::filesystem::remove_all(temp_dir, ec);
+    std::filesystem::create_directories(temp_dir, ec);
+
+    // Create a passing test file with test.case registration
+    auto test_file = temp_dir / "sample.test.keet";
+    {
+        std::ofstream out(test_file);
+        out << "import test;\n"
+            << "fn main(): void {\n"
+            << "    test.suite(\"Arithmetic\", fn(): void {\n"
+            << "        test.case(\"addition check\", fn(): void {\n"
+            << "            test.assertEq(10 + 5, 15);\n"
+            << "            test.assertTrue(true);\n"
+            << "        });\n"
+            << "        test.case(\"inequality check\", fn(): void {\n"
+            << "            test.assertNe(10, 20);\n"
+            << "        });\n"
+            << "    });\n"
+            << "}\n";
+    }
+
+    SECTION("Default human-readable terminal reporter") {
+        CliOptions opts;
+        opts.command = CliCommand::Test;
+        opts.input_file = test_file;
+        opts.color_mode = keety::diag::ColorMode::Never;
+
+        std::ostringstream out;
+        std::ostringstream err;
+        int code = CliDriver::execute_test(opts, out, err);
+
+        CHECK(code == 0);
+        std::string output = out.str();
+        CHECK(output.find("PASS") != std::string::npos);
+        CHECK(output.find("sample.test.keet (2 tests") != std::string::npos);
+        CHECK(output.find("addition check") != std::string::npos);
+        CHECK(output.find("inequality check") != std::string::npos);
+        CHECK(output.find("Test Files") != std::string::npos);
+        CHECK(output.find("1 passed (1 total)") != std::string::npos);
+        CHECK(output.find("Tests") != std::string::npos);
+        CHECK(output.find("2 passed (2 total)") != std::string::npos);
+    }
+
+    SECTION("Structured JSON reporter (--json)") {
+        CliOptions opts;
+        opts.command = CliCommand::Test;
+        opts.input_file = test_file;
+        opts.test_json = true;
+
+        std::ostringstream out;
+        std::ostringstream err;
+        int code = CliDriver::execute_test(opts, out, err);
+
+        CHECK(code == 0);
+        std::string json_str = out.str();
+        CHECK(json_str.find("PASS") == std::string::npos); // Suppresses ANSI output
+        CHECK(json_str.find("Test Files") == std::string::npos);
+
+        ::keet::json::detail::Parser parser(json_str);
+        auto root = parser.parse_document();
+        REQUIRE(root.is_object());
+        const auto& obj = std::get<keet::json::detail::JsonNode::Object>(root.value);
+
+        REQUIRE(obj.count("total"));
+        CHECK(std::get<int64_t>(obj.at("total").value) == 2);
+        REQUIRE(obj.count("passed"));
+        CHECK(std::get<int64_t>(obj.at("passed").value) == 2);
+        REQUIRE(obj.count("failed"));
+        CHECK(std::get<int64_t>(obj.at("failed").value) == 0);
+
+        REQUIRE(obj.count("testFiles"));
+        const auto& tf_obj = std::get<keet::json::detail::JsonNode::Object>(obj.at("testFiles").value);
+        CHECK(std::get<int64_t>(tf_obj.at("total").value) == 1);
+        CHECK(std::get<int64_t>(tf_obj.at("passed").value) == 1);
+
+        REQUIRE(obj.count("results"));
+        const auto& res_arr = std::get<keet::json::detail::JsonNode::Array>(obj.at("results").value);
+        REQUIRE(res_arr.size() == 2);
+        const auto& r0 = std::get<keet::json::detail::JsonNode::Object>(res_arr[0].value);
+        CHECK(std::get<std::string>(r0.at("name").value) == "addition check");
+        CHECK(std::get<bool>(r0.at("passed").value) == true);
+    }
+
+    SECTION("TAP version 13 reporter (--tap)") {
+        CliOptions opts;
+        opts.command = CliCommand::Test;
+        opts.input_file = test_file;
+        opts.test_tap = true;
+
+        std::ostringstream out;
+        std::ostringstream err;
+        int code = CliDriver::execute_test(opts, out, err);
+
+        CHECK(code == 0);
+        std::string tap_str = out.str();
+        CHECK(tap_str.rfind("TAP version 13\n", 0) == 0);
+        CHECK(tap_str.find("1..2\n") != std::string::npos);
+        CHECK(tap_str.find("ok 1 - sample.test.keet > Arithmetic > addition check # time=") != std::string::npos);
+        CHECK(tap_str.find("ok 2 - sample.test.keet > Arithmetic > inequality check # time=") != std::string::npos);
+    }
+
+    SECTION("Regex filtering (--filter)") {
+        CliOptions opts;
+        opts.command = CliCommand::Test;
+        opts.input_file = test_file;
+        opts.test_filter = "add.*"; // Regex matching addition check
+        opts.test_json = true;
+
+        std::ostringstream out;
+        std::ostringstream err;
+        int code = CliDriver::execute_test(opts, out, err);
+
+        CHECK(code == 0);
+        std::string json_str = out.str();
+        ::keet::json::detail::Parser parser(json_str);
+        auto root = parser.parse_document();
+        REQUIRE(root.is_object());
+        const auto& obj = std::get<keet::json::detail::JsonNode::Object>(root.value);
+
+        CHECK(std::get<int64_t>(obj.at("total").value) == 1);
+        CHECK(std::get<int64_t>(obj.at("passed").value) == 1);
+        CHECK(std::get<int64_t>(obj.at("skipped").value) == 1);
+
+        const auto& res_arr = std::get<keet::json::detail::JsonNode::Array>(obj.at("results").value);
+        REQUIRE(res_arr.size() == 1);
+        const auto& r0 = std::get<keet::json::detail::JsonNode::Object>(res_arr[0].value);
+        CHECK(std::get<std::string>(r0.at("name").value) == "addition check");
+    }
+
+    SECTION("Fail-fast mode (--fail-fast)") {
+        auto failing_file = temp_dir / "failing.test.keet";
+        {
+            std::ofstream f_out(failing_file);
+            f_out << "import test;\n"
+                  << "fn main(): void {\n"
+                  << "    test.case(\"will fail\", fn(): void {\n"
+                  << "        test.assertEq(1, 2);\n"
+                  << "    });\n"
+                  << "    test.case(\"should be skipped\", fn(): void {\n"
+                  << "        test.assertTrue(true);\n"
+                  << "    });\n"
+                  << "}\n";
+        }
+
+        CliOptions opts;
+        opts.command = CliCommand::Test;
+        opts.input_file = failing_file;
+        opts.test_fail_fast = true;
+        opts.test_json = true;
+
+        std::ostringstream out;
+        std::ostringstream err;
+        int code = CliDriver::execute_test(opts, out, err);
+
+        CHECK(code == 1);
+        std::string json_str = out.str();
+        ::keet::json::detail::Parser parser(json_str);
+        auto root = parser.parse_document();
+        REQUIRE(root.is_object());
+        const auto& obj = std::get<keet::json::detail::JsonNode::Object>(root.value);
+
+        // Aborted on first failure: total executed 1, failed 1
+        CHECK(std::get<int64_t>(obj.at("total").value) == 1);
+        CHECK(std::get<int64_t>(obj.at("failed").value) == 1);
+    }
+
+    SECTION("Empty directory reporting for --json and --tap") {
+        auto empty_dir = temp_dir / "empty_dir";
+        std::filesystem::create_directories(empty_dir, ec);
+
+        CliOptions json_opts;
+        json_opts.command = CliCommand::Test;
+        json_opts.input_file = empty_dir;
+        json_opts.test_json = true;
+
+        std::ostringstream json_out;
+        std::ostringstream json_err;
+        int code1 = CliDriver::execute_test(json_opts, json_out, json_err);
+        CHECK(code1 == 0);
+        CHECK(json_out.str().find("\"total\": 0") != std::string::npos);
+
+        CliOptions tap_opts;
+        tap_opts.command = CliCommand::Test;
+        tap_opts.input_file = empty_dir;
+        tap_opts.test_tap = true;
+
+        std::ostringstream tap_out;
+        std::ostringstream tap_err;
+        int code2 = CliDriver::execute_test(tap_opts, tap_out, tap_err);
+        CHECK(code2 == 0);
+        CHECK(tap_out.str() == "TAP version 13\n1..0\n");
+    }
+
+    SECTION("BuildDir in pedigree.json routes build artifacts into buildDir and leaves src clean") {
+        std::filesystem::path proj_dir = temp_dir / "proj_with_builddir";
+        std::filesystem::create_directories(proj_dir / "src", ec);
+
+        std::ofstream ped(proj_dir / "pedigree.json");
+        ped << "{\n"
+            << "  \"name\": \"builddir-test\",\n"
+            << "  \"version\": \"0.1.0\",\n"
+            << "  \"buildDir\": \"build\"\n"
+            << "}\n";
+        ped.close();
+
+        std::filesystem::path src_test = proj_dir / "src" / "math.test.keet";
+        std::ofstream test_fs(src_test);
+        test_fs << "import test;\n"
+                << "from \"test\" import assertEq;\n\n"
+                << "fn test_simple(): void {\n"
+                << "    assertEq(10, 10);\n"
+                << "}\n";
+        test_fs.close();
+
+        CliOptions opts;
+        opts.command = CliCommand::Test;
+        opts.input_file = proj_dir / "src";
+        opts.color_mode = keety::diag::ColorMode::Never;
+
+        std::ostringstream out, err;
+        int code = CliDriver::execute_test(opts, out, err);
+        CHECK(code == 0);
+        CHECK(out.str().find("PASS") != std::string::npos);
+
+        // Verify that build artifacts are inside proj_dir / "build"
+        CHECK(std::filesystem::exists(proj_dir / "build"));
+        CHECK(std::filesystem::exists(proj_dir / "build" / ".keety_build"));
+
+        // Verify that src/ has no .keety_build directory or compiled binary
+        CHECK(!std::filesystem::exists(proj_dir / "src" / ".keety_build"));
+        CHECK(!std::filesystem::exists(proj_dir / "src" / "math.test"));
+    }
+
+    std::filesystem::remove_all(temp_dir, ec);
+}
+

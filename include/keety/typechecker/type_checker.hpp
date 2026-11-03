@@ -232,6 +232,8 @@ private:
     TypePtr checkJsonDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope);
     TypePtr checkNetMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope);
     TypePtr checkNetDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope);
+    TypePtr checkTestMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope);
+    TypePtr checkTestDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope);
 };
 
 } // namespace keety::typechecker

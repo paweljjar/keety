@@ -224,6 +224,15 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                 for (const auto& s : imp->getSymbols()) {
                     imported_net_symbols_.insert(s.getEffectiveName());
                 }
+            } else if (p == "test" || p == "std.test" || p == "keet.test") {
+                has_test_import_ = true;
+                add_standard_header("<keet/runtime.hpp>");
+                if (!imp->getModuleAlias().empty()) {
+                    test_aliases_.insert(imp->getModuleAlias());
+                }
+                for (const auto& s : imp->getSymbols()) {
+                    imported_test_symbols_.insert(s.getEffectiveName());
+                }
             } else {
                 std::string mod_id = !imp->getModuleAlias().empty() ? imp->getModuleAlias() : p;
                 if (mod_id.find('/') != std::string::npos || mod_id.find('\\') != std::string::npos) {
@@ -268,6 +277,8 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                         main_returns_int_ = (prim->getKind() == ast::PrimitiveTypeKind::Int);
                     }
                 }
+            } else if (fn->getName().rfind("test", 0) == 0 && fn->getParams().empty()) {
+                test_function_names_.push_back(fn->getName());
             }
             if (fn->getBody()) {
                 add_function_definition(translate_function(*fn));
@@ -303,6 +314,10 @@ void CppEmitter::collect_ir_declarations(const ir::Module& ir_module) {
                 main_has_args_ = !fn->get_parameters().empty();
                 if (fn->get_return_type()) {
                     main_returns_int_ = fn->get_return_type()->isInt();
+                }
+            } else if (fn->get_name().rfind("test", 0) == 0 && fn->get_parameters().empty()) {
+                if (std::find(test_function_names_.begin(), test_function_names_.end(), fn->get_name()) == test_function_names_.end()) {
+                    test_function_names_.push_back(fn->get_name());
                 }
             }
             add_function_definition(translate_ir_function(*fn));
@@ -498,6 +513,12 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             if (obj_id->getName() == "net" || net_aliases_.count(obj_id->getName())) {
                 return "::keet::net::" + mem->getMemberName();
             }
+            if (obj_id->getName() == "test" || test_aliases_.count(obj_id->getName())) {
+                std::string m = mem->getMemberName();
+                if (m == "case") return "::keet_module_test::_keet_case";
+                if (m == "suite") return "::keet_module_test::_keet_suite";
+                return "::keet_module_test::" + m;
+            }
         }
         if (const auto* obj_mem = dynamic_cast<const ast::MemberExpr*>(mem->getObject())) {
             if (const auto* root_id = dynamic_cast<const ast::IdentExpr*>(obj_mem->getObject())) {
@@ -595,6 +616,11 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             }
             if (obj_s == "net" || net_aliases_.count(obj_s)) {
                 return "::keet::net::" + m_name + "(" + args_str + ")";
+            }
+            if (obj_s == "test" || test_aliases_.count(obj_s)) {
+                if (m_name == "case") return "::keet_module_test::_keet_case(" + args_str + ")";
+                if (m_name == "suite") return "::keet_module_test::_keet_suite(" + args_str + ")";
+                return "::keet_module_test::" + m_name + "(" + args_str + ")";
             }
             // Container member mapping
             if (m_name == "push") {
@@ -746,6 +772,14 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
                 name == "udpBind" || name == "udpLocalPort" || name == "udpSendTo" || name == "udpRecvFrom" ||
                 name == "udpClose")) {
                 return "::keet::net::" + name + "(" + args_str + ")";
+            }
+            if (has_test_import_ && (imported_test_symbols_.count(name) ||
+                name == "case" || name == "suite" || name == "assertEq" || name == "assertNe" ||
+                name == "assertTrue" || name == "assertFalse" || name == "assertZonks" ||
+                name == "fail" || name == "run")) {
+                if (name == "case") return "::keet_module_test::_keet_case(" + args_str + ")";
+                if (name == "suite") return "::keet_module_test::_keet_suite(" + args_str + ")";
+                return "::keet_module_test::" + name + "(" + args_str + ")";
             }
         }
 
@@ -1365,6 +1399,11 @@ std::string CppEmitter::translate_ir_function(const ir::Function& fn) const {
                 } else if (callee.rfind("keet.net.", 0) == 0) {
                     std::string func_name = callee.substr(9);
                     call_expr = "::keet::net::" + func_name + "(";
+                } else if (callee.rfind("keet.test.", 0) == 0) {
+                    std::string func_name = callee.substr(10);
+                    if (func_name == "case") func_name = "_keet_case";
+                    if (func_name == "suite") func_name = "_keet_suite";
+                    call_expr = "::keet_module_test::" + func_name + "(";
                 } else {
                     call_expr = callee + "(";
                 }
@@ -1483,7 +1522,7 @@ bool CppEmitter::is_root_module() const noexcept {
     if (manual_root_override_) {
         return options_.is_root_module;
     }
-    return options_.is_root_module || has_main_function_;
+    return options_.is_root_module || has_main_function_ || has_test_import_;
 }
 
 std::string CppEmitter::emit_main_wrapper() const {
@@ -1509,11 +1548,30 @@ std::string CppEmitter::emit_main_wrapper() const {
         call_str += ");";
 
         if (main_returns_int_) {
-            ss << "        return static_cast<int>(" << call_str.substr(0, call_str.size() - 1) << ");\n";
+            if (has_test_import_) {
+                ss << "        auto user_ret = static_cast<int>(" << call_str.substr(0, call_str.size() - 1) << ");\n";
+                ss << "        if (user_ret != 0) return user_ret;\n";
+                ss << "        if (::keet::test::Registry::instance().cases().size() > 0) {\n";
+                ss << "            return static_cast<int>(::keet_module_test::run());\n";
+                ss << "        }\n";
+                ss << "        return user_ret;\n";
+            } else {
+                ss << "        return static_cast<int>(" << call_str.substr(0, call_str.size() - 1) << ");\n";
+            }
         } else {
             ss << "        " << call_str << "\n";
+            if (has_test_import_) {
+                ss << "        if (::keet::test::Registry::instance().cases().size() > 0) {\n";
+                ss << "            return static_cast<int>(::keet_module_test::run());\n";
+                ss << "        }\n";
+            }
             ss << "        return 0;\n";
         }
+    } else if (has_test_import_) {
+        for (const auto& fn_name : test_function_names_) {
+            ss << "        ::keet_module_test::_keet_case(\"" << fn_name << "\", []() { " << ns << "::" << fn_name << "(); });\n";
+        }
+        ss << "        return static_cast<int>(::keet_module_test::run());\n";
     } else {
         ss << "        return 0;\n";
     }
