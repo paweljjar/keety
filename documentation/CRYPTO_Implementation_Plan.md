@@ -276,27 +276,27 @@ let scannedUrl: string = crypto.decodeQr(qr.matrix) zonk "decode failed";
 ### Part 5: Compiler Pipeline & Toolchain Integration
 
 #### Phase 5.1: Semantic Model & Universe Symbol Registration
-- [ ] **Task 5.1.1: Universe Definitions**
+- [x] **Task 5.1.1: Universe Definitions**
   - In `src/sema/universe.cpp`, add `populateCryptoModuleScope()`.
   - Register types: `Hasher`, `Hmac`, `EncryptedPayload`, `QrCode`.
   - Register all crypto, encoding, and symbology functions with strongly typed signatures.
-- [ ] **Task 5.1.2: Module Path Resolution**
+- [x] **Task 5.1.2: Module Path Resolution**
   - Confirm `"crypto"`, `"std.crypto"`, `"keet.crypto"` canonical mapping in `src/resolver/module_path_resolver.cpp`.
 
 #### Phase 5.2: Typechecker & Diagnostics
-- [ ] **Task 5.2.1: Type Checking for `crypto.*` Members**
+- [x] **Task 5.2.1: Type Checking for `crypto.*` Members**
   - Verify parameter counts, types, and return types in `src/typechecker/type_checker.cpp`.
   - Check `zonk` safety on fallible operations (`fromHex`, `fromBase64`, `decrypt*`, `decodeQr`, `decodeCode128`).
 
 #### Phase 5.3: IR Lowering & C++ Emission
-- [ ] **Task 5.3.1: AST Lowering**
+- [x] **Task 5.3.1: AST Lowering**
   - Wire module symbols and object methods in `src/ir/ast_lowerer.cpp`.
-- [ ] **Task 5.3.2: C++ Code Emission**
+- [x] **Task 5.3.2: C++ Code Emission**
   - In `src/emitter/cpp_emitter.cpp`, ensure `#include <keet/crypto.hpp>` is emitted when `crypto` is imported.
   - Emit calls to `keet::crypto::...`.
 
 #### Phase 5.4: LSP Integration
-- [ ] **Task 5.4.1: Autocomplete & Hover Docs**
+- [x] **Task 5.4.1: Autocomplete & Hover Docs**
   - Update `src/lsp/analyzer.cpp` with hover descriptions, parameter hints, and code completion items for all `crypto` APIs.
 
 ---

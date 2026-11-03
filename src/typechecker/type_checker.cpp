@@ -66,6 +66,18 @@ const std::vector<std::string> kTestCandidates = {
     "case", "suite", "assertEq", "assertNe", "assertTrue", "assertFalse", "assertZonks", "fail", "run"
 };
 
+const std::vector<std::string> kCryptoCandidates = {
+    "toHex", "fromHex", "toBase64", "fromBase64", "toBase64Url", "fromBase64Url",
+    "randomBytes", "randomHex", "randomInt", "randomUuid", "timingSafeEqual",
+    "sha256", "sha512", "sha3_256", "sha3_512", "blake3", "createHash",
+    "hmacSha256", "hmacSha512", "createHmac",
+    "encryptChaCha20Poly1305", "decryptChaCha20Poly1305",
+    "encryptAesGcm", "decryptAesGcm",
+    "encodeCode128", "encodeCode128Svg", "encodeCode128Ascii", "decodeCode128",
+    "generateQr", "decodeQr",
+    "EncryptedPayload", "QrCode", "Hasher", "Hmac"
+};
+
 const std::vector<std::string> kColorCandidates = {
     "Default", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White", "Gray"
 };
@@ -4471,6 +4483,221 @@ TypePtr TypeChecker::checkTestDirectCall(const ast::IdentExpr* callee, const ast
     return Type::unknownType();
 }
 
+TypePtr TypeChecker::checkCryptoMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!member || !call) return Type::unknownType();
+    const std::string& name = member->getMemberName();
+
+    auto checkArgCountMinMax = [&](size_t minExpected, size_t maxExpected) -> bool {
+        size_t count = call->getArgs().size();
+        if (count < minExpected || count > maxExpected) {
+            if (emitter_) {
+                std::string expStr = (minExpected == maxExpected)
+                    ? std::to_string(minExpected)
+                    : std::to_string(minExpected) + " to " + std::to_string(maxExpected);
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function 'crypto." + name + "' expects " + expStr +
+                    " arguments, but got " + std::to_string(count),
+                    call->getSpan().start).withLabel(call->getSpan(), "wrong argument count"));
+            }
+            hasErrors_ = true;
+            return false;
+        }
+        return true;
+    };
+
+    auto checkStringArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::stringType());
+                if (aType && !aType->isString()) {
+                    reportTypeMismatch(Type::stringType(), aType, arg.value->getSpan(), "crypto." + name + " " + argName + " argument");
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    auto checkIntArg = [&](size_t idx, const char* argName) -> TypePtr {
+        if (idx < call->getArgs().size()) {
+            const auto& arg = call->getArgs()[idx];
+            if (arg.value) {
+                auto aType = inferType(*arg.value, scope, Type::intType());
+                if (aType && !aType->isInt()) {
+                    reportTypeMismatch(Type::intType(), aType, arg.value->getSpan(), "crypto." + name + " " + argName + " argument");
+                }
+                return aType;
+            }
+        }
+        return Type::unknownType();
+    };
+
+    // Phase 1: Encodings, CSPRNG & Security Utilities
+    if (name == "toHex" || name == "fromHex" ||
+        name == "toBase64" || name == "fromBase64" ||
+        name == "toBase64Url" || name == "fromBase64Url") {
+        if (checkArgCountMinMax(1, 1)) {
+            checkStringArg(0, "data");
+        }
+        return Type::stringType();
+    }
+    if (name == "randomBytes" || name == "randomHex") {
+        if (checkArgCountMinMax(1, 1)) {
+            checkIntArg(0, "length");
+        }
+        return Type::stringType();
+    }
+    if (name == "randomInt") {
+        if (checkArgCountMinMax(2, 2)) {
+            checkIntArg(0, "min");
+            checkIntArg(1, "max");
+        }
+        return Type::intType();
+    }
+    if (name == "randomUuid") {
+        checkArgCountMinMax(0, 0);
+        return Type::stringType();
+    }
+    if (name == "timingSafeEqual") {
+        if (checkArgCountMinMax(2, 2)) {
+            checkStringArg(0, "a");
+            checkStringArg(1, "b");
+        }
+        return Type::boolType();
+    }
+
+    // Phase 2: Cryptographic Hashes & HMAC
+    if (name == "sha256" || name == "sha512" ||
+        name == "sha3_256" || name == "sha3_512" ||
+        name == "blake3") {
+        if (checkArgCountMinMax(1, 1)) {
+            checkStringArg(0, "data");
+        }
+        return Type::stringType();
+    }
+    if (name == "createHash") {
+        if (checkArgCountMinMax(1, 1)) {
+            checkStringArg(0, "algorithm");
+        }
+        return std::make_shared<CustomType>("Hasher");
+    }
+    if (name == "hmacSha256" || name == "hmacSha512") {
+        if (checkArgCountMinMax(2, 2)) {
+            checkStringArg(0, "key");
+            checkStringArg(1, "data");
+        }
+        return Type::stringType();
+    }
+    if (name == "createHmac") {
+        if (checkArgCountMinMax(2, 2)) {
+            checkStringArg(0, "algorithm");
+            checkStringArg(1, "key");
+        }
+        return std::make_shared<CustomType>("Hmac");
+    }
+
+    // Phase 3: Authenticated Symmetric Encryption (AEAD)
+    if (name == "encryptChaCha20Poly1305") {
+        if (checkArgCountMinMax(3, 4)) {
+            checkStringArg(0, "key");
+            checkStringArg(1, "nonce");
+            checkStringArg(2, "plaintext");
+            if (call->getArgs().size() > 3) {
+                checkStringArg(3, "aad");
+            }
+        }
+        return std::make_shared<CustomType>("EncryptedPayload");
+    }
+    if (name == "decryptChaCha20Poly1305") {
+        if (checkArgCountMinMax(4, 5)) {
+            checkStringArg(0, "key");
+            checkStringArg(1, "nonce");
+            checkStringArg(2, "ciphertext");
+            checkStringArg(3, "tag");
+            if (call->getArgs().size() > 4) {
+                checkStringArg(4, "aad");
+            }
+        }
+        return Type::stringType();
+    }
+    if (name == "encryptAesGcm") {
+        if (checkArgCountMinMax(3, 4)) {
+            checkStringArg(0, "key");
+            checkStringArg(1, "iv");
+            checkStringArg(2, "plaintext");
+            if (call->getArgs().size() > 3) {
+                checkStringArg(3, "aad");
+            }
+        }
+        return std::make_shared<CustomType>("EncryptedPayload");
+    }
+    if (name == "decryptAesGcm") {
+        if (checkArgCountMinMax(4, 5)) {
+            checkStringArg(0, "key");
+            checkStringArg(1, "iv");
+            checkStringArg(2, "ciphertext");
+            checkStringArg(3, "tag");
+            if (call->getArgs().size() > 4) {
+                checkStringArg(4, "aad");
+            }
+        }
+        return Type::stringType();
+    }
+
+    // Phase 4: Symbology & 2D Matrix Codes (QR & Barcodes)
+    if (name == "encodeCode128" || name == "encodeCode128Ascii" || name == "decodeCode128") {
+        if (checkArgCountMinMax(1, 1)) {
+            checkStringArg(0, "text");
+        }
+        return Type::stringType();
+    }
+    if (name == "encodeCode128Svg") {
+        if (checkArgCountMinMax(1, 3)) {
+            checkStringArg(0, "text");
+            if (call->getArgs().size() > 1) checkIntArg(1, "barHeight");
+            if (call->getArgs().size() > 2) checkIntArg(2, "moduleWidth");
+        }
+        return Type::stringType();
+    }
+    if (name == "generateQr") {
+        if (checkArgCountMinMax(1, 2)) {
+            checkStringArg(0, "text");
+            if (call->getArgs().size() > 1) checkStringArg(1, "ecLevel");
+        }
+        return std::make_shared<CustomType>("QrCode");
+    }
+    if (name == "decodeQr") {
+        if (checkArgCountMinMax(1, 1)) {
+            if (call->getArgs().size() > 0 && call->getArgs()[0].value) {
+                auto aType = inferType(*call->getArgs()[0].value, scope);
+                if (aType && !aType->isArray() && !aType->isUnknown()) {
+                    reportTypeMismatch(Type::array(Type::array(Type::boolType())), aType, call->getArgs()[0].value->getSpan(), "crypto.decodeQr matrix argument");
+                }
+            }
+        }
+        return Type::stringType();
+    }
+
+    if (emitter_) {
+        auto d = diag::Diagnostic::makeError(
+            diag::ErrorCode::InvalidMemberAccess,
+            "module 'crypto' has no member named '" + name + "'",
+            member->getSpan().start).withLabel(member->getSpan(), "unknown crypto member");
+        attachMemberSuggestions(d, name, kCryptoCandidates);
+        emitter_->report(d);
+    }
+    hasErrors_ = true;
+    return Type::unknownType();
+}
+
+TypePtr TypeChecker::checkCryptoDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!callee || !call) return Type::unknownType();
+    ast::MemberExpr synthetic(callee->getSpan(), nullptr, callee->getName());
+    return checkCryptoMemberCall(&synthetic, call, scope);
+}
+
 bool TypeChecker::checkZeroCoercion(const parser::ModuleAST& module, sema::Scope* rootScope) {
     return checkTypes(module, rootScope);
 }
@@ -4797,6 +5024,46 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                                     "symbol '" + symItem.originalName + "' is not exported by module 'test'",
                                     symItem.span.start).withLabel(symItem.span, "symbol not exported");
                                 attachMemberSuggestions(d, symItem.originalName, kTestCandidates);
+                                emitter_->report(d);
+                            }
+                            hasErrors_ = true;
+                        }
+                    }
+                }
+            } else if (modPath == "crypto" || modPath == "std.crypto" || modPath == "keet.crypto" || modPath == "crypto.hash") {
+                if (importDecl->getSymbols().empty()) {
+                    std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "crypto";
+                    if (!targetScope->lookupCurrent(boundName)) {
+                        auto modSym = std::make_shared<sema::Symbol>(boundName, sema::SymbolKind::Module, importDecl->getSpan());
+                        modSym->setExported(importDecl->isReExported());
+                        auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, modSym, emitter_);
+                        if (!res.success) hasErrors_ = true;
+                    }
+                } else {
+                    auto cryptoScope = sema::createStdlibModuleScope("crypto");
+                    for (const auto& symItem : importDecl->getSymbols()) {
+                        auto exportedSym = cryptoScope->lookupCurrent(symItem.originalName);
+                        if (exportedSym) {
+                            std::string importAsName = symItem.getEffectiveName();
+                            if (!targetScope->lookupCurrent(importAsName)) {
+                                auto importedSym = std::make_shared<sema::Symbol>(
+                                    importAsName, exportedSym->getKind(), symItem.span
+                                );
+                                importedSym->setExported(importDecl->isReExported());
+                                importedSym->setIsType(exportedSym->isType());
+                                if (exportedSym->isConstant()) {
+                                    importedSym->setConst(true);
+                                }
+                                auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, importedSym, emitter_);
+                                if (!res.success) hasErrors_ = true;
+                            }
+                        } else {
+                            if (emitter_) {
+                                auto d = diag::Diagnostic::makeError(
+                                    diag::ErrorCode::SymbolNotExported,
+                                    "symbol '" + symItem.originalName + "' is not exported by module 'crypto'",
+                                    symItem.span.start).withLabel(symItem.span, "symbol not exported");
+                                attachMemberSuggestions(d, symItem.originalName, kCryptoCandidates);
                                 emitter_->report(d);
                             }
                             hasErrors_ = true;
@@ -5873,6 +6140,21 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     }
                     return checkTestMemberCall(member, call, scope);
                 }
+                if (objIdent->getName() == "crypto" || (sym && sym->isModule() && sym->getName() == "crypto")) {
+                    if (!sym) {
+                        if (emitter_) {
+                            auto d = diag::Diagnostic::makeError(
+                                diag::ErrorCode::UndeclaredIdentifier,
+                                "undeclared identifier '" + objIdent->getName() + "'",
+                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                            d.withHelp("add 'import crypto;' at the top of the file");
+                            emitter_->report(d);
+                        }
+                        hasErrors_ = true;
+                        return Type::unknownType();
+                    }
+                    return checkCryptoMemberCall(member, call, scope);
+                }
             }
 
             auto objType = member->getObject() ? inferType(*member->getObject(), scope) : Type::unknownType();
@@ -5967,6 +6249,22 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             const ast::FnDecl* methodDecl = nullptr;
             if (objType && objType->isCustom()) {
                 auto clsName = static_cast<const CustomType*>(objType.get())->getName();
+                if (clsName == "EncryptedPayload" || clsName == "crypto.EncryptedPayload") {
+                    const std::string& m = member->getMemberName();
+                    if (m == "toCombinedHex") return Type::stringType();
+                    if (m == "fromCombinedHex") return std::make_shared<CustomType>("EncryptedPayload");
+                } else if (clsName == "QrCode" || clsName == "crypto.QrCode") {
+                    const std::string& m = member->getMemberName();
+                    if (m == "toSvg" || m == "toAscii") return Type::stringType();
+                } else if (clsName == "Hasher" || clsName == "crypto.Hasher") {
+                    const std::string& m = member->getMemberName();
+                    if (m == "update" || m == "reset") return Type::voidType();
+                    if (m == "digestHex") return Type::stringType();
+                } else if (clsName == "Hmac" || clsName == "crypto.Hmac") {
+                    const std::string& m = member->getMemberName();
+                    if (m == "update" || m == "reset") return Type::voidType();
+                    if (m == "digestHex") return Type::stringType();
+                }
                 auto clsSym = scope.lookup(clsName);
                 if (clsSym && clsSym->getAstNode()) {
                     const auto* clsDecl = dynamic_cast<const ast::ClassDecl*>(clsSym->getAstNode());
@@ -6129,6 +6427,17 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     name == "assertTrue" || name == "assertFalse" || name == "assertZonks" ||
                     name == "fail" || name == "run") {
                     return checkTestDirectCall(calleeIdent, call, scope);
+                }
+                if (name == "toHex" || name == "fromHex" || name == "toBase64" || name == "fromBase64" ||
+                    name == "toBase64Url" || name == "fromBase64Url" || name == "randomBytes" || name == "randomHex" ||
+                    name == "randomInt" || name == "randomUuid" || name == "timingSafeEqual" || name == "sha256" ||
+                    name == "sha512" || name == "sha3_256" || name == "sha3_512" || name == "blake3" ||
+                    name == "createHash" || name == "hmacSha256" || name == "hmacSha512" || name == "createHmac" ||
+                    name == "encryptChaCha20Poly1305" || name == "decryptChaCha20Poly1305" ||
+                    name == "encryptAesGcm" || name == "decryptAesGcm" ||
+                    name == "encodeCode128" || name == "encodeCode128Svg" || name == "encodeCode128Ascii" ||
+                    name == "decodeCode128" || name == "generateQr" || name == "decodeQr") {
+                    return checkCryptoDirectCall(calleeIdent, call, scope);
                 }
             }
             const ast::FnDecl* fnDecl = nullptr;
@@ -6916,6 +7225,80 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 hasErrors_ = true;
                 return Type::unknownType();
             }
+            if (objIdent->getName() == "crypto" || (sym && sym->isModule() && sym->getName() == "crypto")) {
+                if (!sym) {
+                    if (emitter_) {
+                        auto d = diag::Diagnostic::makeError(
+                            diag::ErrorCode::UndeclaredIdentifier,
+                            "undeclared identifier '" + objIdent->getName() + "'",
+                            objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                        d.withHelp("add 'import crypto;' at the top of the file");
+                        emitter_->report(d);
+                    }
+                    hasErrors_ = true;
+                    return Type::unknownType();
+                }
+                const std::string& mName = member->getMemberName();
+                if (mName == "toHex" || mName == "fromHex" ||
+                    mName == "toBase64" || mName == "fromBase64" ||
+                    mName == "toBase64Url" || mName == "fromBase64Url") {
+                    return Type::function({Type::stringType()}, Type::stringType(), false);
+                }
+                if (mName == "randomBytes" || mName == "randomHex") {
+                    return Type::function({Type::intType()}, Type::stringType(), false);
+                }
+                if (mName == "randomInt") {
+                    return Type::function({Type::intType(), Type::intType()}, Type::intType(), false);
+                }
+                if (mName == "randomUuid") {
+                    return Type::function({}, Type::stringType(), false);
+                }
+                if (mName == "timingSafeEqual") {
+                    return Type::function({Type::stringType(), Type::stringType()}, Type::boolType(), false);
+                }
+                if (mName == "sha256" || mName == "sha512" ||
+                    mName == "sha3_256" || mName == "sha3_512" ||
+                    mName == "blake3") {
+                    return Type::function({Type::stringType()}, Type::stringType(), false);
+                }
+                if (mName == "createHash") {
+                    return Type::function({Type::stringType()}, std::make_shared<CustomType>("Hasher"), false);
+                }
+                if (mName == "hmacSha256" || mName == "hmacSha512") {
+                    return Type::function({Type::stringType(), Type::stringType()}, Type::stringType(), false);
+                }
+                if (mName == "createHmac") {
+                    return Type::function({Type::stringType(), Type::stringType()}, std::make_shared<CustomType>("Hmac"), false);
+                }
+                if (mName == "encryptChaCha20Poly1305" || mName == "encryptAesGcm") {
+                    return Type::function({Type::stringType(), Type::stringType(), Type::stringType()}, std::make_shared<CustomType>("EncryptedPayload"), false);
+                }
+                if (mName == "decryptChaCha20Poly1305" || mName == "decryptAesGcm") {
+                    return Type::function({Type::stringType(), Type::stringType(), Type::stringType(), Type::stringType()}, Type::stringType(), false);
+                }
+                if (mName == "encodeCode128" || mName == "encodeCode128Ascii" || mName == "decodeCode128") {
+                    return Type::function({Type::stringType()}, Type::stringType(), false);
+                }
+                if (mName == "encodeCode128Svg") {
+                    return Type::function({Type::stringType()}, Type::stringType(), false);
+                }
+                if (mName == "generateQr") {
+                    return Type::function({Type::stringType()}, std::make_shared<CustomType>("QrCode"), false);
+                }
+                if (mName == "decodeQr") {
+                    return Type::function({Type::array(Type::array(Type::boolType()))}, Type::stringType(), false);
+                }
+                if (emitter_) {
+                    auto d = diag::Diagnostic::makeError(
+                        diag::ErrorCode::InvalidMemberAccess,
+                        "module 'crypto' has no member '" + member->getMemberName() + "'",
+                        member->getSpan().start).withLabel(member->getSpan(), "unknown module member");
+                    attachMemberSuggestions(d, member->getMemberName(), kCryptoCandidates);
+                    emitter_->report(d);
+                }
+                hasErrors_ = true;
+                return Type::unknownType();
+            }
             if (sym && (sym->isEnum() || sym->isType()) && (objIdent->getName() == "Color" || sym->getName() == "Color")) {
                 const std::string& memberName = member->getMemberName();
                 const std::vector<std::string_view> validMembers = {
@@ -6972,6 +7355,39 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
         }
         if (objType && objType->isCustom()) {
             auto clsName = static_cast<const CustomType*>(objType.get())->getName();
+            if (clsName == "EncryptedPayload" || clsName == "crypto.EncryptedPayload") {
+                const std::string& fName = member->getMemberName();
+                if (fName == "ciphertext" || fName == "tag" || fName == "iv" || fName == "aad") {
+                    return Type::stringType();
+                }
+                if (fName == "toCombinedHex") {
+                    return Type::function({}, Type::stringType());
+                }
+                if (fName == "fromCombinedHex") {
+                    return Type::function({Type::stringType()}, std::make_shared<CustomType>("EncryptedPayload"));
+                }
+            } else if (clsName == "QrCode" || clsName == "crypto.QrCode") {
+                const std::string& fName = member->getMemberName();
+                if (fName == "size" || fName == "version") {
+                    return Type::intType();
+                }
+                if (fName == "matrix") {
+                    return Type::array(Type::array(Type::boolType()));
+                }
+                if (fName == "toSvg" || fName == "toAscii") {
+                    return Type::function({Type::intType()}, Type::stringType());
+                }
+            } else if (clsName == "Hasher" || clsName == "crypto.Hasher") {
+                const std::string& fName = member->getMemberName();
+                if (fName == "update") return Type::function({Type::stringType()}, Type::voidType());
+                if (fName == "digestHex") return Type::function({}, Type::stringType());
+                if (fName == "reset") return Type::function({}, Type::voidType());
+            } else if (clsName == "Hmac" || clsName == "crypto.Hmac") {
+                const std::string& fName = member->getMemberName();
+                if (fName == "update") return Type::function({Type::stringType()}, Type::voidType());
+                if (fName == "digestHex") return Type::function({}, Type::stringType());
+                if (fName == "reset") return Type::function({}, Type::voidType());
+            }
             auto clsSym = scope.lookup(clsName);
             if (clsSym && clsSym->getAstNode()) {
                 const auto* clsDecl = dynamic_cast<const ast::ClassDecl*>(clsSym->getAstNode());

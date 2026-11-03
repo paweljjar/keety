@@ -262,6 +262,41 @@ std::optional<StdlibDoc> getStdlibMemberDoc(const std::string& name) {
         {"assertFalse", {"fn assertFalse(condition: bool, msg?: string): void", "Asserts that a boolean condition is false."}},
         {"assertZonks", {"fn assertZonks(fn: (): void, expectedError?: string, msg?: string): void", "Asserts that a callback throws a KeetScript zonk error."}},
         {"fail", {"fn fail(msg?: string): void", "Explicitly fails the current test case."}},
+        // Standard Library Module: crypto
+        {"toHex", {"fn toHex(data: string): string", "Encodes binary data or string into lowercase hexadecimal representation."}},
+        {"fromHex", {"fn fromHex(hexStr: string): string", "Decodes a hexadecimal string into binary data or ASCII string."}},
+        {"toBase64", {"fn toBase64(data: string): string", "Encodes data into standard RFC 4648 Base64 representation."}},
+        {"fromBase64", {"fn fromBase64(b64Str: string): string", "Decodes standard RFC 4648 Base64 encoded string."}},
+        {"toBase64Url", {"fn toBase64Url(data: string): string", "Encodes data into URL-safe Base64 representation without padding."}},
+        {"fromBase64Url", {"fn fromBase64Url(b64UrlStr: string): string", "Decodes URL-safe Base64 encoded string."}},
+        {"randomBytes", {"fn randomBytes(size: int): string", "Generates cryptographically secure random bytes of the specified length."}},
+        {"randomHex", {"fn randomHex(size: int): string", "Generates cryptographically secure random hex string of the specified byte count."}},
+        {"randomInt", {"fn randomInt(min: int, max: int): int", "Generates a uniform cryptographically secure random integer in [min, max]."}},
+        {"randomUuid", {"fn randomUuid(): string", "Generates an RFC 4122 Version 4 random UUID string."}},
+        {"timingSafeEqual", {"fn timingSafeEqual(a: string, b: string): bool", "Constant-time string/byte buffer comparison to mitigate side-channel timing attacks."}},
+        {"sha256", {"fn sha256(data: string): string", "Computes SHA-256 hash returned as lowercase hex string."}},
+        {"sha512", {"fn sha512(data: string): string", "Computes SHA-512 hash returned as lowercase hex string."}},
+        {"sha3_256", {"fn sha3_256(data: string): string", "Computes SHA3-256 (FIPS 202) hash returned as lowercase hex string."}},
+        {"sha3_512", {"fn sha3_512(data: string): string", "Computes SHA3-512 (FIPS 202) hash returned as lowercase hex string."}},
+        {"blake3", {"fn blake3(data: string): string", "Computes BLAKE3 high-performance cryptographic hash returned as hex string."}},
+        {"createHash", {"fn createHash(algorithm: string): Hasher", "Creates an incremental streaming cryptographic hash instance ('sha256', 'sha512', 'sha3-256', 'sha3-512', 'blake3')."}},
+        {"hmacSha256", {"fn hmacSha256(key: string, data: string): string", "Computes HMAC-SHA256 message authentication code returned as hex string."}},
+        {"hmacSha512", {"fn hmacSha512(key: string, data: string): string", "Computes HMAC-SHA512 message authentication code returned as hex string."}},
+        {"createHmac", {"fn createHmac(algorithm: string, key: string): Hmac", "Creates an incremental streaming HMAC instance ('sha256' or 'sha512')."}},
+        {"encryptChaCha20Poly1305", {"fn encryptChaCha20Poly1305(plaintext: string, key: string, iv: string, aad?: string): EncryptedPayload", "Encrypts data using ChaCha20-Poly1305 AEAD (RFC 8439)."}},
+        {"decryptChaCha20Poly1305", {"fn decryptChaCha20Poly1305(payload: EncryptedPayload, key: string, aad?: string): string", "Decrypts and verifies data using ChaCha20-Poly1305 AEAD (RFC 8439)."}},
+        {"encryptAesGcm", {"fn encryptAesGcm(plaintext: string, key: string, iv: string, aad?: string): EncryptedPayload", "Encrypts data using AES-256-GCM AEAD (NIST SP 800-38D)."}},
+        {"decryptAesGcm", {"fn decryptAesGcm(payload: EncryptedPayload, key: string, aad?: string): string", "Decrypts and verifies data using AES-256-GCM AEAD (NIST SP 800-38D)."}},
+        {"encodeCode128", {"fn encodeCode128(text: string): string", "Encodes text into a Code 128 barcode binary pattern ('1' for bar, '0' for space)."}},
+        {"encodeCode128Svg", {"fn encodeCode128Svg(text: string, height?: int): string", "Renders Code 128 barcode as a standalone vector SVG XML string."}},
+        {"encodeCode128Ascii", {"fn encodeCode128Ascii(text: string): string", "Renders Code 128 barcode as an ASCII art block string."}},
+        {"decodeCode128", {"fn decodeCode128(pattern: string): string", "Decodes a Code 128 binary pattern string ('1' and '0') back into text."}},
+        {"generateQr", {"fn generateQr(text: string, eccLevel?: string): QrCode", "Generates a 2D QR Code ISO/IEC 18004 matrix with specified ECC level ('L', 'M', 'Q', 'H')."}},
+        {"decodeQr", {"fn decodeQr(matrix: array<array<bool>>): string", "Decodes a 2D boolean module matrix of a QR Code into string text."}},
+        {"EncryptedPayload", {"class EncryptedPayload", "AEAD encryption payload containing ciphertext, auth tag, and initialization vector (iv)."}},
+        {"QrCode", {"class QrCode", "QR Code model providing SVG/ASCII rendering and matrix access."}},
+        {"Hasher", {"class Hasher", "Streaming cryptographic hash accumulator (`update(data)`, `digestHex()`)."}},
+        {"Hmac", {"class Hmac", "Streaming HMAC accumulator (`update(data)`, `digestHex()`)."}},
     };
     auto it = docs.find(name);
     if (it != docs.end()) return it->second;
@@ -924,6 +959,9 @@ std::optional<Hover> Analyzer::getHover(
     if (ident == "test") {
         return Hover{MarkupContent{"markdown", "```keet\nimport test;\n```\n**Standard Library Module: `test`**\n\nUnit testing framework, assertion primitives, and test suite runner."}, tokRange};
     }
+    if (ident == "crypto") {
+        return Hover{MarkupContent{"markdown", "```keet\nimport crypto;\n```\n**Standard Library Module: `crypto`**\n\nCryptographic hashing, HMAC, symmetric encryption (AEAD), CSPRNG, encodings, and symbology (QR & barcodes)."}, tokRange};
+    }
 
     // 3b. Standard Library Built-in Functions/Constants
     if (auto stdDoc = getStdlibMemberDoc(ident); stdDoc.has_value()) {
@@ -1461,7 +1499,8 @@ CompletionList Analyzer::getCompletions(
         {"time", "Standard Library Module: `time` (Time measurement and formatting)"},
         {"json", "Standard Library Module: `json` (JSON serialization and parsing)"},
         {"net", "Standard Library Module: `net` (Networking, HTTP and sockets)"},
-        {"test", "Standard Library Module: `test` (Unit testing and assertions)"}
+        {"test", "Standard Library Module: `test` (Unit testing and assertions)"},
+        {"crypto", "Standard Library Module: `crypto` (Hashing, HMAC, AEAD ciphers, CSPRNG, and QR/barcodes)"}
     };
     for (const auto& [mod, desc] : stdModules) {
         if (seen.insert(mod).second) {

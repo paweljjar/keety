@@ -1009,9 +1009,11 @@ inline std::string blake3(const std::string& data) {
 // Phase 2.2: Streaming Digest API (crypto.Hasher)
 // ============================================================================
 
-class Hasher {
+namespace detail {
+
+class HasherEngine {
 public:
-    virtual ~Hasher() = default;
+    virtual ~HasherEngine() = default;
     virtual void update(const std::string& chunk) = 0;
     virtual std::string digestBytes() = 0;
     virtual std::string digestHex() {
@@ -1020,9 +1022,7 @@ public:
     virtual void reset() = 0;
 };
 
-namespace detail {
-
-class Sha256Hasher : public Hasher {
+class Sha256Hasher : public HasherEngine {
     Sha256Core core_;
     bool finalized_{false};
     std::string digest_;
@@ -1045,7 +1045,7 @@ public:
     }
 };
 
-class Sha512Hasher : public Hasher {
+class Sha512Hasher : public HasherEngine {
     Sha512Core core_;
     bool finalized_{false};
     std::string digest_;
@@ -1068,7 +1068,7 @@ public:
     }
 };
 
-class Sha3Hasher : public Hasher {
+class Sha3Hasher : public HasherEngine {
     Sha3Core core_;
     bool finalized_{false};
     std::string digest_;
@@ -1092,7 +1092,7 @@ public:
     }
 };
 
-class Blake3Hasher : public Hasher {
+class Blake3Hasher : public HasherEngine {
     Blake3Core core_;
     bool finalized_{false};
     std::string digest_;
@@ -1117,25 +1117,55 @@ public:
 
 } // namespace detail
 
+/// Streaming cryptographic hasher supporting multiple hash algorithms.
+class Hasher {
+public:
+    Hasher() = default;
+    explicit Hasher(std::shared_ptr<detail::HasherEngine> engine) : engine_(std::move(engine)) {}
+
+    void update(const std::string& chunk) {
+        if (!engine_) throw keet::error("CryptoError", "Hasher is uninitialized");
+        engine_->update(chunk);
+    }
+    std::string digestBytes() {
+        if (!engine_) throw keet::error("CryptoError", "Hasher is uninitialized");
+        return engine_->digestBytes();
+    }
+    std::string digestHex() {
+        if (!engine_) throw keet::error("CryptoError", "Hasher is uninitialized");
+        return engine_->digestHex();
+    }
+    void reset() {
+        if (!engine_) throw keet::error("CryptoError", "Hasher is uninitialized");
+        engine_->reset();
+    }
+
+    Hasher* operator->() noexcept { return this; }
+    const Hasher* operator->() const noexcept { return this; }
+
+private:
+    std::shared_ptr<detail::HasherEngine> engine_;
+};
+
 /// Creates a streaming cryptographic hasher for the given algorithm name.
-inline std::shared_ptr<Hasher> createHash(std::string algo) {
+inline Hasher createHash(std::string algo) {
     for (char& c : algo) {
         if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + 32);
     }
     if (algo == "sha256" || algo == "sha-256") {
-        return std::make_shared<detail::Sha256Hasher>();
+        return Hasher(std::make_shared<detail::Sha256Hasher>());
     }
     if (algo == "sha512" || algo == "sha-512") {
-        return std::make_shared<detail::Sha512Hasher>();
+        return Hasher(std::make_shared<detail::Sha512Hasher>());
     }
     if (algo == "sha3-256" || algo == "sha3_256") {
-        return std::make_shared<detail::Sha3Hasher>(32);
+        return Hasher(std::make_shared<detail::Sha3Hasher>(32));
     }
     if (algo == "sha3-512" || algo == "sha3_512") {
-        return std::make_shared<detail::Sha3Hasher>(64);
+        return Hasher(std::make_shared<detail::Sha3Hasher>(64));
     }
     if (algo == "blake3") {
-        return std::make_shared<detail::Blake3Hasher>();
+        return Hasher(std::make_shared<detail::Blake3Hasher>());
     }
     throw keet::error("CryptoError", "Unsupported cryptographic hash algorithm: '" + algo + "'");
 }
@@ -1159,7 +1189,7 @@ inline size_t getHashBlockSize(std::string_view algo) {
 
 /// Streaming HMAC message authenticator (RFC 2104).
 class Hmac {
-    std::shared_ptr<Hasher> inner_;
+    Hasher inner_;
     std::string k_opad_;
     std::string algorithm_;
     bool finalized_{false};

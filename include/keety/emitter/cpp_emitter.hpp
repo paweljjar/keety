@@ -162,6 +162,9 @@ private:
     bool has_test_import_{false};
     std::unordered_set<std::string> test_aliases_{};
     std::unordered_set<std::string> imported_test_symbols_{};
+    bool has_crypto_import_{false};
+    std::unordered_set<std::string> crypto_aliases_{};
+    std::unordered_set<std::string> imported_crypto_symbols_{};
     std::vector<std::string> test_function_names_{};
     std::unordered_set<std::string> user_imported_modules_{};
 };

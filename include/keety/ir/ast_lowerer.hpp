@@ -132,6 +132,9 @@ private:
     bool has_net_import_{false};
     std::unordered_set<std::string> net_aliases_;
     std::unordered_set<std::string> imported_net_symbols_;
+    bool has_crypto_import_{false};
+    std::unordered_set<std::string> crypto_aliases_;
+    std::unordered_set<std::string> imported_crypto_symbols_;
 };
 
 } // namespace keety::ir

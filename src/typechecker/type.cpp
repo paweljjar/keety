@@ -485,6 +485,22 @@ bool CustomType::equals(const Type& other) const {
         (name_ == "io.Color" && o.name_ == "Color")) {
         return true;
     }
+    if ((name_ == "EncryptedPayload" && o.name_ == "crypto.EncryptedPayload") ||
+        (name_ == "crypto.EncryptedPayload" && o.name_ == "EncryptedPayload")) {
+        return true;
+    }
+    if ((name_ == "QrCode" && o.name_ == "crypto.QrCode") ||
+        (name_ == "crypto.QrCode" && o.name_ == "QrCode")) {
+        return true;
+    }
+    if ((name_ == "Hasher" && o.name_ == "crypto.Hasher") ||
+        (name_ == "crypto.Hasher" && o.name_ == "Hasher")) {
+        return true;
+    }
+    if ((name_ == "Hmac" && o.name_ == "crypto.Hmac") ||
+        (name_ == "crypto.Hmac" && o.name_ == "Hmac")) {
+        return true;
+    }
     return false;
 }
 

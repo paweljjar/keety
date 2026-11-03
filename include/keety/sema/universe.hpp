@@ -65,4 +65,7 @@ void populateNetModuleScope(Scope& netScope);
 /// Populates an existing Scope with all exported symbols of the 'test' standard library module.
 void populateTestModuleScope(Scope& testScope);
 
+/// Populates an existing Scope with all exported symbols of the 'crypto' standard library module.
+void populateCryptoModuleScope(Scope& cryptoScope);
+
 } // namespace keety::sema
