@@ -341,3 +341,61 @@ TEST_CASE("HTTP Server Error Handling & Limits", "[runtime][http][server]") {
 
     server.stop();
 }
+
+TEST_CASE("HTTP Server Port Binding Conflict and Optional SO_REUSEPORT", "[runtime][http][server]") {
+    HttpServerConfig cfg1;
+    cfg1.host = "127.0.0.1";
+    cfg1.port = 0; // Ephemeral port
+    cfg1.reuse_port = false;
+
+    HttpServer server1(cfg1);
+    REQUIRE(server1.start());
+    int bound_port = server1.bound_port();
+    REQUIRE(bound_port > 0);
+
+    SECTION("Default configuration throws NetError when port is already taken") {
+        HttpServerConfig cfg2;
+        cfg2.host = "127.0.0.1";
+        cfg2.port = bound_port;
+        cfg2.reuse_port = false;
+
+        HttpServer server2(cfg2);
+        CHECK_THROWS_AS(server2.start(), keet::error);
+        try {
+            server2.start();
+        } catch (const keet::error& err) {
+            CHECK(err.name == "NetError");
+            CHECK(err.message.find("failed to bind") != std::string::npos);
+        }
+    }
+
+#if defined(SO_REUSEPORT)
+    SECTION("Optional reuse_port allows shared port binding when both servers enable it") {
+        server1.stop();
+
+        HttpServerConfig cfg_shared1;
+        cfg_shared1.host = "127.0.0.1";
+        cfg_shared1.port = 0;
+        cfg_shared1.reuse_port = true;
+
+        HttpServer server_shared1(cfg_shared1);
+        REQUIRE(server_shared1.start());
+        int shared_port = server_shared1.bound_port();
+        REQUIRE(shared_port > 0);
+
+        HttpServerConfig cfg_shared2;
+        cfg_shared2.host = "127.0.0.1";
+        cfg_shared2.port = shared_port;
+        cfg_shared2.reuse_port = true;
+
+        HttpServer server_shared2(cfg_shared2);
+        CHECK_NOTHROW(server_shared2.start());
+        CHECK(server_shared2.is_running());
+
+        server_shared1.stop();
+        server_shared2.stop();
+    }
+#endif
+
+    server1.stop();
+}

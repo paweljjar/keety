@@ -6406,7 +6406,8 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     const std::string& m = member->getMemberName();
                     if (m == "use" || m == "get" || m == "post" || m == "put" ||
                         m == "delete" || m == "del" || m == "patch" || m == "head" ||
-                        m == "options" || m == "ws" || m == "mount" || m == "route") {
+                        m == "options" || m == "ws" || m == "mount" || m == "route" ||
+                        m == "reusePort" || m == "setReusePort") {
                         return objType;
                     }
                     if (m == "listen") {
@@ -6418,7 +6419,7 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     if (m == "port") {
                         return Type::intType();
                     }
-                    if (m == "isRunning") {
+                    if (m == "isRunning" || m == "isReusePort") {
                         return Type::boolType();
                     }
                 } else if (clsName == "Request" || clsName == "http.Request" || clsName == "net.http.Request") {

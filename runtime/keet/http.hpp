@@ -2714,14 +2714,19 @@ inline void set_tcp_nodelay(net::detail::socket_t fd, bool enabled) noexcept {
 #endif
 }
 
-inline void set_reuse_addr_port(net::detail::socket_t fd) noexcept {
+inline void set_reuse_addr_port(net::detail::socket_t fd, bool reuse_port = false) noexcept {
     int one = 1;
 #if defined(_WIN32)
     ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&one), sizeof(one));
+    (void)reuse_port;
 #else
     ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, static_cast<socklen_t>(sizeof(one)));
 #if defined(SO_REUSEPORT)
-    ::setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, static_cast<socklen_t>(sizeof(one)));
+    if (reuse_port) {
+        ::setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, static_cast<socklen_t>(sizeof(one)));
+    }
+#else
+    (void)reuse_port;
 #endif
 #endif
 }
@@ -3852,6 +3857,7 @@ struct HttpServerConfig {
     int read_timeout_ms = 10000;
     int write_timeout_ms = 10000;
     int drain_timeout_ms = 3000;
+    bool reuse_port = false;
     HttpParserLimits limits{};
 };
 
@@ -3861,14 +3867,31 @@ public:
         : config_(std::move(config)),
           thread_pool_(config_.worker_threads) {}
 
+    explicit HttpServer(bool reuse_port)
+        : thread_pool_(config_.worker_threads) {
+        config_.reuse_port = reuse_port;
+    }
+
     HttpServer(HttpHandler handler, HttpServerConfig config = {})
         : config_(std::move(config)),
           thread_pool_(config_.worker_threads),
           handler_(std::move(handler)) {}
 
+    HttpServer(HttpHandler handler, bool reuse_port)
+        : thread_pool_(config_.worker_threads),
+          handler_(std::move(handler)) {
+        config_.reuse_port = reuse_port;
+    }
+
     HttpServer(Handler handler, HttpServerConfig config = {})
         : config_(std::move(config)),
           thread_pool_(config_.worker_threads) {
+        set_handler(std::move(handler));
+    }
+
+    HttpServer(Handler handler, bool reuse_port)
+        : thread_pool_(config_.worker_threads) {
+        config_.reuse_port = reuse_port;
         set_handler(std::move(handler));
     }
 
@@ -4244,15 +4267,31 @@ public:
         return true;
     }
 
-    /// Convenience method: sets handler and starts listening.
-    bool listen(int port = -1, const std::string& host = "") {
+    /// Enables or disables SO_REUSEPORT on the listener socket.
+    HttpServer& reusePort(bool enabled = true) noexcept {
+        config_.reuse_port = enabled;
+        return *this;
+    }
+
+    HttpServer& setReusePort(bool enabled = true) noexcept {
+        config_.reuse_port = enabled;
+        return *this;
+    }
+
+    [[nodiscard]] bool isReusePort() const noexcept {
+        return config_.reuse_port;
+    }
+
+    /// Convenience method: sets port/host and starts listening. Throws NetError on bind failure.
+    HttpServer& listen(int port = -1, const std::string& host = "") {
         if (port >= 0) {
             config_.port = port;
         }
         if (!host.empty()) {
             config_.host = host;
         }
-        return start();
+        start();
+        return *this;
     }
 
     /// Starts listening and blocks current thread until server is stopped.
@@ -4355,17 +4394,24 @@ private:
         struct addrinfo* res = nullptr;
         int rc = ::getaddrinfo(host_str, port_str.c_str(), &hints, &res);
         if (rc != 0 || !res) {
-            return false;
+            std::string err = (rc != 0) ? ::gai_strerror(rc) : "getaddrinfo returned empty list";
+            throw keet::error(
+                "NetError",
+                "http.listen: failed to resolve bind address '" +
+                (host_str ? std::string(host_str) : "0.0.0.0") + ":" + port_str + "' (" + err + ")"
+            );
         }
 
+        std::string last_err = "failed to bind socket";
         net::detail::socket_t s = net::detail::kInvalidSocket;
         for (struct addrinfo* p = res; p != nullptr; p = p->ai_next) {
             s = ::socket(p->ai_family, p->ai_socktype, p->ai_protocol);
             if (s == net::detail::kInvalidSocket) {
+                last_err = net::detail::last_socket_error_str();
                 continue;
             }
 
-            detail::set_reuse_addr_port(s);
+            detail::set_reuse_addr_port(s, config_.reuse_port);
             net::detail::configure_no_sigpipe(s);
             detail::set_tcp_nodelay(s, true);
 
@@ -4379,6 +4425,7 @@ private:
                 break;
             }
 
+            last_err = net::detail::last_socket_error_str();
             net::detail::close_raw_socket(s);
             s = net::detail::kInvalidSocket;
         }
@@ -4386,13 +4433,22 @@ private:
         ::freeaddrinfo(res);
 
         if (listen_fd_ == net::detail::kInvalidSocket) {
-            return false;
+            throw keet::error(
+                "NetError",
+                "http.listen: failed to bind on '" +
+                (host_str ? std::string(host_str) : "0.0.0.0") + ":" + port_str + "' (" + last_err + ")"
+            );
         }
 
         if (::listen(listen_fd_, 128) != 0) {
+            std::string err = net::detail::last_socket_error_str();
             net::detail::close_raw_socket(listen_fd_);
             listen_fd_ = net::detail::kInvalidSocket;
-            return false;
+            throw keet::error(
+                "NetError",
+                "http.listen: failed to listen on '" +
+                (host_str ? std::string(host_str) : "0.0.0.0") + ":" + port_str + "' (" + err + ")"
+            );
         }
 
         // Determine bound port
@@ -4847,9 +4903,34 @@ inline HttpServer createServer(HttpServerConfig config = {}) {
     return HttpServer(std::move(config));
 }
 
+/// Creates a new HTTP server instance with the given reuse_port flag.
+inline HttpServer createServer(bool reuse_port) {
+    return HttpServer(reuse_port);
+}
+
+/// Creates a new HTTP server instance with options map.
+inline HttpServer createServer(const std::unordered_map<std::string, bool>& opts) {
+    HttpServerConfig cfg;
+    auto it = opts.find("reusePort");
+    if (it != opts.end()) {
+        cfg.reuse_port = it->second;
+    } else {
+        auto it2 = opts.find("reuse_port");
+        if (it2 != opts.end()) {
+            cfg.reuse_port = it2->second;
+        }
+    }
+    return HttpServer(std::move(cfg));
+}
+
 /// Creates a new HTTP server instance with the given default request handler.
 inline HttpServer createServer(HttpHandler handler, HttpServerConfig config = {}) {
     return HttpServer(std::move(handler), std::move(config));
+}
+
+/// Creates a new HTTP server instance with the given default request handler and reuse_port flag.
+inline HttpServer createServer(HttpHandler handler, bool reuse_port) {
+    return HttpServer(std::move(handler), reuse_port);
 }
 
 /// Creates a new HTTP server instance with the given express-style request handler.
@@ -4857,9 +4938,34 @@ inline HttpServer createServer(Handler handler, HttpServerConfig config = {}) {
     return HttpServer(std::move(handler), std::move(config));
 }
 
+/// Creates a new HTTP server instance with the given express-style request handler and reuse_port flag.
+inline HttpServer createServer(Handler handler, bool reuse_port) {
+    return HttpServer(std::move(handler), reuse_port);
+}
+
 /// Creates a new Express-style HTTP server application.
 inline HttpServer app(HttpServerConfig config = {}) {
     return HttpServer(std::move(config));
+}
+
+/// Creates a new Express-style HTTP server application with reuse_port flag.
+inline HttpServer app(bool reuse_port) {
+    return HttpServer(reuse_port);
+}
+
+/// Creates a new Express-style HTTP server application with options map.
+inline HttpServer app(const std::unordered_map<std::string, bool>& opts) {
+    HttpServerConfig cfg;
+    auto it = opts.find("reusePort");
+    if (it != opts.end()) {
+        cfg.reuse_port = it->second;
+    } else {
+        auto it2 = opts.find("reuse_port");
+        if (it2 != opts.end()) {
+            cfg.reuse_port = it2->second;
+        }
+    }
+    return HttpServer(std::move(cfg));
 }
 
 } // namespace keet::net::http

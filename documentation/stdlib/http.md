@@ -56,13 +56,28 @@ fn main(): void {
 
 | Function / Method | Return Type | Description |
 |---|---|---|
-| `http.app()` | `HttpServer` | Creates a new Express-style HTTP server application |
+| `http.app()` | `HttpServer` | Creates a new Express-style HTTP server application (`reusePort = false`) |
+| `http.app(reusePort: bool)` | `HttpServer` | Creates a server explicitly enabling or disabling `SO_REUSEPORT` socket sharing |
 | `http.createServer()` | `HttpServer` | Creates a new HTTP server instance with default configuration |
+| `http.createServer(reusePort: bool)` | `HttpServer` | Creates a new HTTP server instance with explicit `reusePort` setting |
 | `http.createServer(handler)` | `HttpServer` | Creates a server with a global request handler callback |
-| `server.listen(port: int)` | `HttpServer` | Binds and starts listening on `port` (use `0` for an OS-assigned ephemeral port) |
+| `server.reusePort(enabled: bool)` | `HttpServer` | Fluently configures `SO_REUSEPORT` before calling `server.listen()` |
+| `server.isReusePort(): bool` | `bool` | Returns `true` if `SO_REUSEPORT` socket sharing is enabled |
+| `server.listen(port: int)` | `HttpServer` | Binds and starts listening on `port` (use `0` for an OS-assigned ephemeral port). Throws `NetError` if port is already in use |
 | `server.stop(): void` | `void` | Gracefully stops the listener socket and drains worker threads |
 | `server.port(): int` | `int` | Returns the actual bound local port number |
 | `server.isRunning(): bool` | `bool` | Returns `true` if the server listener and thread pool are running |
+
+> [!NOTE] Port Conflict & Error Recovery
+> By default, `reusePort` is `false`. Attempting to call `server.listen(port)` when the port is already taken throws a `NetError` (`Address already in use`), which can be safely recovered using KeetScript's `zonk` primitive:
+> ```keet
+> let app: HttpServer = http.app();
+> let ok: bool = tryListen(app, 8080) zonk (err) {
+>     io.println("Port conflict: " + err.message);
+>     yield false;
+> };
+> ```
+> When `reusePort` is set to `true`, the operating system allows multiple processes or workers to bind to the same port with kernel-level load balancing (`SO_REUSEPORT`).
 
 ---
 
