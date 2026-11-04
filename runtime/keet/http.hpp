@@ -96,31 +96,32 @@ class HeaderMap {
 public:
     HeaderMap() = default;
 
-    void set(std::string name, std::string value) {
+    void set(std::string_view name, std::string_view value) {
         std::string key_lower = detail::to_lower_ascii(name);
         for (auto& entry : entries_) {
             if (detail::to_lower_ascii(entry.first) == key_lower) {
-                entry.second = std::move(value);
+                entry.second = std::string(value);
                 return;
             }
         }
-        entries_.emplace_back(std::move(name), std::move(value));
+        entries_.emplace_back(std::string(name), std::string(value));
     }
 
-    void add(std::string name, std::string value) {
+    void add(std::string_view name, std::string_view value) {
         std::string key_lower = detail::to_lower_ascii(name);
         for (auto& entry : entries_) {
             if (detail::to_lower_ascii(entry.first) == key_lower) {
                 if (key_lower == "set-cookie") {
                     // Set-Cookie headers must be separate entries
-                    entries_.emplace_back(std::move(name), std::move(value));
+                    entries_.emplace_back(std::string(name), std::string(value));
                 } else {
-                    entry.second += ", " + value;
+                    entry.second += ", ";
+                    entry.second += value;
                 }
                 return;
             }
         }
-        entries_.emplace_back(std::move(name), std::move(value));
+        entries_.emplace_back(std::string(name), std::string(value));
     }
 
     [[nodiscard]] bool has(std::string_view name) const {
@@ -342,6 +343,7 @@ struct HttpRequestMessage {
     HeaderMap headers;
     std::unordered_map<std::string, std::string> query;
     std::unordered_map<std::string, std::string> params;
+    std::unordered_map<std::string, std::string> locals;
     std::string body;
     std::string client_ip = "127.0.0.1";
     int client_port = 0;
@@ -814,6 +816,331 @@ public:
     [[nodiscard]] static std::string format_last_chunk() {
         return "0\r\n\r\n";
     }
+};
+
+// ============================================================================
+// Phase 2.2: Express-Style Middleware Pipeline & Fluent Request/Response API
+// ============================================================================
+
+struct CookieOptions {
+    int64_t max_age = -1; ///< Max-Age in seconds (-1 = session cookie)
+    std::string domain;
+    std::string path = "/";
+    bool secure = false;
+    bool http_only = false;
+    enum class SameSite { None, Lax, Strict } same_site = SameSite::Lax;
+    std::string expires;
+};
+
+namespace detail {
+
+inline std::unordered_map<std::string, std::string> parse_cookies(std::string_view cookie_hdr) {
+    std::unordered_map<std::string, std::string> cookies;
+    size_t start = 0;
+    while (start < cookie_hdr.size()) {
+        size_t semi = cookie_hdr.find(';', start);
+        std::string_view pair = (semi == std::string_view::npos)
+            ? cookie_hdr.substr(start)
+            : cookie_hdr.substr(start, semi - start);
+        pair = trim_ascii(pair);
+        if (!pair.empty()) {
+            size_t eq = pair.find('=');
+            if (eq != std::string_view::npos) {
+                std::string name = std::string(trim_ascii(pair.substr(0, eq)));
+                std::string val = std::string(trim_ascii(pair.substr(eq + 1)));
+                if (!name.empty()) {
+                    if (val.size() >= 2 && val.front() == '"' && val.back() == '"') {
+                        val = val.substr(1, val.size() - 2);
+                    }
+                    cookies[name] = url_decode(val);
+                }
+            }
+        }
+        if (semi == std::string_view::npos) break;
+        start = semi + 1;
+    }
+    return cookies;
+}
+
+inline std::string format_set_cookie(std::string_view name, std::string_view value, const CookieOptions& options = {}) {
+    std::string out = std::string(name) + "=" + std::string(value);
+    if (!options.path.empty()) {
+        out += "; Path=" + options.path;
+    }
+    if (!options.domain.empty()) {
+        out += "; Domain=" + options.domain;
+    }
+    if (options.max_age >= 0) {
+        out += "; Max-Age=" + std::to_string(options.max_age);
+    }
+    if (!options.expires.empty()) {
+        out += "; Expires=" + options.expires;
+    }
+    if (options.secure) {
+        out += "; Secure";
+    }
+    if (options.http_only) {
+        out += "; HttpOnly";
+    }
+    switch (options.same_site) {
+        case CookieOptions::SameSite::None:
+            out += "; SameSite=None";
+            break;
+        case CookieOptions::SameSite::Strict:
+            out += "; SameSite=Strict";
+            break;
+        case CookieOptions::SameSite::Lax:
+        default:
+            out += "; SameSite=Lax";
+            break;
+    }
+    return out;
+}
+
+inline bool path_starts_with_prefix(std::string_view path, std::string_view prefix) {
+    if (prefix.empty() || prefix == "/") {
+        return true;
+    }
+    while (!prefix.empty() && prefix.back() == '/') {
+        prefix.remove_suffix(1);
+    }
+    if (path.size() < prefix.size()) {
+        return false;
+    }
+    if (path.substr(0, prefix.size()) != prefix) {
+        return false;
+    }
+    return path.size() == prefix.size() || path[prefix.size()] == '/';
+}
+
+} // namespace detail
+
+class Request {
+public:
+    std::string method;
+    std::string url;
+    std::string path;
+    std::string protocol = "HTTP/1.1";
+    std::string ip = "127.0.0.1";
+    int port = 0;
+    std::unordered_map<std::string, std::string> params;
+    std::unordered_map<std::string, std::string> query;
+    HeaderMap headers;
+    std::unordered_map<std::string, std::string> cookies;
+    std::string body;
+    bool keep_alive = true;
+    bool upgrade_websocket = false;
+
+    std::unordered_map<std::string, std::string> locals;
+
+    Request() = default;
+    explicit Request(const HttpRequestMessage& msg)
+        : method(msg.line.method),
+          url(msg.line.raw_target),
+          path(msg.line.path),
+          protocol(msg.line.version),
+          ip(msg.client_ip),
+          port(msg.client_port),
+          params(msg.params),
+          query(msg.query),
+          headers(msg.headers),
+          cookies(),
+          body(msg.body),
+          keep_alive(msg.keep_alive),
+          upgrade_websocket(msg.upgrade_websocket),
+          locals(msg.locals) {
+        auto cookie_hdr = headers.get("cookie");
+        if (cookie_hdr.has_value()) {
+            cookies = detail::parse_cookies(*cookie_hdr);
+        }
+    }
+
+    [[nodiscard]] std::string header(std::string_view name, std::string_view fallback = "") const {
+        return headers.get_or(name, fallback);
+    }
+
+    [[nodiscard]] std::string param(std::string_view name, std::string_view fallback = "") const {
+        auto it = params.find(std::string(name));
+        return (it != params.end()) ? it->second : std::string(fallback);
+    }
+
+    [[nodiscard]] std::string query_param(std::string_view name, std::string_view fallback = "") const {
+        auto it = query.find(std::string(name));
+        return (it != query.end()) ? it->second : std::string(fallback);
+    }
+
+    [[nodiscard]] std::string cookie(std::string_view name, std::string_view fallback = "") const {
+        auto it = cookies.find(std::string(name));
+        return (it != cookies.end()) ? it->second : std::string(fallback);
+    }
+
+    [[nodiscard]] HttpRequestMessage to_raw_message() const {
+        HttpRequestMessage msg;
+        msg.line.method = method;
+        msg.line.raw_target = url;
+        msg.line.path = path;
+        msg.line.version = protocol;
+        msg.client_ip = ip;
+        msg.client_port = port;
+        msg.params = params;
+        msg.query = query;
+        msg.locals = locals;
+        msg.headers = headers;
+        msg.body = body;
+        msg.keep_alive = keep_alive;
+        msg.upgrade_websocket = upgrade_websocket;
+        return msg;
+    }
+};
+
+class Response {
+public:
+    int status_code = 200;
+    HeaderMap headers;
+    std::string body;
+    bool chunked = false;
+
+    Response() = default;
+
+    Response& status(int code) {
+        status_code = code;
+        return *this;
+    }
+
+    Response& setHeader(std::string_view name, std::string_view value) {
+        headers.set(name, value);
+        return *this;
+    }
+
+    Response& header(std::string_view name, std::string_view value) {
+        return setHeader(name, value);
+    }
+
+    Response& appendHeader(std::string_view name, std::string_view value) {
+        headers.add(std::string(name), std::string(value));
+        return *this;
+    }
+
+    Response& type(std::string_view content_type) {
+        headers.set("Content-Type", content_type);
+        return *this;
+    }
+
+    Response& cookie(std::string_view name, std::string_view value, const CookieOptions& options = {}) {
+        std::string set_cookie_val = detail::format_set_cookie(name, value, options);
+        headers.add("Set-Cookie", set_cookie_val);
+        return *this;
+    }
+
+    Response& clearCookie(std::string_view name, std::string_view path = "/") {
+        CookieOptions opt;
+        opt.path = std::string(path);
+        opt.max_age = 0;
+        opt.expires = "Thu, 01 Jan 1970 00:00:00 GMT";
+        return cookie(name, "", opt);
+    }
+
+    Response& send(std::string_view text) {
+        if (!headers.has("Content-Type")) {
+            headers.set("Content-Type", "text/plain; charset=utf-8");
+        }
+        body = std::string(text);
+        sent_ = true;
+        return *this;
+    }
+
+    Response& json(std::string_view json_str) {
+        headers.set("Content-Type", "application/json; charset=utf-8");
+        body = std::string(json_str);
+        sent_ = true;
+        return *this;
+    }
+
+    Response& html(std::string_view html_str) {
+        headers.set("Content-Type", "text/html; charset=utf-8");
+        body = std::string(html_str);
+        sent_ = true;
+        return *this;
+    }
+
+    Response& redirect(std::string_view location, int redirect_code = 302) {
+        status(redirect_code);
+        setHeader("Location", location);
+        if (body.empty()) {
+            body = "Redirecting to " + std::string(location);
+        }
+        sent_ = true;
+        return *this;
+    }
+
+    Response& end() {
+        sent_ = true;
+        return *this;
+    }
+
+    [[nodiscard]] bool is_sent() const noexcept {
+        return sent_;
+    }
+
+    [[nodiscard]] HttpResponseMessage to_message() const {
+        HttpResponseMessage msg;
+        msg.status = status_code;
+        msg.headers = headers;
+        msg.body = body;
+        msg.chunked = chunked;
+        return msg;
+    }
+
+private:
+    bool sent_ = false;
+};
+
+class NextFunction {
+public:
+    using Fn = std::function<void(std::optional<std::string>)>;
+    NextFunction() = default;
+    NextFunction(Fn fn) : fn_(std::move(fn)) {}
+
+    template <typename F, typename = std::enable_if_t<!std::is_same_v<std::decay_t<F>, NextFunction> && std::is_invocable_v<F, std::optional<std::string>>>>
+    NextFunction(F&& fn) : fn_(std::forward<F>(fn)) {}
+
+    void operator()() const {
+        if (fn_) fn_(std::nullopt);
+    }
+
+    void operator()(const char* err) const {
+        if (fn_) fn_(err ? std::optional<std::string>(std::string(err)) : std::nullopt);
+    }
+
+    void operator()(std::string_view err) const {
+        if (fn_) fn_(std::string(err));
+    }
+
+    void operator()(const std::string& err) const {
+        if (fn_) fn_(err);
+    }
+
+    void operator()(std::optional<std::string> err) const {
+        if (fn_) fn_(std::move(err));
+    }
+
+    void operator()(std::nullopt_t) const {
+        if (fn_) fn_(std::nullopt);
+    }
+
+private:
+    Fn fn_;
+};
+
+using Middleware = std::function<void(Request&, Response&, NextFunction)>;
+using Handler = std::function<void(Request&, Response&)>;
+using ErrorMiddleware = std::function<void(const std::string&, Request&, Response&, NextFunction)>;
+
+struct MiddlewareEntry {
+    std::string prefix;
+    bool is_error_handler = false;
+    Middleware handler;
+    ErrorMiddleware error_handler;
 };
 
 // ============================================================================
@@ -1305,6 +1632,273 @@ public:
         handler_ = std::move(handler);
     }
 
+    void use(Middleware mw) {
+        use("", std::move(mw));
+    }
+
+    void use(std::string_view prefix, Middleware mw) {
+        std::lock_guard<std::mutex> lock(middleware_mutex_);
+        MiddlewareEntry entry;
+        entry.prefix = std::string(prefix);
+        entry.is_error_handler = false;
+        entry.handler = std::move(mw);
+        middlewares_.push_back(std::move(entry));
+    }
+
+    void use(ErrorMiddleware emw) {
+        use("", std::move(emw));
+    }
+
+    void use(std::string_view prefix, ErrorMiddleware emw) {
+        std::lock_guard<std::mutex> lock(middleware_mutex_);
+        MiddlewareEntry entry;
+        entry.prefix = std::string(prefix);
+        entry.is_error_handler = true;
+        entry.error_handler = std::move(emw);
+        middlewares_.push_back(std::move(entry));
+    }
+
+    void set_handler(Handler handler) {
+        set_handler([h = std::move(handler)](const HttpRequestMessage& raw_req) -> HttpResponseMessage {
+            Request req(raw_req);
+            Response res;
+            h(req, res);
+            return res.to_message();
+        });
+    }
+
+    void get(std::string_view path, Handler handler) {
+        get(path, [h = std::move(handler)](const HttpRequestMessage& raw_req) -> HttpResponseMessage {
+            Request req(raw_req);
+            Response res;
+            h(req, res);
+            return res.to_message();
+        });
+    }
+
+    void get(std::string_view path, Middleware middleware, Handler handler) {
+        get(path, [mw = std::move(middleware), h = std::move(handler)](const HttpRequestMessage& raw_req) -> HttpResponseMessage {
+            Request req(raw_req);
+            Response res;
+            bool next_called = false;
+            std::optional<std::string> next_err;
+            mw(req, res, NextFunction([&](std::optional<std::string> err) {
+                next_called = true;
+                next_err = std::move(err);
+            }));
+            if (next_called && !res.is_sent()) {
+                if (next_err.has_value()) {
+                    throw std::runtime_error(*next_err);
+                }
+                h(req, res);
+            }
+            return res.to_message();
+        });
+    }
+
+    void post(std::string_view path, Handler handler) {
+        post(path, [h = std::move(handler)](const HttpRequestMessage& raw_req) -> HttpResponseMessage {
+            Request req(raw_req);
+            Response res;
+            h(req, res);
+            return res.to_message();
+        });
+    }
+
+    void post(std::string_view path, Middleware middleware, Handler handler) {
+        post(path, [mw = std::move(middleware), h = std::move(handler)](const HttpRequestMessage& raw_req) -> HttpResponseMessage {
+            Request req(raw_req);
+            Response res;
+            bool next_called = false;
+            std::optional<std::string> next_err;
+            mw(req, res, NextFunction([&](std::optional<std::string> err) {
+                next_called = true;
+                next_err = std::move(err);
+            }));
+            if (next_called && !res.is_sent()) {
+                if (next_err.has_value()) {
+                    throw std::runtime_error(*next_err);
+                }
+                h(req, res);
+            }
+            return res.to_message();
+        });
+    }
+
+    void put(std::string_view path, Handler handler) {
+        put(path, [h = std::move(handler)](const HttpRequestMessage& raw_req) -> HttpResponseMessage {
+            Request req(raw_req);
+            Response res;
+            h(req, res);
+            return res.to_message();
+        });
+    }
+
+    void put(std::string_view path, Middleware middleware, Handler handler) {
+        put(path, [mw = std::move(middleware), h = std::move(handler)](const HttpRequestMessage& raw_req) -> HttpResponseMessage {
+            Request req(raw_req);
+            Response res;
+            bool next_called = false;
+            std::optional<std::string> next_err;
+            mw(req, res, NextFunction([&](std::optional<std::string> err) {
+                next_called = true;
+                next_err = std::move(err);
+            }));
+            if (next_called && !res.is_sent()) {
+                if (next_err.has_value()) {
+                    throw std::runtime_error(*next_err);
+                }
+                h(req, res);
+            }
+            return res.to_message();
+        });
+    }
+
+    void del(std::string_view path, Handler handler) {
+        del(path, [h = std::move(handler)](const HttpRequestMessage& raw_req) -> HttpResponseMessage {
+            Request req(raw_req);
+            Response res;
+            h(req, res);
+            return res.to_message();
+        });
+    }
+
+    void del(std::string_view path, Middleware middleware, Handler handler) {
+        del(path, [mw = std::move(middleware), h = std::move(handler)](const HttpRequestMessage& raw_req) -> HttpResponseMessage {
+            Request req(raw_req);
+            Response res;
+            bool next_called = false;
+            std::optional<std::string> next_err;
+            mw(req, res, NextFunction([&](std::optional<std::string> err) {
+                next_called = true;
+                next_err = std::move(err);
+            }));
+            if (next_called && !res.is_sent()) {
+                if (next_err.has_value()) {
+                    throw std::runtime_error(*next_err);
+                }
+                h(req, res);
+            }
+            return res.to_message();
+        });
+    }
+
+    void patch(std::string_view path, Handler handler) {
+        patch(path, [h = std::move(handler)](const HttpRequestMessage& raw_req) -> HttpResponseMessage {
+            Request req(raw_req);
+            Response res;
+            h(req, res);
+            return res.to_message();
+        });
+    }
+
+    void patch(std::string_view path, Middleware middleware, Handler handler) {
+        patch(path, [mw = std::move(middleware), h = std::move(handler)](const HttpRequestMessage& raw_req) -> HttpResponseMessage {
+            Request req(raw_req);
+            Response res;
+            bool next_called = false;
+            std::optional<std::string> next_err;
+            mw(req, res, NextFunction([&](std::optional<std::string> err) {
+                next_called = true;
+                next_err = std::move(err);
+            }));
+            if (next_called && !res.is_sent()) {
+                if (next_err.has_value()) {
+                    throw std::runtime_error(*next_err);
+                }
+                h(req, res);
+            }
+            return res.to_message();
+        });
+    }
+
+    void head(std::string_view path, Handler handler) {
+        head(path, [h = std::move(handler)](const HttpRequestMessage& raw_req) -> HttpResponseMessage {
+            Request req(raw_req);
+            Response res;
+            h(req, res);
+            return res.to_message();
+        });
+    }
+
+    void head(std::string_view path, Middleware middleware, Handler handler) {
+        head(path, [mw = std::move(middleware), h = std::move(handler)](const HttpRequestMessage& raw_req) -> HttpResponseMessage {
+            Request req(raw_req);
+            Response res;
+            bool next_called = false;
+            std::optional<std::string> next_err;
+            mw(req, res, NextFunction([&](std::optional<std::string> err) {
+                next_called = true;
+                next_err = std::move(err);
+            }));
+            if (next_called && !res.is_sent()) {
+                if (next_err.has_value()) {
+                    throw std::runtime_error(*next_err);
+                }
+                h(req, res);
+            }
+            return res.to_message();
+        });
+    }
+
+    void options(std::string_view path, Handler handler) {
+        options(path, [h = std::move(handler)](const HttpRequestMessage& raw_req) -> HttpResponseMessage {
+            Request req(raw_req);
+            Response res;
+            h(req, res);
+            return res.to_message();
+        });
+    }
+
+    void options(std::string_view path, Middleware middleware, Handler handler) {
+        options(path, [mw = std::move(middleware), h = std::move(handler)](const HttpRequestMessage& raw_req) -> HttpResponseMessage {
+            Request req(raw_req);
+            Response res;
+            bool next_called = false;
+            std::optional<std::string> next_err;
+            mw(req, res, NextFunction([&](std::optional<std::string> err) {
+                next_called = true;
+                next_err = std::move(err);
+            }));
+            if (next_called && !res.is_sent()) {
+                if (next_err.has_value()) {
+                    throw std::runtime_error(*next_err);
+                }
+                h(req, res);
+            }
+            return res.to_message();
+        });
+    }
+
+    void all(std::string_view path, Handler handler) {
+        all(path, [h = std::move(handler)](const HttpRequestMessage& raw_req) -> HttpResponseMessage {
+            Request req(raw_req);
+            Response res;
+            h(req, res);
+            return res.to_message();
+        });
+    }
+
+    void all(std::string_view path, Middleware middleware, Handler handler) {
+        all(path, [mw = std::move(middleware), h = std::move(handler)](const HttpRequestMessage& raw_req) -> HttpResponseMessage {
+            Request req(raw_req);
+            Response res;
+            bool next_called = false;
+            std::optional<std::string> next_err;
+            mw(req, res, NextFunction([&](std::optional<std::string> err) {
+                next_called = true;
+                next_err = std::move(err);
+            }));
+            if (next_called && !res.is_sent()) {
+                if (next_err.has_value()) {
+                    throw std::runtime_error(*next_err);
+                }
+                h(req, res);
+            }
+            return res.to_message();
+        });
+    }
+
     void get(std::string_view path, HttpHandler handler) {
         std::lock_guard<std::mutex> lock(router_mutex_);
         router_.get(path, std::move(handler));
@@ -1607,54 +2201,193 @@ private:
 
             while (parser.is_complete()) {
                 requests_served++;
-                HttpRequestMessage req = parser.message();
-                req.client_ip = client_ip;
-                req.client_port = client_port;
+                HttpRequestMessage raw_req = parser.message();
+                raw_req.client_ip = client_ip;
+                raw_req.client_port = client_port;
 
                 in_flight_requests_.fetch_add(1);
 
                 HttpResponseMessage resp;
+                bool keep_alive_flag = raw_req.keep_alive;
                 try {
-                    bool handled = false;
-                    RouteMatchResult<HttpHandler> match_res;
+                    Request req(raw_req);
+                    Response res;
+
+                    std::vector<MiddlewareEntry> mws;
                     {
-                        std::lock_guard<std::mutex> lock(router_mutex_);
-                        if (!router_.empty()) {
-                            match_res = router_.match(req.line.method, req.line.path);
-                        }
+                        std::lock_guard<std::mutex> lock(middleware_mutex_);
+                        mws = middlewares_;
                     }
 
-                    if (match_res.status == RouteMatchStatus::Found) {
-                        req.params = std::move(match_res.params);
-                        resp = match_res.handler(req);
-                        handled = true;
-                    } else if (match_res.status == RouteMatchStatus::MethodNotAllowed) {
-                        resp.status = 405;
-                        std::string allow_hdr;
-                        for (size_t i = 0; i < match_res.allowed_methods.size(); ++i) {
-                            if (i > 0) {
-                                allow_hdr += ", ";
+                    std::string current_error;
+                    size_t mw_index = 0;
+
+                    auto run_error_middlewares = [&](size_t start_idx) {
+                        for (size_t i = start_idx; i < mws.size(); ++i) {
+                            if (res.is_sent()) break;
+                            const auto& entry = mws[i];
+                            if (!entry.is_error_handler) continue;
+                            if (!entry.prefix.empty() && !detail::path_starts_with_prefix(req.path, entry.prefix)) continue;
+
+                            bool next_called = false;
+                            std::optional<std::string> next_err;
+                            try {
+                                entry.error_handler(current_error, req, res, NextFunction([&](std::optional<std::string> err) {
+                                    next_called = true;
+                                    next_err = std::move(err);
+                                }));
+                            } catch (const std::exception& ex) {
+                                current_error = ex.what();
+                                continue;
+                            } catch (...) {
+                                current_error = "Unknown error";
+                                continue;
                             }
-                            allow_hdr += match_res.allowed_methods[i];
+
+                            if (res.is_sent()) break;
+                            if (next_called) {
+                                if (next_err.has_value()) {
+                                    current_error = *next_err;
+                                } else {
+                                    current_error.clear();
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
                         }
-                        resp.headers.set("Allow", allow_hdr);
-                        resp.headers.set("Content-Type", "text/plain; charset=utf-8");
-                        resp.body = "Method Not Allowed";
-                        handled = true;
+                    };
+
+                    while (mw_index < mws.size() && !res.is_sent() && current_error.empty()) {
+                        const auto& entry = mws[mw_index];
+                        if (entry.is_error_handler) {
+                            mw_index++;
+                            continue;
+                        }
+                        if (!entry.prefix.empty() && !detail::path_starts_with_prefix(req.path, entry.prefix)) {
+                            mw_index++;
+                            continue;
+                        }
+
+                        bool next_called = false;
+                        std::optional<std::string> next_err;
+                        try {
+                            entry.handler(req, res, NextFunction([&](std::optional<std::string> err) {
+                                next_called = true;
+                                next_err = std::move(err);
+                            }));
+                        } catch (const std::exception& ex) {
+                            current_error = ex.what();
+                            mw_index++;
+                            break;
+                        } catch (...) {
+                            current_error = "Unknown error";
+                            mw_index++;
+                            break;
+                        }
+
+                        if (res.is_sent()) break;
+
+                        if (next_called) {
+                            if (next_err.has_value()) {
+                                current_error = *next_err;
+                                mw_index++;
+                                break;
+                            }
+                            mw_index++;
+                        } else {
+                            break;
+                        }
                     }
 
-                    if (!handled) {
-                        HttpHandler handler_copy;
+                    if (!current_error.empty() && !res.is_sent()) {
+                        run_error_middlewares(mw_index);
+                    }
+
+                    if (res.is_sent()) {
+                        resp = res.to_message();
+                        keep_alive_flag = req.keep_alive;
+                    } else if (!current_error.empty()) {
+                        resp.status = 500;
+                        resp.headers.set("Content-Type", "text/plain; charset=utf-8");
+                        resp.body = "Internal Server Error: " + current_error;
+                    } else {
+                        bool handled = false;
+                        RouteMatchResult<HttpHandler> match_res;
                         {
-                            std::lock_guard<std::mutex> lock(handler_mutex_);
-                            handler_copy = handler_;
+                            std::lock_guard<std::mutex> lock(router_mutex_);
+                            if (!router_.empty()) {
+                                match_res = router_.match(req.method, req.path);
+                            }
                         }
-                        if (handler_copy) {
-                            resp = handler_copy(req);
-                        } else {
-                            resp.status = 404;
+
+                        if (match_res.status == RouteMatchStatus::Found) {
+                            HttpRequestMessage enriched_raw = req.to_raw_message();
+                            enriched_raw.params = std::move(match_res.params);
+                            try {
+                                resp = match_res.handler(enriched_raw);
+                            } catch (const std::exception& ex) {
+                                current_error = ex.what();
+                            } catch (...) {
+                                current_error = "Unknown error";
+                            }
+
+                            if (!current_error.empty()) {
+                                run_error_middlewares(0);
+                                if (res.is_sent()) {
+                                    resp = res.to_message();
+                                } else {
+                                    resp.status = 500;
+                                    resp.headers.set("Content-Type", "text/plain; charset=utf-8");
+                                    resp.body = "Internal Server Error: " + current_error;
+                                }
+                            }
+                            handled = true;
+                        } else if (match_res.status == RouteMatchStatus::MethodNotAllowed) {
+                            resp.status = 405;
+                            std::string allow_hdr;
+                            for (size_t i = 0; i < match_res.allowed_methods.size(); ++i) {
+                                if (i > 0) {
+                                    allow_hdr += ", ";
+                                }
+                                allow_hdr += match_res.allowed_methods[i];
+                            }
+                            resp.headers.set("Allow", allow_hdr);
                             resp.headers.set("Content-Type", "text/plain; charset=utf-8");
-                            resp.body = "Cannot " + req.line.method + " " + req.line.path;
+                            resp.body = "Method Not Allowed";
+                            handled = true;
+                        }
+
+                        if (!handled) {
+                            HttpHandler handler_copy;
+                            {
+                                std::lock_guard<std::mutex> lock(handler_mutex_);
+                                handler_copy = handler_;
+                            }
+                            if (handler_copy) {
+                                try {
+                                    resp = handler_copy(req.to_raw_message());
+                                } catch (const std::exception& ex) {
+                                    current_error = ex.what();
+                                } catch (...) {
+                                    current_error = "Unknown error";
+                                }
+
+                                if (!current_error.empty()) {
+                                    run_error_middlewares(0);
+                                    if (res.is_sent()) {
+                                        resp = res.to_message();
+                                    } else {
+                                        resp.status = 500;
+                                        resp.headers.set("Content-Type", "text/plain; charset=utf-8");
+                                        resp.body = "Internal Server Error: " + current_error;
+                                    }
+                                }
+                            } else {
+                                resp.status = 404;
+                                resp.headers.set("Content-Type", "text/plain; charset=utf-8");
+                                resp.body = "Cannot " + req.method + " " + req.path;
+                            }
                         }
                     }
                 } catch (const std::exception& ex) {
@@ -1670,7 +2403,7 @@ private:
                 in_flight_requests_.fetch_sub(1);
                 in_flight_cv_.notify_all();
 
-                bool will_keep_alive = req.keep_alive &&
+                bool will_keep_alive = keep_alive_flag &&
                                        running_.load() &&
                                        (requests_served < config_.max_keep_alive_requests) &&
                                        (detail::to_lower_ascii(resp.headers.get_or("connection", "")) != "close");
@@ -1710,6 +2443,9 @@ private:
 
     HttpRouter router_;
     std::mutex router_mutex_;
+
+    std::vector<MiddlewareEntry> middlewares_;
+    std::mutex middleware_mutex_;
 
     net::detail::socket_t listen_fd_ = net::detail::kInvalidSocket;
     int bound_port_ = 0;
