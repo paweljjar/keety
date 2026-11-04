@@ -26,6 +26,11 @@
     "onLanguage:keetscript"
   ],
   "contributes": {
+    "breakpoints": [
+      {
+        "language": "keetscript"
+      }
+    ],
     "languages": [
       {
         "id": "keetscript",
