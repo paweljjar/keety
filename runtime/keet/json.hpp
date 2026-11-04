@@ -1434,4 +1434,13 @@ inline bool writeFile(const std::string& path, const std::string& text, int64_t 
     return true;
 }
 
+using JsonNode = detail::JsonNode;
+
+/// Parses an RFC 8259 JSON document string into a JsonNode DOM tree.
+/// Throws keet::error("JsonError", ...) on syntax errors.
+[[nodiscard]] inline JsonNode parse(std::string_view text) {
+    detail::Parser p(text);
+    return p.parse_document();
+}
+
 } // namespace keet::json

@@ -13,7 +13,11 @@
 #include <condition_variable>
 #include <cstdint>
 #include <ctime>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
+#include <iostream>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <queue>
@@ -344,6 +348,9 @@ struct HttpRequestMessage {
     std::unordered_map<std::string, std::string> query;
     std::unordered_map<std::string, std::string> params;
     std::unordered_map<std::string, std::string> locals;
+    std::unordered_map<std::string, std::string> body_params;
+    std::string raw_body;
+    std::shared_ptr<keet::json::JsonNode> json_value;
     std::string body;
     std::string client_ip = "127.0.0.1";
     int client_port = 0;
@@ -353,6 +360,11 @@ struct HttpRequestMessage {
     [[nodiscard]] std::string param(std::string_view name, std::string_view fallback = "") const {
         auto it = params.find(std::string(name));
         return (it != params.end()) ? it->second : std::string(fallback);
+    }
+
+    [[nodiscard]] std::string body_param(std::string_view name, std::string_view fallback = "") const {
+        auto it = body_params.find(std::string(name));
+        return (it != body_params.end()) ? it->second : std::string(fallback);
     }
 };
 
@@ -932,6 +944,9 @@ public:
     bool upgrade_websocket = false;
 
     std::unordered_map<std::string, std::string> locals;
+    std::unordered_map<std::string, std::string> body_params;
+    std::string raw_body;
+    std::shared_ptr<keet::json::JsonNode> json_value;
 
     Request() = default;
     explicit Request(const HttpRequestMessage& msg)
@@ -948,7 +963,10 @@ public:
           body(msg.body),
           keep_alive(msg.keep_alive),
           upgrade_websocket(msg.upgrade_websocket),
-          locals(msg.locals) {
+          locals(msg.locals),
+          body_params(msg.body_params),
+          raw_body(msg.raw_body),
+          json_value(msg.json_value) {
         auto cookie_hdr = headers.get("cookie");
         if (cookie_hdr.has_value()) {
             cookies = detail::parse_cookies(*cookie_hdr);
@@ -969,9 +987,44 @@ public:
         return (it != query.end()) ? it->second : std::string(fallback);
     }
 
+    [[nodiscard]] std::string body_param(std::string_view name, std::string_view fallback = "") const {
+        auto it = body_params.find(std::string(name));
+        return (it != body_params.end()) ? it->second : std::string(fallback);
+    }
+
     [[nodiscard]] std::string cookie(std::string_view name, std::string_view fallback = "") const {
         auto it = cookies.find(std::string(name));
         return (it != cookies.end()) ? it->second : std::string(fallback);
+    }
+
+    [[nodiscard]] bool has_json() const noexcept {
+        return json_value != nullptr;
+    }
+
+    [[nodiscard]] const keet::json::JsonNode* json_opt() const noexcept {
+        return json_value.get();
+    }
+
+    [[nodiscard]] const keet::json::JsonNode& json() const {
+        if (!json_value) {
+            throw keet::error("HttpError", "Request does not contain a parsed JSON body");
+        }
+        return *json_value;
+    }
+
+    [[nodiscard]] std::string json_field(std::string_view key, std::string_view fallback = "") const {
+        if (!json_value || !json_value->is_object()) {
+            return std::string(fallback);
+        }
+        const auto& obj = std::get<keet::json::JsonNode::Object>(json_value->value);
+        auto it = obj.find(std::string(key));
+        if (it == obj.end()) {
+            return std::string(fallback);
+        }
+        if (it->second.is_string()) {
+            return std::get<std::string>(it->second.value);
+        }
+        return keet::json::detail::dump_node(it->second, 0);
     }
 
     [[nodiscard]] HttpRequestMessage to_raw_message() const {
@@ -985,6 +1038,9 @@ public:
         msg.params = params;
         msg.query = query;
         msg.locals = locals;
+        msg.body_params = body_params;
+        msg.raw_body = raw_body;
+        msg.json_value = json_value;
         msg.headers = headers;
         msg.body = body;
         msg.keep_alive = keep_alive;
@@ -1054,6 +1110,10 @@ public:
         body = std::string(json_str);
         sent_ = true;
         return *this;
+    }
+
+    Response& json(const keet::json::JsonNode& node) {
+        return json(keet::json::detail::dump_node(node, 0));
     }
 
     Response& html(std::string_view html_str) {
@@ -1142,6 +1202,335 @@ struct MiddlewareEntry {
     Middleware handler;
     ErrorMiddleware error_handler;
 };
+
+// ============================================================================
+// Phase 3.1: Standard Middleware Ecosystem
+// ============================================================================
+
+namespace detail {
+
+inline std::string mime_type_for_path(std::string_view ext) {
+    std::string lower = detail::to_lower_ascii(ext);
+    if (lower == ".html" || lower == ".htm") return "text/html; charset=utf-8";
+    if (lower == ".css") return "text/css; charset=utf-8";
+    if (lower == ".js" || lower == ".mjs") return "application/javascript; charset=utf-8";
+    if (lower == ".json") return "application/json; charset=utf-8";
+    if (lower == ".png") return "image/png";
+    if (lower == ".jpg" || lower == ".jpeg") return "image/jpeg";
+    if (lower == ".gif") return "image/gif";
+    if (lower == ".svg") return "image/svg+xml";
+    if (lower == ".ico") return "image/x-icon";
+    if (lower == ".txt") return "text/plain; charset=utf-8";
+    if (lower == ".pdf") return "application/pdf";
+    if (lower == ".wasm") return "application/wasm";
+    return "application/octet-stream";
+}
+
+} // namespace detail
+
+struct CorsOptions {
+    std::string origin = "*";
+    std::vector<std::string> methods = {"GET", "HEAD", "PUT", "PATCH", "POST", "DELETE"};
+    std::vector<std::string> allowed_headers;
+    std::vector<std::string> exposed_headers;
+    bool credentials = false;
+    int max_age = 0;
+};
+
+inline Middleware cors(CorsOptions options = {}) {
+    return [opts = std::move(options)](Request& req, Response& res, NextFunction next) {
+        std::string req_origin = req.header("origin");
+        if (!req_origin.empty()) {
+            if (opts.origin == "*") {
+                res.setHeader("Access-Control-Allow-Origin", opts.credentials ? req_origin : "*");
+            } else {
+                bool allowed = false;
+                if (opts.origin == req_origin) {
+                    allowed = true;
+                } else {
+                    size_t start = 0;
+                    while (start < opts.origin.size()) {
+                        size_t comma = opts.origin.find(',', start);
+                        std::string_view o = (comma == std::string_view::npos)
+                            ? std::string_view(opts.origin).substr(start)
+                            : std::string_view(opts.origin).substr(start, comma - start);
+                        o = detail::trim_ascii(o);
+                        if (o == req_origin) {
+                            allowed = true;
+                            break;
+                        }
+                        if (comma == std::string_view::npos) break;
+                        start = comma + 1;
+                    }
+                }
+                if (allowed) {
+                    res.setHeader("Access-Control-Allow-Origin", req_origin);
+                }
+            }
+        } else if (opts.origin == "*") {
+            res.setHeader("Access-Control-Allow-Origin", "*");
+        }
+
+        if (opts.origin != "*") {
+            res.appendHeader("Vary", "Origin");
+        }
+
+        if (opts.credentials) {
+            res.setHeader("Access-Control-Allow-Credentials", "true");
+        }
+
+        if (!opts.exposed_headers.empty()) {
+            std::string exp;
+            for (size_t i = 0; i < opts.exposed_headers.size(); ++i) {
+                if (i > 0) exp += ", ";
+                exp += opts.exposed_headers[i];
+            }
+            res.setHeader("Access-Control-Expose-Headers", exp);
+        }
+
+        if (detail::to_upper_ascii(req.method) == "OPTIONS" && req.headers.has("Access-Control-Request-Method")) {
+            std::string methods_hdr;
+            for (size_t i = 0; i < opts.methods.size(); ++i) {
+                if (i > 0) methods_hdr += ", ";
+                methods_hdr += opts.methods[i];
+            }
+            res.setHeader("Access-Control-Allow-Methods", methods_hdr);
+
+            if (!opts.allowed_headers.empty()) {
+                std::string hdrs;
+                for (size_t i = 0; i < opts.allowed_headers.size(); ++i) {
+                    if (i > 0) hdrs += ", ";
+                    hdrs += opts.allowed_headers[i];
+                }
+                res.setHeader("Access-Control-Allow-Headers", hdrs);
+            } else if (req.headers.has("Access-Control-Request-Headers")) {
+                res.setHeader("Access-Control-Allow-Headers", req.header("access-control-request-headers"));
+            }
+
+            if (opts.max_age > 0) {
+                res.setHeader("Access-Control-Max-Age", std::to_string(opts.max_age));
+            }
+
+            res.status(204);
+            res.setHeader("Content-Length", "0");
+            res.end();
+            return;
+        }
+
+        next();
+    };
+}
+
+inline Middleware jsonParser(size_t max_body_size = 10 * 1024 * 1024) {
+    return [max_body_size](Request& req, Response& res, NextFunction next) {
+        if (req.body.empty()) {
+            next();
+            return;
+        }
+
+        std::string ct = detail::to_lower_ascii(req.header("content-type"));
+        if (ct.find("application/json") == std::string::npos) {
+            next();
+            return;
+        }
+
+        if (req.body.size() > max_body_size) {
+            res.status(413).type("application/json").send("{\"error\":\"Payload Too Large\"}");
+            return;
+        }
+
+        try {
+            req.json_value = std::make_shared<keet::json::JsonNode>(keet::json::parse(req.body));
+            next();
+        } catch (const std::exception& ex) {
+            res.status(400).type("application/json").send("{\"error\":\"Bad Request\",\"message\":\"" + keet::json::detail::escape_json_string(ex.what()) + "\"}");
+        }
+    };
+}
+
+inline Middleware urlencodedParser(size_t max_body_size = 10 * 1024 * 1024) {
+    return [max_body_size](Request& req, Response& res, NextFunction next) {
+        if (req.body.empty()) {
+            next();
+            return;
+        }
+
+        std::string ct = detail::to_lower_ascii(req.header("content-type"));
+        if (ct.find("application/x-www-form-urlencoded") == std::string::npos) {
+            next();
+            return;
+        }
+
+        if (req.body.size() > max_body_size) {
+            res.status(413).send("Payload Too Large");
+            return;
+        }
+
+        req.body_params = parse_query_string(req.body);
+        next();
+    };
+}
+
+inline Middleware rawParser(size_t max_body_size = 50 * 1024 * 1024) {
+    return [max_body_size](Request& req, Response& res, NextFunction next) {
+        if (req.body.size() > max_body_size) {
+            res.status(413).send("Payload Too Large");
+            return;
+        }
+        req.raw_body = req.body;
+        next();
+    };
+}
+
+struct LoggerOptions {
+    std::function<void(std::string_view)> sink;
+    bool color = true;
+};
+
+inline Middleware logger(LoggerOptions options = {}) {
+    return [opts = std::move(options)](Request& req, Response& res, NextFunction next) {
+        auto t0 = std::chrono::steady_clock::now();
+        next();
+        auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+
+        std::time_t now_c = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        std::tm tm_buf{};
+        detail::safe_gmtime(&now_c, &tm_buf);
+        char time_str[32];
+        std::strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm_buf);
+
+        std::ostringstream ss;
+        ss << "[" << time_str << "] " << req.method << " " << req.path << " ";
+
+        int st = res.status_code;
+        if (opts.color) {
+            if (st >= 200 && st < 300) {
+                ss << "\033[32m" << st << "\033[0m";
+            } else if (st >= 300 && st < 400) {
+                ss << "\033[36m" << st << "\033[0m";
+            } else if (st >= 400 && st < 500) {
+                ss << "\033[33m" << st << "\033[0m";
+            } else {
+                ss << "\033[31m" << st << "\033[0m";
+            }
+        } else {
+            ss << st;
+        }
+
+        ss << " - " << std::fixed << std::setprecision(2) << elapsed << "ms";
+        std::string line = ss.str();
+
+        if (opts.sink) {
+            opts.sink(line);
+        } else {
+            std::cout << line << std::endl;
+        }
+    };
+}
+
+inline Middleware staticDir(std::string_view mountPath, std::string_view diskDir) {
+    std::string mount_prefix = std::string(mountPath);
+    while (!mount_prefix.empty() && mount_prefix.back() == '/') {
+        mount_prefix.pop_back();
+    }
+    std::filesystem::path root(diskDir);
+
+    return [mount_prefix, root](Request& req, Response& res, NextFunction next) {
+        if (!mount_prefix.empty() && !detail::path_starts_with_prefix(req.path, mount_prefix)) {
+            next();
+            return;
+        }
+
+        std::string rel_path;
+        if (!mount_prefix.empty()) {
+            rel_path = req.path.substr(mount_prefix.size());
+        } else {
+            rel_path = req.path;
+        }
+
+        if (rel_path.empty() || rel_path == "/") {
+            rel_path = "index.html";
+        } else if (rel_path.front() == '/') {
+            rel_path.erase(0, 1);
+        }
+
+        if (rel_path.find("..") != std::string::npos || rel_path.find('\\') != std::string::npos) {
+            res.status(403).send("Forbidden");
+            return;
+        }
+
+        std::filesystem::path full_path = root / rel_path;
+        std::error_code ec;
+        if (!std::filesystem::exists(full_path, ec) || !std::filesystem::is_regular_file(full_path, ec)) {
+            next();
+            return;
+        }
+
+        auto canon_root = std::filesystem::weakly_canonical(root, ec);
+        auto canon_full = std::filesystem::weakly_canonical(full_path, ec);
+        if (canon_full.string().rfind(canon_root.string(), 0) != 0) {
+            res.status(403).send("Forbidden");
+            return;
+        }
+
+        auto file_size = std::filesystem::file_size(full_path, ec);
+        auto lwt = std::filesystem::last_write_time(full_path, ec);
+        auto sys_time = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+            lwt - std::filesystem::file_time_type::clock::now() + std::chrono::system_clock::now()
+        );
+        std::string last_mod = format_http_date(sys_time);
+        auto lwt_secs = std::chrono::duration_cast<std::chrono::seconds>(sys_time.time_since_epoch()).count();
+        std::string etag = "\"" + std::to_string(file_size) + "-" + std::to_string(lwt_secs) + "\"";
+
+        if (req.header("if-none-match") == etag) {
+            res.status(304);
+            res.setHeader("ETag", etag);
+            res.end();
+            return;
+        }
+        if (!last_mod.empty() && req.header("if-modified-since") == last_mod) {
+            res.status(304);
+            res.setHeader("Last-Modified", last_mod);
+            res.end();
+            return;
+        }
+
+        std::ifstream ifs(full_path, std::ios::in | std::ios::binary);
+        if (!ifs.is_open()) {
+            next();
+            return;
+        }
+        std::string data((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+        std::string ext = full_path.extension().string();
+        std::string mime = detail::mime_type_for_path(ext);
+
+        res.status(200);
+        res.setHeader("Content-Type", mime);
+        res.setHeader("Last-Modified", last_mod);
+        res.setHeader("ETag", etag);
+        res.send(data);
+    };
+}
+
+inline Middleware recover() {
+    return [](Request&, Response& res, NextFunction next) {
+        try {
+            next();
+        } catch (const std::exception& ex) {
+            if (!res.is_sent()) {
+                res.status(500);
+                res.setHeader("Content-Type", "application/json; charset=utf-8");
+                res.send("{\"error\":\"Internal Server Error\",\"message\":\"" + keet::json::detail::escape_json_string(ex.what()) + "\"}");
+            }
+        } catch (...) {
+            if (!res.is_sent()) {
+                res.status(500);
+                res.setHeader("Content-Type", "application/json; charset=utf-8");
+                res.send("{\"error\":\"Internal Server Error\"}");
+            }
+        }
+    };
+}
 
 // ============================================================================
 // Phase 1.2: Server Socket Lifecycle & Concurrency Engine
@@ -2220,176 +2609,144 @@ private:
                     }
 
                     std::string current_error;
-                    size_t mw_index = 0;
+                    size_t total_mws = mws.size();
 
-                    auto run_error_middlewares = [&](size_t start_idx) {
-                        for (size_t i = start_idx; i < mws.size(); ++i) {
-                            if (res.is_sent()) break;
-                            const auto& entry = mws[i];
-                            if (!entry.is_error_handler) continue;
+                    std::function<void(size_t, std::optional<std::string>)> dispatch;
+                    dispatch = [&](size_t idx, std::optional<std::string> err) {
+                        if (res.is_sent()) {
+                            return;
+                        }
+                        if (err.has_value()) {
+                            current_error = *err;
+                        }
+
+                        if (!current_error.empty()) {
+                            while (idx < total_mws) {
+                                const auto& entry = mws[idx];
+                                idx++;
+                                if (!entry.is_error_handler) continue;
+                                if (!entry.prefix.empty() && !detail::path_starts_with_prefix(req.path, entry.prefix)) continue;
+
+                                try {
+                                    entry.error_handler(current_error, req, res, NextFunction([&, idx](std::optional<std::string> next_err) {
+                                        dispatch(idx, next_err);
+                                    }));
+                                } catch (const std::exception& ex) {
+                                    current_error = ex.what();
+                                    dispatch(idx, current_error);
+                                } catch (...) {
+                                    current_error = "Unknown error";
+                                    dispatch(idx, current_error);
+                                }
+                                return;
+                            }
+
+                            if (!res.is_sent()) {
+                                res.status(500);
+                                res.setHeader("Content-Type", "text/plain; charset=utf-8");
+                                res.send("Internal Server Error: " + current_error);
+                            }
+                            return;
+                        }
+
+                        while (idx < total_mws) {
+                            const auto& entry = mws[idx];
+                            idx++;
+                            if (entry.is_error_handler) continue;
                             if (!entry.prefix.empty() && !detail::path_starts_with_prefix(req.path, entry.prefix)) continue;
 
-                            bool next_called = false;
-                            std::optional<std::string> next_err;
                             try {
-                                entry.error_handler(current_error, req, res, NextFunction([&](std::optional<std::string> err) {
-                                    next_called = true;
-                                    next_err = std::move(err);
+                                entry.handler(req, res, NextFunction([&, idx](std::optional<std::string> next_err) {
+                                    dispatch(idx, next_err);
                                 }));
                             } catch (const std::exception& ex) {
                                 current_error = ex.what();
-                                continue;
+                                dispatch(idx, current_error);
                             } catch (...) {
                                 current_error = "Unknown error";
-                                continue;
+                                dispatch(idx, current_error);
+                            }
+                            return;
+                        }
+
+                        // Reached end of pipeline -> Route Matching!
+                        if (!res.is_sent()) {
+                            bool handled = false;
+                            RouteMatchResult<HttpHandler> match_res;
+                            {
+                                std::lock_guard<std::mutex> lock(router_mutex_);
+                                if (!router_.empty()) {
+                                    match_res = router_.match(req.method, req.path);
+                                }
                             }
 
-                            if (res.is_sent()) break;
-                            if (next_called) {
-                                if (next_err.has_value()) {
-                                    current_error = *next_err;
-                                } else {
-                                    current_error.clear();
-                                    break;
+                            if (match_res.status == RouteMatchStatus::Found) {
+                                HttpRequestMessage enriched_raw = req.to_raw_message();
+                                enriched_raw.params = std::move(match_res.params);
+                                try {
+                                    resp = match_res.handler(enriched_raw);
+                                    res.status_code = resp.status;
+                                    for (const auto& h : resp.headers.entries()) {
+                                        res.setHeader(h.first, h.second);
+                                    }
+                                    res.body = resp.body;
+                                    res.end();
+                                } catch (const std::exception& ex) {
+                                    current_error = ex.what();
+                                    dispatch(0, current_error);
+                                } catch (...) {
+                                    current_error = "Unknown error";
+                                    dispatch(0, "Unknown error");
                                 }
-                            } else {
-                                break;
+                                handled = true;
+                            } else if (match_res.status == RouteMatchStatus::MethodNotAllowed) {
+                                res.status(405);
+                                std::string allow_hdr;
+                                for (size_t i = 0; i < match_res.allowed_methods.size(); ++i) {
+                                    if (i > 0) {
+                                        allow_hdr += ", ";
+                                    }
+                                    allow_hdr += match_res.allowed_methods[i];
+                                }
+                                res.setHeader("Allow", allow_hdr);
+                                res.setHeader("Content-Type", "text/plain; charset=utf-8");
+                                res.send("Method Not Allowed");
+                                handled = true;
+                            }
+
+                            if (!handled) {
+                                HttpHandler handler_copy;
+                                {
+                                    std::lock_guard<std::mutex> lock(handler_mutex_);
+                                    handler_copy = handler_;
+                                }
+                                if (handler_copy) {
+                                    try {
+                                        resp = handler_copy(req.to_raw_message());
+                                        res.status_code = resp.status;
+                                        for (const auto& h : resp.headers.entries()) {
+                                            res.setHeader(h.first, h.second);
+                                        }
+                                        res.body = resp.body;
+                                        res.end();
+                                    } catch (const std::exception& ex) {
+                                        current_error = ex.what();
+                                        dispatch(0, current_error);
+                                    } catch (...) {
+                                        current_error = "Unknown error";
+                                        dispatch(0, "Unknown error");
+                                    }
+                                } else {
+                                    res.status(404);
+                                    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+                                    res.send("Cannot " + req.method + " " + req.path);
+                                }
                             }
                         }
                     };
 
-                    while (mw_index < mws.size() && !res.is_sent() && current_error.empty()) {
-                        const auto& entry = mws[mw_index];
-                        if (entry.is_error_handler) {
-                            mw_index++;
-                            continue;
-                        }
-                        if (!entry.prefix.empty() && !detail::path_starts_with_prefix(req.path, entry.prefix)) {
-                            mw_index++;
-                            continue;
-                        }
-
-                        bool next_called = false;
-                        std::optional<std::string> next_err;
-                        try {
-                            entry.handler(req, res, NextFunction([&](std::optional<std::string> err) {
-                                next_called = true;
-                                next_err = std::move(err);
-                            }));
-                        } catch (const std::exception& ex) {
-                            current_error = ex.what();
-                            mw_index++;
-                            break;
-                        } catch (...) {
-                            current_error = "Unknown error";
-                            mw_index++;
-                            break;
-                        }
-
-                        if (res.is_sent()) break;
-
-                        if (next_called) {
-                            if (next_err.has_value()) {
-                                current_error = *next_err;
-                                mw_index++;
-                                break;
-                            }
-                            mw_index++;
-                        } else {
-                            break;
-                        }
-                    }
-
-                    if (!current_error.empty() && !res.is_sent()) {
-                        run_error_middlewares(mw_index);
-                    }
-
-                    if (res.is_sent()) {
-                        resp = res.to_message();
-                        keep_alive_flag = req.keep_alive;
-                    } else if (!current_error.empty()) {
-                        resp.status = 500;
-                        resp.headers.set("Content-Type", "text/plain; charset=utf-8");
-                        resp.body = "Internal Server Error: " + current_error;
-                    } else {
-                        bool handled = false;
-                        RouteMatchResult<HttpHandler> match_res;
-                        {
-                            std::lock_guard<std::mutex> lock(router_mutex_);
-                            if (!router_.empty()) {
-                                match_res = router_.match(req.method, req.path);
-                            }
-                        }
-
-                        if (match_res.status == RouteMatchStatus::Found) {
-                            HttpRequestMessage enriched_raw = req.to_raw_message();
-                            enriched_raw.params = std::move(match_res.params);
-                            try {
-                                resp = match_res.handler(enriched_raw);
-                            } catch (const std::exception& ex) {
-                                current_error = ex.what();
-                            } catch (...) {
-                                current_error = "Unknown error";
-                            }
-
-                            if (!current_error.empty()) {
-                                run_error_middlewares(0);
-                                if (res.is_sent()) {
-                                    resp = res.to_message();
-                                } else {
-                                    resp.status = 500;
-                                    resp.headers.set("Content-Type", "text/plain; charset=utf-8");
-                                    resp.body = "Internal Server Error: " + current_error;
-                                }
-                            }
-                            handled = true;
-                        } else if (match_res.status == RouteMatchStatus::MethodNotAllowed) {
-                            resp.status = 405;
-                            std::string allow_hdr;
-                            for (size_t i = 0; i < match_res.allowed_methods.size(); ++i) {
-                                if (i > 0) {
-                                    allow_hdr += ", ";
-                                }
-                                allow_hdr += match_res.allowed_methods[i];
-                            }
-                            resp.headers.set("Allow", allow_hdr);
-                            resp.headers.set("Content-Type", "text/plain; charset=utf-8");
-                            resp.body = "Method Not Allowed";
-                            handled = true;
-                        }
-
-                        if (!handled) {
-                            HttpHandler handler_copy;
-                            {
-                                std::lock_guard<std::mutex> lock(handler_mutex_);
-                                handler_copy = handler_;
-                            }
-                            if (handler_copy) {
-                                try {
-                                    resp = handler_copy(req.to_raw_message());
-                                } catch (const std::exception& ex) {
-                                    current_error = ex.what();
-                                } catch (...) {
-                                    current_error = "Unknown error";
-                                }
-
-                                if (!current_error.empty()) {
-                                    run_error_middlewares(0);
-                                    if (res.is_sent()) {
-                                        resp = res.to_message();
-                                    } else {
-                                        resp.status = 500;
-                                        resp.headers.set("Content-Type", "text/plain; charset=utf-8");
-                                        resp.body = "Internal Server Error: " + current_error;
-                                    }
-                                }
-                            } else {
-                                resp.status = 404;
-                                resp.headers.set("Content-Type", "text/plain; charset=utf-8");
-                                resp.body = "Cannot " + req.method + " " + req.path;
-                            }
-                        }
-                    }
+                    dispatch(0, std::nullopt);
+                    resp = res.to_message();
                 } catch (const std::exception& ex) {
                     resp.status = 500;
                     resp.headers.set("Content-Type", "text/plain; charset=utf-8");
