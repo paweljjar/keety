@@ -3,17 +3,25 @@
 #include <iostream>
 
 namespace keet_module_scalars_divzero_recover {
+#line 1 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/01_scalars/scalars_divzero_recover.keet"
     int64_t safeDiv(int64_t a, int64_t b) {
+#line 2 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/01_scalars/scalars_divzero_recover.keet"
         return ([&]() -> std::decay_t<decltype(keet::div_safe(a, b))> { try { return keet::div_safe(a, b); } catch (...) { return -1; } })();
     }
 
+#line 5 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/01_scalars/scalars_divzero_recover.keet"
     int64_t _keet_main() {
+#line 6 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/01_scalars/scalars_divzero_recover.keet"
         if (safeDiv(10, 2) != 5) {
+#line 7 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/01_scalars/scalars_divzero_recover.keet"
             return 1;
         }
+#line 9 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/01_scalars/scalars_divzero_recover.keet"
         if (safeDiv(10, 0) != -1) {
+#line 10 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/01_scalars/scalars_divzero_recover.keet"
             return 2;
         }
+#line 12 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/01_scalars/scalars_divzero_recover.keet"
         return 0;
     }
 } // namespace keet_module_scalars_divzero_recover

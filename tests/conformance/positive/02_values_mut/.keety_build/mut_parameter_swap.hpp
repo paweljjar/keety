@@ -17,9 +17,11 @@
 
 namespace keet_module_mut_parameter_swap {
     // --- Generic Function Templates ---
+#line 1 "mut_parameter_swap.keet"
     template <typename T>
     void swap(T& x, T& y);
 
     // --- Exported Function Prototypes ---
+#line 7 "mut_parameter_swap.keet"
     int64_t main();
 } // namespace keet_module_mut_parameter_swap

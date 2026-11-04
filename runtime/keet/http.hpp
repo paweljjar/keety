@@ -3866,6 +3866,12 @@ public:
           thread_pool_(config_.worker_threads),
           handler_(std::move(handler)) {}
 
+    HttpServer(Handler handler, HttpServerConfig config = {})
+        : config_(std::move(config)),
+          thread_pool_(config_.worker_threads) {
+        set_handler(std::move(handler));
+    }
+
     ~HttpServer() {
         stop();
     }
@@ -4306,8 +4312,16 @@ public:
         return running_.load();
     }
 
+    [[nodiscard]] bool isRunning() const noexcept {
+        return is_running();
+    }
+
     [[nodiscard]] int bound_port() const noexcept {
         return bound_port_;
+    }
+
+    [[nodiscard]] int port() const noexcept {
+        return bound_port();
     }
 
     [[nodiscard]] const std::string& bound_host() const noexcept {
@@ -4835,6 +4849,11 @@ inline HttpServer createServer(HttpServerConfig config = {}) {
 
 /// Creates a new HTTP server instance with the given default request handler.
 inline HttpServer createServer(HttpHandler handler, HttpServerConfig config = {}) {
+    return HttpServer(std::move(handler), std::move(config));
+}
+
+/// Creates a new HTTP server instance with the given express-style request handler.
+inline HttpServer createServer(Handler handler, HttpServerConfig config = {}) {
     return HttpServer(std::move(handler), std::move(config));
 }
 

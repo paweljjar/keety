@@ -17,5 +17,6 @@
 
 namespace keet_module_value_semantics_collections {
     // --- Exported Function Prototypes ---
+#line 1 "value_semantics_collections.keet"
     int64_t main();
 } // namespace keet_module_value_semantics_collections

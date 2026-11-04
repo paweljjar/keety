@@ -17,8 +17,12 @@
 
 namespace keet_module_union_narrowing_invalidation {
     // --- Exported Function Prototypes ---
+#line 1 "union_narrowing_invalidation.keet"
     int64_t mutateAndVerify();
+#line 26 "union_narrowing_invalidation.keet"
     int64_t testGuardedReassignment();
+#line 50 "union_narrowing_invalidation.keet"
     int64_t testNullableInvalidation();
+#line 71 "union_narrowing_invalidation.keet"
     int64_t main();
 } // namespace keet_module_union_narrowing_invalidation

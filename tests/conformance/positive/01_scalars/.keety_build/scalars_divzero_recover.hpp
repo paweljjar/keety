@@ -17,6 +17,8 @@
 
 namespace keet_module_scalars_divzero_recover {
     // --- Exported Function Prototypes ---
+#line 1 "scalars_divzero_recover.keet"
     int64_t safeDiv(int64_t a, int64_t b);
+#line 5 "scalars_divzero_recover.keet"
     int64_t main();
 } // namespace keet_module_scalars_divzero_recover

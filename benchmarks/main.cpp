@@ -2,6 +2,7 @@
 #include "bench_hash_map.hpp"
 #include "bench_string_ingestion.hpp"
 #include "bench_task_concurrency.hpp"
+#include "bench_http_server.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -68,6 +69,17 @@ int main(int argc, char* argv[]) {
         size_t b4_warmup = (warmup == 5) ? 3 : warmup;
         size_t b4_measure = (measure == 10) ? 5 : measure;
         auto res = keety::benchmarks::run_task_concurrency_benchmark(b4_size, b4_warmup, b4_measure, verbose);
+        if (!res.passed) {
+            all_passed = false;
+        }
+    }
+
+    // Benchmark 5: HTTP Server Throughput & Concurrent Latency
+    if (target_benchmark == 5 || target_benchmark == 0) {
+        size_t b5_size = custom_size > 0 ? custom_size : 50000;
+        size_t b5_warmup = (warmup == 5) ? 2 : warmup;
+        size_t b5_measure = (measure == 10) ? 3 : measure;
+        auto res = keety::benchmarks::run_http_server_benchmark(b5_size, b5_warmup, b5_measure, verbose);
         if (!res.passed) {
             all_passed = false;
         }

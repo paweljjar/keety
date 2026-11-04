@@ -672,7 +672,10 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             if (obj_s == "http" || obj_s == "::keet::net::http" || http_aliases_.count(obj_s)) {
                 return "::keet::net::http::" + m_name + "(" + args_str + ")";
             }
-            // Container member mapping
+            // Container & method mapping
+            if (m_name == "delete") {
+                return obj_s + ".del(" + args_str + ")";
+            }
             if (m_name == "push") {
                 return obj_s + ".push_back(" + args_str + ")";
             }

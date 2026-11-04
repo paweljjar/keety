@@ -20,5 +20,6 @@
 
 namespace keet_module_time_operations {
     // --- Exported Function Prototypes ---
+#line 5 "time_operations.keet"
     int64_t main();
 } // namespace keet_module_time_operations

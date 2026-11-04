@@ -17,8 +17,12 @@
 
 namespace keet_module_switch_named_loop_break {
     // --- Exported Function Prototypes ---
+#line 1 "switch_named_loop_break.keet"
     int64_t testSwitchNamedWhileBreak();
+#line 28 "switch_named_loop_break.keet"
     int64_t testSwitchNamedForBreak();
+#line 52 "switch_named_loop_break.keet"
     int64_t testSwitchNamedContinue();
+#line 70 "switch_named_loop_break.keet"
     int64_t main();
 } // namespace keet_module_switch_named_loop_break

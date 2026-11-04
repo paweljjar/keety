@@ -20,5 +20,6 @@
 
 namespace keet_module_fs_operations {
     // --- Exported Function Prototypes ---
+#line 4 "fs_operations.keet"
     int64_t main();
 } // namespace keet_module_fs_operations

@@ -22,6 +22,7 @@ namespace keet_module_class_inheritance_constructor {
     struct Boss;
 
     // --- Classes and Structs ---
+#line 1 "class_inheritance_constructor.keet"
     struct Entity {
         int64_t id = 1;
         bool active = true;
@@ -32,6 +33,7 @@ namespace keet_module_class_inheritance_constructor {
         void deactivate();
     };
 
+#line 14 "class_inheritance_constructor.keet"
     struct Player : public Entity {
         std::string name{};
         int64_t score = 0;
@@ -41,6 +43,7 @@ namespace keet_module_class_inheritance_constructor {
         void addScore(int64_t pts);
     };
 
+#line 23 "class_inheritance_constructor.keet"
     struct Boss : public Player {
         int64_t multiplier = 2;
 
@@ -50,5 +53,6 @@ namespace keet_module_class_inheritance_constructor {
     };
 
     // --- Exported Function Prototypes ---
+#line 31 "class_inheritance_constructor.keet"
     int64_t main();
 } // namespace keet_module_class_inheritance_constructor
