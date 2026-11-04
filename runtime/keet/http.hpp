@@ -42,6 +42,34 @@ inline std::string to_lower_ascii(std::string_view s) {
     return out;
 }
 
+inline std::string to_upper_ascii(std::string_view s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char c : s) {
+        out.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+    }
+    return out;
+}
+
+inline std::vector<std::string> split_path(std::string_view path) {
+    std::vector<std::string> segs;
+    size_t i = 0;
+    while (i < path.size()) {
+        while (i < path.size() && path[i] == '/') {
+            ++i;
+        }
+        if (i >= path.size()) {
+            break;
+        }
+        size_t start = i;
+        while (i < path.size() && path[i] != '/') {
+            ++i;
+        }
+        segs.emplace_back(path.substr(start, i - start));
+    }
+    return segs;
+}
+
 inline std::string_view trim_ascii(std::string_view s) {
     size_t start = 0;
     while (start < s.size() && (s[start] == ' ' || s[start] == '\t' || s[start] == '\r' || s[start] == '\n')) {
@@ -313,11 +341,17 @@ struct HttpRequestMessage {
     RequestLine line;
     HeaderMap headers;
     std::unordered_map<std::string, std::string> query;
+    std::unordered_map<std::string, std::string> params;
     std::string body;
     std::string client_ip = "127.0.0.1";
     int client_port = 0;
     bool keep_alive = true;
     bool upgrade_websocket = false;
+
+    [[nodiscard]] std::string param(std::string_view name, std::string_view fallback = "") const {
+        auto it = params.find(std::string(name));
+        return (it != params.end()) ? it->second : std::string(fallback);
+    }
 };
 
 enum class ParseState {
@@ -948,6 +982,296 @@ private:
 };
 
 // ============================================================================
+// Phase 2.1: Radix Tree Router & Parameter Extraction
+// ============================================================================
+
+enum class RouteMatchStatus {
+    Found,
+    MethodNotAllowed,
+    NotFound
+};
+
+template <typename HandlerType>
+struct RouteMatchResult {
+    RouteMatchStatus status = RouteMatchStatus::NotFound;
+    HandlerType handler{};
+    std::unordered_map<std::string, std::string> params;
+    std::vector<std::string> allowed_methods;
+};
+
+template <typename HandlerType>
+struct RadixNode {
+    std::string segment;
+    enum class SegmentType { Static, Param, Wildcard } type = SegmentType::Static;
+    std::string param_name;
+
+    std::unordered_map<std::string, HandlerType> handlers;
+    std::optional<HandlerType> all_handler;
+
+    std::vector<std::unique_ptr<RadixNode<HandlerType>>> static_children;
+    std::unique_ptr<RadixNode<HandlerType>> param_child;
+    std::unique_ptr<RadixNode<HandlerType>> wildcard_child;
+
+    [[nodiscard]] bool has_any_handler() const noexcept {
+        return all_handler.has_value() || !handlers.empty();
+    }
+
+    [[nodiscard]] std::vector<std::string> allowed_methods() const {
+        std::vector<std::string> methods;
+        methods.reserve(handlers.size());
+        for (const auto& [method, _] : handlers) {
+            methods.push_back(method);
+        }
+        std::sort(methods.begin(), methods.end());
+        return methods;
+    }
+
+    std::unique_ptr<RadixNode<HandlerType>> clone() const {
+        auto copy = std::make_unique<RadixNode<HandlerType>>();
+        copy->segment = segment;
+        copy->type = type;
+        copy->param_name = param_name;
+        copy->handlers = handlers;
+        copy->all_handler = all_handler;
+        if (param_child) {
+            copy->param_child = param_child->clone();
+        }
+        if (wildcard_child) {
+            copy->wildcard_child = wildcard_child->clone();
+        }
+        copy->static_children.reserve(static_children.size());
+        for (const auto& child : static_children) {
+            copy->static_children.push_back(child->clone());
+        }
+        return copy;
+    }
+};
+
+template <typename HandlerType>
+class RadixRouter {
+public:
+    RadixRouter() : root_(std::make_unique<RadixNode<HandlerType>>()) {}
+
+    RadixRouter(const RadixRouter& other)
+        : root_(other.root_ ? other.root_->clone() : std::make_unique<RadixNode<HandlerType>>()),
+          route_count_(other.route_count_) {}
+
+    RadixRouter& operator=(const RadixRouter& other) {
+        if (this != &other) {
+            root_ = other.root_ ? other.root_->clone() : std::make_unique<RadixNode<HandlerType>>();
+            route_count_ = other.route_count_;
+        }
+        return *this;
+    }
+
+    RadixRouter(RadixRouter&&) noexcept = default;
+    RadixRouter& operator=(RadixRouter&&) noexcept = default;
+
+    void add(std::string_view method, std::string_view path, HandlerType handler) {
+        std::string norm_method = detail::to_upper_ascii(method);
+        std::vector<std::string> segs = detail::split_path(path);
+
+        RadixNode<HandlerType>* current = root_.get();
+
+        for (const auto& seg : segs) {
+            if (!seg.empty() && seg.front() == ':') {
+                std::string param_name = seg.substr(1);
+                if (!current->param_child) {
+                    current->param_child = std::make_unique<RadixNode<HandlerType>>();
+                    current->param_child->segment = seg;
+                    current->param_child->type = RadixNode<HandlerType>::SegmentType::Param;
+                    current->param_child->param_name = param_name;
+                }
+                current = current->param_child.get();
+            } else if (!seg.empty() && seg.front() == '*') {
+                std::string param_name = (seg.size() > 1) ? seg.substr(1) : "*";
+                if (!current->wildcard_child) {
+                    current->wildcard_child = std::make_unique<RadixNode<HandlerType>>();
+                    current->wildcard_child->segment = seg;
+                    current->wildcard_child->type = RadixNode<HandlerType>::SegmentType::Wildcard;
+                    current->wildcard_child->param_name = param_name;
+                }
+                current = current->wildcard_child.get();
+                break;
+            } else {
+                RadixNode<HandlerType>* found = nullptr;
+                for (auto& child : current->static_children) {
+                    if (child->segment == seg) {
+                        found = child.get();
+                        break;
+                    }
+                }
+                if (!found) {
+                    auto new_child = std::make_unique<RadixNode<HandlerType>>();
+                    new_child->segment = seg;
+                    new_child->type = RadixNode<HandlerType>::SegmentType::Static;
+                    current->static_children.push_back(std::move(new_child));
+                    found = current->static_children.back().get();
+                }
+                current = found;
+            }
+        }
+
+        if (norm_method == "ALL" || norm_method == "*") {
+            current->all_handler = std::move(handler);
+        } else {
+            current->handlers[norm_method] = std::move(handler);
+        }
+        ++route_count_;
+    }
+
+    void all(std::string_view path, HandlerType handler) {
+        add("ALL", path, std::move(handler));
+    }
+
+    void get(std::string_view path, HandlerType handler) {
+        add("GET", path, std::move(handler));
+    }
+
+    void post(std::string_view path, HandlerType handler) {
+        add("POST", path, std::move(handler));
+    }
+
+    void put(std::string_view path, HandlerType handler) {
+        add("PUT", path, std::move(handler));
+    }
+
+    void del(std::string_view path, HandlerType handler) {
+        add("DELETE", path, std::move(handler));
+    }
+
+    void patch(std::string_view path, HandlerType handler) {
+        add("PATCH", path, std::move(handler));
+    }
+
+    void head(std::string_view path, HandlerType handler) {
+        add("HEAD", path, std::move(handler));
+    }
+
+    void options(std::string_view path, HandlerType handler) {
+        add("OPTIONS", path, std::move(handler));
+    }
+
+    RouteMatchResult<HandlerType> match(std::string_view method, std::string_view path) const {
+        RouteMatchResult<HandlerType> result;
+        std::string norm_method = detail::to_upper_ascii(method);
+        std::vector<std::string> segs = detail::split_path(path);
+
+        const RadixNode<HandlerType>* matched_node = nullptr;
+        std::unordered_map<std::string, std::string> params;
+
+        bool found_path = match_recursive(root_.get(), 0, segs, params, matched_node);
+
+        if (!found_path && root_->wildcard_child && root_->wildcard_child->has_any_handler()) {
+            std::string full_path = std::string(path);
+            if (!full_path.empty() && full_path.front() == '/') {
+                full_path.erase(0, 1);
+            }
+            params.clear();
+            params[root_->wildcard_child->param_name] = full_path;
+            matched_node = root_->wildcard_child.get();
+            found_path = true;
+        }
+
+        if (!found_path || !matched_node) {
+            result.status = RouteMatchStatus::NotFound;
+            return result;
+        }
+
+        result.params = std::move(params);
+
+        auto it = matched_node->handlers.find(norm_method);
+        if (it != matched_node->handlers.end()) {
+            result.status = RouteMatchStatus::Found;
+            result.handler = it->second;
+            return result;
+        }
+
+        if (matched_node->all_handler.has_value()) {
+            result.status = RouteMatchStatus::Found;
+            result.handler = *matched_node->all_handler;
+            return result;
+        }
+
+        result.status = RouteMatchStatus::MethodNotAllowed;
+        result.allowed_methods = matched_node->allowed_methods();
+        return result;
+    }
+
+    [[nodiscard]] bool empty() const noexcept {
+        return route_count_ == 0;
+    }
+
+    [[nodiscard]] size_t size() const noexcept {
+        return route_count_;
+    }
+
+private:
+    bool match_recursive(
+        const RadixNode<HandlerType>* node,
+        size_t seg_idx,
+        const std::vector<std::string>& segs,
+        std::unordered_map<std::string, std::string>& params,
+        const RadixNode<HandlerType>*& matched_node
+    ) const {
+        if (seg_idx == segs.size()) {
+            if (node->has_any_handler()) {
+                matched_node = node;
+                return true;
+            }
+            if (node->wildcard_child && node->wildcard_child->has_any_handler()) {
+                params[node->wildcard_child->param_name] = "";
+                matched_node = node->wildcard_child.get();
+                return true;
+            }
+            return false;
+        }
+
+        const std::string& current_seg = segs[seg_idx];
+
+        // 1. Static children (highest priority)
+        for (const auto& child : node->static_children) {
+            if (child->segment == current_seg) {
+                if (match_recursive(child.get(), seg_idx + 1, segs, params, matched_node)) {
+                    return true;
+                }
+            }
+        }
+
+        // 2. Named parameter child
+        if (node->param_child) {
+            params[node->param_child->param_name] = current_seg;
+            if (match_recursive(node->param_child.get(), seg_idx + 1, segs, params, matched_node)) {
+                return true;
+            }
+            params.erase(node->param_child->param_name);
+        }
+
+        // 3. Wildcard child
+        if (node->wildcard_child) {
+            std::string rest;
+            for (size_t i = seg_idx; i < segs.size(); ++i) {
+                if (!rest.empty()) {
+                    rest += "/";
+                }
+                rest += segs[i];
+            }
+            params[node->wildcard_child->param_name] = rest;
+            matched_node = node->wildcard_child.get();
+            return true;
+        }
+
+        return false;
+    }
+
+    std::unique_ptr<RadixNode<HandlerType>> root_;
+    size_t route_count_ = 0;
+};
+
+using HttpHandler = std::function<HttpResponseMessage(const HttpRequestMessage&)>;
+using HttpRouter = RadixRouter<HttpHandler>;
+
+// ============================================================================
 // Server Configuration & Lifecycle Engine
 // ============================================================================
 
@@ -962,8 +1286,6 @@ struct HttpServerConfig {
     int drain_timeout_ms = 3000;
     HttpParserLimits limits{};
 };
-
-using HttpHandler = std::function<HttpResponseMessage(const HttpRequestMessage&)>;
 
 class HttpServer {
 public:
@@ -981,6 +1303,59 @@ public:
     void set_handler(HttpHandler handler) {
         std::lock_guard<std::mutex> lock(handler_mutex_);
         handler_ = std::move(handler);
+    }
+
+    void get(std::string_view path, HttpHandler handler) {
+        std::lock_guard<std::mutex> lock(router_mutex_);
+        router_.get(path, std::move(handler));
+    }
+
+    void post(std::string_view path, HttpHandler handler) {
+        std::lock_guard<std::mutex> lock(router_mutex_);
+        router_.post(path, std::move(handler));
+    }
+
+    void put(std::string_view path, HttpHandler handler) {
+        std::lock_guard<std::mutex> lock(router_mutex_);
+        router_.put(path, std::move(handler));
+    }
+
+    void del(std::string_view path, HttpHandler handler) {
+        std::lock_guard<std::mutex> lock(router_mutex_);
+        router_.del(path, std::move(handler));
+    }
+
+    void patch(std::string_view path, HttpHandler handler) {
+        std::lock_guard<std::mutex> lock(router_mutex_);
+        router_.patch(path, std::move(handler));
+    }
+
+    void head(std::string_view path, HttpHandler handler) {
+        std::lock_guard<std::mutex> lock(router_mutex_);
+        router_.head(path, std::move(handler));
+    }
+
+    void options(std::string_view path, HttpHandler handler) {
+        std::lock_guard<std::mutex> lock(router_mutex_);
+        router_.options(path, std::move(handler));
+    }
+
+    void all(std::string_view path, HttpHandler handler) {
+        std::lock_guard<std::mutex> lock(router_mutex_);
+        router_.all(path, std::move(handler));
+    }
+
+    void use_router(const HttpRouter& r) {
+        std::lock_guard<std::mutex> lock(router_mutex_);
+        router_ = r;
+    }
+
+    [[nodiscard]] HttpRouter& router() noexcept {
+        return router_;
+    }
+
+    [[nodiscard]] const HttpRouter& router() const noexcept {
+        return router_;
     }
 
     /// Starts listening on the configured host/port in a background thread.
@@ -1240,22 +1615,55 @@ private:
 
                 HttpResponseMessage resp;
                 try {
-                    HttpHandler handler_copy;
+                    bool handled = false;
+                    RouteMatchResult<HttpHandler> match_res;
                     {
-                        std::lock_guard<std::mutex> lock(handler_mutex_);
-                        handler_copy = handler_;
+                        std::lock_guard<std::mutex> lock(router_mutex_);
+                        if (!router_.empty()) {
+                            match_res = router_.match(req.line.method, req.line.path);
+                        }
                     }
-                    if (handler_copy) {
-                        resp = handler_copy(req);
-                    } else {
-                        resp.status = 404;
-                        resp.body = "Not Found";
+
+                    if (match_res.status == RouteMatchStatus::Found) {
+                        req.params = std::move(match_res.params);
+                        resp = match_res.handler(req);
+                        handled = true;
+                    } else if (match_res.status == RouteMatchStatus::MethodNotAllowed) {
+                        resp.status = 405;
+                        std::string allow_hdr;
+                        for (size_t i = 0; i < match_res.allowed_methods.size(); ++i) {
+                            if (i > 0) {
+                                allow_hdr += ", ";
+                            }
+                            allow_hdr += match_res.allowed_methods[i];
+                        }
+                        resp.headers.set("Allow", allow_hdr);
+                        resp.headers.set("Content-Type", "text/plain; charset=utf-8");
+                        resp.body = "Method Not Allowed";
+                        handled = true;
+                    }
+
+                    if (!handled) {
+                        HttpHandler handler_copy;
+                        {
+                            std::lock_guard<std::mutex> lock(handler_mutex_);
+                            handler_copy = handler_;
+                        }
+                        if (handler_copy) {
+                            resp = handler_copy(req);
+                        } else {
+                            resp.status = 404;
+                            resp.headers.set("Content-Type", "text/plain; charset=utf-8");
+                            resp.body = "Cannot " + req.line.method + " " + req.line.path;
+                        }
                     }
                 } catch (const std::exception& ex) {
                     resp.status = 500;
+                    resp.headers.set("Content-Type", "text/plain; charset=utf-8");
                     resp.body = std::string("Internal Server Error: ") + ex.what();
                 } catch (...) {
                     resp.status = 500;
+                    resp.headers.set("Content-Type", "text/plain; charset=utf-8");
                     resp.body = "Internal Server Error";
                 }
 
@@ -1299,6 +1707,9 @@ private:
     HttpThreadPool thread_pool_;
     HttpHandler handler_;
     std::mutex handler_mutex_;
+
+    HttpRouter router_;
+    std::mutex router_mutex_;
 
     net::detail::socket_t listen_fd_ = net::detail::kInvalidSocket;
     int bound_port_ = 0;
