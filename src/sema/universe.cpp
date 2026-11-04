@@ -106,6 +106,8 @@ bool isStdlibModule(std::string_view name) noexcept {
            name == "time" || name == "std.time" || name == "keet.time" ||
            name == "json" || name == "std.json" || name == "keet.json" ||
            name == "net" || name == "std.net" || name == "keet.net" ||
+           name == "net.http" || name == "std.net.http" || name == "keet.net.http" ||
+           name == "http" || name == "std.http" || name == "keet.http" ||
            name == "crypto" || name == "std.crypto" || name == "keet.crypto" || name == "crypto.hash" ||
            name == "test" || name == "std.test" || name == "keet.test";
 }
@@ -479,6 +481,12 @@ void populateNetModuleScope(Scope& netScope) {
     makeFn("udpSendTo");
     makeFn("udpRecvFrom");
     makeFn("udpClose");
+
+    // Submodules: net.http
+    auto httpModSym = std::make_shared<Symbol>("http", SymbolKind::Module, span);
+    httpModSym->setExported(true);
+    httpModSym->setConst(true);
+    netScope.define(httpModSym, false);
 }
 
 void populateTestModuleScope(Scope& testScope) {
@@ -564,6 +572,51 @@ void populateCryptoModuleScope(Scope& cryptoScope) {
     makeFn("decodeQr");
 }
 
+void populateNetHttpModuleScope(Scope& httpScope) {
+    diag::SourceSpan span{};
+
+    auto makeFn = [&](const char* name) {
+        auto sym = std::make_shared<Symbol>(name, SymbolKind::Function, span);
+        sym->setExported(true);
+        sym->setConst(true);
+        httpScope.define(sym, false);
+    };
+
+    auto makeType = [&](const char* name) {
+        auto sym = std::make_shared<Symbol>(name, SymbolKind::Class, span);
+        sym->setExported(true);
+        sym->setIsType(true);
+        httpScope.define(sym, false);
+    };
+
+    // Types
+    makeType("Request");
+    makeType("Response");
+    makeType("WebSocket");
+    makeType("HttpServer");
+    makeType("App");
+    makeType("Server");
+    makeType("Schema");
+    makeType("SchemaValidator");
+
+    // Server / App creation
+    makeFn("app");
+    makeFn("createServer");
+
+    // Standard Middlewares
+    makeFn("cors");
+    makeFn("json");
+    makeFn("jsonParser");
+    makeFn("urlencoded");
+    makeFn("logger");
+    makeFn("staticDir");
+    makeFn("recover");
+
+    // Schema Validation
+    makeFn("schema");
+    makeFn("validate");
+}
+
 std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, const std::shared_ptr<Scope>& universe) {
     auto scope = std::make_shared<Scope>(ScopeKind::Module, universe);
     if (moduleName == "io" || moduleName == "std.io" || moduleName == "keet.io") {
@@ -580,6 +633,9 @@ std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, cons
         populateJsonModuleScope(*scope);
     } else if (moduleName == "net" || moduleName == "std.net" || moduleName == "keet.net") {
         populateNetModuleScope(*scope);
+    } else if (moduleName == "net.http" || moduleName == "std.net.http" || moduleName == "keet.net.http" ||
+               moduleName == "http" || moduleName == "std.http" || moduleName == "keet.http") {
+        populateNetHttpModuleScope(*scope);
     } else if (moduleName == "crypto" || moduleName == "std.crypto" || moduleName == "keet.crypto" || moduleName == "crypto.hash") {
         populateCryptoModuleScope(*scope);
     } else if (moduleName == "test" || moduleName == "std.test" || moduleName == "keet.test") {

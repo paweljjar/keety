@@ -78,6 +78,12 @@ const std::vector<std::string> kCryptoCandidates = {
     "EncryptedPayload", "QrCode", "Hasher", "Hmac"
 };
 
+const std::vector<std::string> kHttpCandidates = {
+    "app", "createServer", "cors", "json", "jsonParser", "urlencoded",
+    "logger", "staticDir", "recover", "schema", "validate",
+    "Request", "Response", "WebSocket", "HttpServer", "App", "Server", "Schema", "SchemaValidator"
+};
+
 const std::vector<std::string> kColorCandidates = {
     "Default", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White", "Gray"
 };
@@ -4698,6 +4704,73 @@ TypePtr TypeChecker::checkCryptoDirectCall(const ast::IdentExpr* callee, const a
     return checkCryptoMemberCall(&synthetic, call, scope);
 }
 
+TypePtr TypeChecker::checkHttpMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!member || !call) return Type::unknownType();
+    const std::string& name = member->getMemberName();
+
+    auto checkArgCountMinMax = [&](size_t minExpected, size_t maxExpected) -> bool {
+        size_t count = call->getArgs().size();
+        if (count < minExpected || count > maxExpected) {
+            if (emitter_) {
+                std::string expStr = (minExpected == maxExpected)
+                    ? std::to_string(minExpected)
+                    : std::to_string(minExpected) + " to " + std::to_string(maxExpected);
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function 'http." + name + "' expects " + expStr +
+                    " arguments, but got " + std::to_string(count),
+                    call->getSpan().start).withLabel(call->getSpan(), "wrong argument count"));
+            }
+            hasErrors_ = true;
+            return false;
+        }
+        return true;
+    };
+
+    for (const auto& arg : call->getArgs()) {
+        if (arg.value) inferType(*arg.value, scope);
+    }
+
+    if (name == "app" || name == "createServer") {
+        checkArgCountMinMax(0, 2);
+        return std::make_shared<CustomType>("HttpServer");
+    }
+    if (name == "cors" || name == "json" || name == "jsonParser" ||
+        name == "urlencoded" || name == "logger" || name == "recover") {
+        checkArgCountMinMax(0, 1);
+        return Type::unknownType();
+    }
+    if (name == "staticDir") {
+        checkArgCountMinMax(1, 2);
+        return Type::unknownType();
+    }
+    if (name == "schema") {
+        checkArgCountMinMax(1, 1);
+        return std::make_shared<CustomType>("SchemaValidator");
+    }
+    if (name == "validate") {
+        checkArgCountMinMax(1, 1);
+        return Type::unknownType();
+    }
+
+    if (emitter_) {
+        auto d = diag::Diagnostic::makeError(
+            diag::ErrorCode::InvalidMemberAccess,
+            "module 'http' has no member named '" + name + "'",
+            member->getSpan().start).withLabel(member->getSpan(), "unknown http member");
+        attachMemberSuggestions(d, name, kHttpCandidates);
+        emitter_->report(d);
+    }
+    hasErrors_ = true;
+    return Type::unknownType();
+}
+
+TypePtr TypeChecker::checkHttpDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!callee || !call) return Type::unknownType();
+    ast::MemberExpr synthetic(callee->getSpan(), nullptr, callee->getName());
+    return checkHttpMemberCall(&synthetic, call, scope);
+}
+
 bool TypeChecker::checkZeroCoercion(const parser::ModuleAST& module, sema::Scope* rootScope) {
     return checkTypes(module, rootScope);
 }
@@ -5064,6 +5137,47 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                                     "symbol '" + symItem.originalName + "' is not exported by module 'crypto'",
                                     symItem.span.start).withLabel(symItem.span, "symbol not exported");
                                 attachMemberSuggestions(d, symItem.originalName, kCryptoCandidates);
+                                emitter_->report(d);
+                            }
+                            hasErrors_ = true;
+                        }
+                    }
+                }
+            } else if (modPath == "net.http" || modPath == "std.net.http" || modPath == "keet.net.http" ||
+                       modPath == "http" || modPath == "std.http" || modPath == "keet.http") {
+                if (importDecl->getSymbols().empty()) {
+                    std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "http";
+                    if (!targetScope->lookupCurrent(boundName)) {
+                        auto modSym = std::make_shared<sema::Symbol>(boundName, sema::SymbolKind::Module, importDecl->getSpan());
+                        modSym->setExported(importDecl->isReExported());
+                        auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, modSym, emitter_);
+                        if (!res.success) hasErrors_ = true;
+                    }
+                } else {
+                    auto httpScope = sema::createStdlibModuleScope("net.http");
+                    for (const auto& symItem : importDecl->getSymbols()) {
+                        auto exportedSym = httpScope->lookupCurrent(symItem.originalName);
+                        if (exportedSym) {
+                            std::string importAsName = symItem.getEffectiveName();
+                            if (!targetScope->lookupCurrent(importAsName)) {
+                                auto importedSym = std::make_shared<sema::Symbol>(
+                                    importAsName, exportedSym->getKind(), symItem.span
+                                );
+                                importedSym->setExported(importDecl->isReExported());
+                                importedSym->setIsType(exportedSym->isType());
+                                if (exportedSym->isConstant()) {
+                                    importedSym->setConst(true);
+                                }
+                                auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, importedSym, emitter_);
+                                if (!res.success) hasErrors_ = true;
+                            }
+                        } else {
+                            if (emitter_) {
+                                auto d = diag::Diagnostic::makeError(
+                                    diag::ErrorCode::SymbolNotExported,
+                                    "symbol '" + symItem.originalName + "' is not exported by module 'http'",
+                                    symItem.span.start).withLabel(symItem.span, "symbol not exported");
+                                attachMemberSuggestions(d, symItem.originalName, kHttpCandidates);
                                 emitter_->report(d);
                             }
                             hasErrors_ = true;
@@ -6155,6 +6269,29 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     }
                     return checkCryptoMemberCall(member, call, scope);
                 }
+                if (objIdent->getName() == "http" || (sym && sym->isModule() && sym->getName() == "http")) {
+                    if (!sym) {
+                        if (emitter_) {
+                            auto d = diag::Diagnostic::makeError(
+                                diag::ErrorCode::UndeclaredIdentifier,
+                                "undeclared identifier '" + objIdent->getName() + "'",
+                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                            d.withHelp("add 'import net.http;' at the top of the file");
+                            emitter_->report(d);
+                        }
+                        hasErrors_ = true;
+                        return Type::unknownType();
+                    }
+                    return checkHttpMemberCall(member, call, scope);
+                }
+            }
+
+            if (const auto* nestedMember = dynamic_cast<const ast::MemberExpr*>(member->getObject())) {
+                if (const auto* baseIdent = dynamic_cast<const ast::IdentExpr*>(nestedMember->getObject())) {
+                    if (baseIdent->getName() == "net" && nestedMember->getMemberName() == "http") {
+                        return checkHttpMemberCall(member, call, scope);
+                    }
+                }
             }
 
             auto objType = member->getObject() ? inferType(*member->getObject(), scope) : Type::unknownType();
@@ -6264,6 +6401,70 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     const std::string& m = member->getMemberName();
                     if (m == "update" || m == "reset") return Type::voidType();
                     if (m == "digestHex") return Type::stringType();
+                } else if (clsName == "HttpServer" || clsName == "http.HttpServer" || clsName == "net.http.HttpServer" ||
+                           clsName == "App" || clsName == "http.App" || clsName == "Server" || clsName == "http.Server") {
+                    const std::string& m = member->getMemberName();
+                    if (m == "use" || m == "get" || m == "post" || m == "put" ||
+                        m == "delete" || m == "del" || m == "patch" || m == "head" ||
+                        m == "options" || m == "ws" || m == "mount" || m == "route") {
+                        return objType;
+                    }
+                    if (m == "listen") {
+                        return objType;
+                    }
+                    if (m == "stop") {
+                        return Type::voidType();
+                    }
+                    if (m == "port") {
+                        return Type::intType();
+                    }
+                    if (m == "isRunning") {
+                        return Type::boolType();
+                    }
+                } else if (clsName == "Request" || clsName == "http.Request" || clsName == "net.http.Request") {
+                    const std::string& m = member->getMemberName();
+                    if (m == "header" || m == "param" || m == "queryParam" || m == "cookie" || m == "ip" || m == "json") {
+                        return Type::stringType();
+                    }
+                    if (m == "hasHeader" || m == "hasParam" || m == "hasCookie" || m == "isSecure") {
+                        return Type::boolType();
+                    }
+                    if (m == "context") {
+                        return Type::unknownType();
+                    }
+                } else if (clsName == "Response" || clsName == "http.Response" || clsName == "net.http.Response") {
+                    const std::string& m = member->getMemberName();
+                    if (m == "status" || m == "header" || m == "setHeader" || m == "cookie" ||
+                        m == "clearCookie" || m == "type" || m == "send" || m == "json" ||
+                        m == "text" || m == "html" || m == "redirect" || m == "sendFile" ||
+                        m == "stream" || m == "end") {
+                        return objType;
+                    }
+                } else if (clsName == "WebSocket" || clsName == "http.WebSocket" || clsName == "net.http.WebSocket") {
+                    const std::string& m = member->getMemberName();
+                    if (m == "send" || m == "sendBinary" || m == "ping" || m == "pong" || m == "isOpen") {
+                        return Type::boolType();
+                    }
+                    if (m == "close") {
+                        return Type::voidType();
+                    }
+                    if (m == "onMessage" || m == "onClose" || m == "onError") {
+                        return objType;
+                    }
+                    if (m == "id" || m == "remoteIp") {
+                        return Type::stringType();
+                    }
+                } else if (clsName == "SchemaValidator" || clsName == "http.SchemaValidator" || clsName == "net.http.SchemaValidator") {
+                    const std::string& m = member->getMemberName();
+                    if (m == "validate") {
+                        return Type::boolType();
+                    }
+                    if (m == "errors") {
+                        return Type::array(Type::stringType());
+                    }
+                    if (m == "errorString") {
+                        return Type::stringType();
+                    }
                 }
                 auto clsSym = scope.lookup(clsName);
                 if (clsSym && clsSym->getAstNode()) {
@@ -6438,6 +6639,11 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     name == "encodeCode128" || name == "encodeCode128Svg" || name == "encodeCode128Ascii" ||
                     name == "decodeCode128" || name == "generateQr" || name == "decodeQr") {
                     return checkCryptoDirectCall(calleeIdent, call, scope);
+                }
+                if (name == "app" || name == "createServer" || name == "cors" ||
+                    name == "jsonParser" || name == "urlencoded" || name == "logger" ||
+                    name == "staticDir" || name == "recover" || (name == "validate" && sym && sym->isExported())) {
+                    return checkHttpDirectCall(calleeIdent, call, scope);
                 }
             }
             const ast::FnDecl* fnDecl = nullptr;
@@ -7387,6 +7593,19 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 if (fName == "update") return Type::function({Type::stringType()}, Type::voidType());
                 if (fName == "digestHex") return Type::function({}, Type::stringType());
                 if (fName == "reset") return Type::function({}, Type::voidType());
+            } else if (clsName == "Request" || clsName == "http.Request" || clsName == "net.http.Request") {
+                const std::string& fName = member->getMemberName();
+                if (fName == "method" || fName == "path" || fName == "url" || fName == "body" || fName == "remoteIp") {
+                    return Type::stringType();
+                }
+                if (fName == "headers" || fName == "params" || fName == "query" || fName == "cookies") {
+                    return Type::map(Type::stringType(), Type::stringType());
+                }
+            } else if (clsName == "WebSocket" || clsName == "http.WebSocket" || clsName == "net.http.WebSocket") {
+                const std::string& fName = member->getMemberName();
+                if (fName == "path" || fName == "id" || fName == "remoteIp") {
+                    return Type::stringType();
+                }
             }
             auto clsSym = scope.lookup(clsName);
             if (clsSym && clsSym->getAstNode()) {

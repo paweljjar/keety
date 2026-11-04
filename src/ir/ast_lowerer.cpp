@@ -132,6 +132,15 @@ std::unique_ptr<Module> AstLowerer::lower_module(const parser::ModuleAST& module
                 for (const auto& s : imp->getSymbols()) {
                     imported_crypto_symbols_.insert(s.getEffectiveName());
                 }
+            } else if (p == "net.http" || p == "std.net.http" || p == "keet.net.http" ||
+                       p == "http" || p == "std.http" || p == "keet.http") {
+                has_http_import_ = true;
+                if (!imp->getModuleAlias().empty()) {
+                    http_aliases_.insert(imp->getModuleAlias());
+                }
+                for (const auto& s : imp->getSymbols()) {
+                    imported_http_symbols_.insert(s.getEffectiveName());
+                }
             }
         } else if (const auto* var_decl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
             typechecker::TypePtr type = typechecker::Type::fromAnnotation(var_decl->getType());

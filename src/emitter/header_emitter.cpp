@@ -331,6 +331,16 @@ std::string HeaderEmitter::to_cpp_type(const ast::TypeAnnotation* type, const st
              (cust->getName() == "EncryptedPayload" || cust->getName() == "QrCode" || cust->getName() == "Hasher" || cust->getName() == "Hmac"))) {
             return "::keet::crypto::" + cust->getName();
         }
+        if ((cust->isQualified() && (cust->getModuleQualifier() == "http" || cust->getModuleQualifier() == "net.http") &&
+             (cust->getName() == "Request" || cust->getName() == "Response" || cust->getName() == "WebSocket" ||
+              cust->getName() == "HttpServer" || cust->getName() == "App" || cust->getName() == "Server" ||
+              cust->getName() == "Schema" || cust->getName() == "SchemaValidator")) ||
+            (!cust->isQualified() &&
+             (cust->getName() == "Request" || cust->getName() == "Response" || cust->getName() == "WebSocket" ||
+              cust->getName() == "HttpServer" || cust->getName() == "App" || cust->getName() == "Server" ||
+              cust->getName() == "Schema" || cust->getName() == "SchemaValidator"))) {
+            return "::keet::net::http::" + cust->getName();
+        }
         std::string prefix;
         if (cust->isQualified()) {
             prefix = make_module_namespace(cust->getModuleQualifier()) + "::";
@@ -417,6 +427,13 @@ std::string HeaderEmitter::to_cpp_type(const typechecker::TypePtr& type, const s
             if (n == "QrCode" || n == "crypto.QrCode") return "::keet::crypto::QrCode";
             if (n == "Hasher" || n == "crypto.Hasher") return "::keet::crypto::Hasher";
             if (n == "Hmac" || n == "crypto.Hmac") return "::keet::crypto::Hmac";
+            if (n == "Request" || n == "http.Request" || n == "net.http.Request") return "::keet::net::http::Request";
+            if (n == "Response" || n == "http.Response" || n == "net.http.Response") return "::keet::net::http::Response";
+            if (n == "WebSocket" || n == "http.WebSocket" || n == "net.http.WebSocket") return "::keet::net::http::WebSocket";
+            if (n == "HttpServer" || n == "http.HttpServer" || n == "net.http.HttpServer" ||
+                n == "App" || n == "http.App" || n == "Server" || n == "http.Server") return "::keet::net::http::HttpServer";
+            if (n == "Schema" || n == "http.Schema" || n == "net.http.Schema") return "::keet::net::http::Schema";
+            if (n == "SchemaValidator" || n == "http.SchemaValidator" || n == "net.http.SchemaValidator") return "::keet::net::http::SchemaValidator";
         }
         return cust ? cust->getName() : "auto";
     }

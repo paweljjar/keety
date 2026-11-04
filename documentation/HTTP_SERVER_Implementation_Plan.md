@@ -210,13 +210,13 @@ Part 5: KeetScript Compiler & Submodule Integration (net.http)
 
 ### Part 5: KeetScript Compiler & Submodule Integration (`net.http`)
 
-#### Phase 5.1: Compiler Semantic Registration & Native Bindings
-- **Task 5.1.1: Universe Scope & Submodule Symbol Registration**
-  - **Subtask 5.1.1.1:** Register `net.http` submodule in `src/sema/universe.cpp` and `src/resolver/module_path_resolver.cpp`.
-  - **Subtask 5.1.1.2:** Expose standard types and functions to KeetScript type checker: `http.app()`, `http.createServer()`, `http.Request`, `http.Response`, `http.WebSocket`, `http.cors()`, `http.jsonParser()`, `http.validate()`.
-- **Task 5.1.2: Header & C++ Emitter Integration**
-  - **Subtask 5.1.2.1:** Include `keet/net.hpp` and declare `keet::net::http` namespace in generated code.
-  - **Subtask 5.1.2.2:** Ensure clean emission of lambda handlers and callback chains without dangling references.
+#### Phase 5.1: Compiler Semantic Registration & Native Bindings [x]
+- **Task 5.1.1: Universe Scope & Submodule Symbol Registration** [x]
+  - **Subtask 5.1.1.1:** Register `net.http` submodule in `src/sema/universe.cpp` and `src/resolver/module_path_resolver.cpp`. [x]
+  - **Subtask 5.1.1.2:** Expose standard types and functions to KeetScript type checker: `http.app()`, `http.createServer()`, `http.Request`, `http.Response`, `http.WebSocket`, `http.cors()`, `http.jsonParser()`, `http.validate()`. [x]
+- **Task 5.1.2: Header & C++ Emitter Integration** [x]
+  - **Subtask 5.1.2.1:** Include `keet/net.hpp` and declare `keet::net::http` namespace in generated code. [x]
+  - **Subtask 5.1.2.2:** Ensure clean emission of lambda handlers and callback chains without dangling references. [x]
 
 #### Phase 5.2: Verification, Conformance, Benchmarks & Documentation
 - **Task 5.2.1: Conformance Test Suite & Integration Tests**
