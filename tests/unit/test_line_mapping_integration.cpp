@@ -2,6 +2,7 @@
 #include <keety/driver/cli_driver.hpp>
 #include <keety/driver/toolchain_driver.hpp>
 
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -99,7 +100,11 @@ TEST_CASE("Native debugger LLDB resolves breakpoints in .keet source files", "[l
 
     // Verify breakpoint on line 3 (return y + 10;) resolves via LLDB batch mode
     std::string lldb_cmd = "lldb -b -o \"breakpoint set -f target.keet -l 3\" \"" + bin_path.string() + "\" 2>&1";
+#if defined(_WIN32)
+    FILE* pipe = _popen(lldb_cmd.c_str(), "r");
+#else
     FILE* pipe = popen(lldb_cmd.c_str(), "r");
+#endif
     REQUIRE(pipe != nullptr);
 
     char buffer[256];
@@ -107,14 +112,15 @@ TEST_CASE("Native debugger LLDB resolves breakpoints in .keet source files", "[l
     while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
         lldb_output += buffer;
     }
+#if defined(_WIN32)
+    int raw_status = _pclose(pipe);
+    int status = raw_status;
+#else
     int raw_status = pclose(pipe);
     int status = 0;
-#if !defined(_WIN32)
     if (WIFEXITED(raw_status)) {
         status = WEXITSTATUS(raw_status);
     }
-#else
-    status = raw_status;
 #endif
 
     CHECK(status == 0);
