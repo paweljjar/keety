@@ -2690,61 +2690,7 @@ enum class WebSocketState {
     Closed
 };
 
-class WebSocket {
-public:
-    net::detail::socket_t socket_fd = net::detail::kInvalidSocket;
-    WebSocketState state = WebSocketState::Connecting;
-    std::string path;
-    std::string protocol;
-    std::string pending_buffer;
-    std::unordered_map<std::string, std::string> params;
-    std::unordered_map<std::string, std::string> query;
-    HeaderMap headers;
-
-    WebSocket() = default;
-    WebSocket(net::detail::socket_t fd,
-              std::string req_path,
-              std::string subproto = "",
-              std::unordered_map<std::string, std::string> route_params = {},
-              std::unordered_map<std::string, std::string> query_params = {},
-              HeaderMap hdrs = {})
-        : socket_fd(fd),
-          state(WebSocketState::Open),
-          path(std::move(req_path)),
-          protocol(std::move(subproto)),
-          params(std::move(route_params)),
-          query(std::move(query_params)),
-          headers(std::move(hdrs)) {}
-
-    [[nodiscard]] bool is_open() const noexcept {
-        return state == WebSocketState::Open && socket_fd != net::detail::kInvalidSocket;
-    }
-
-    [[nodiscard]] net::detail::socket_t socket() const noexcept {
-        return socket_fd;
-    }
-
-    [[nodiscard]] std::string param(std::string_view name, std::string_view fallback = "") const {
-        auto it = params.find(std::string(name));
-        return (it != params.end()) ? it->second : std::string(fallback);
-    }
-
-    [[nodiscard]] std::string query_param(std::string_view name, std::string_view fallback = "") const {
-        auto it = query.find(std::string(name));
-        return (it != query.end()) ? it->second : std::string(fallback);
-    }
-
-    void close(uint16_t code = 1000, std::string_view reason = "") {
-        (void)code;
-        (void)reason;
-        if (state == WebSocketState::Closed) return;
-        state = WebSocketState::Closed;
-        if (socket_fd != net::detail::kInvalidSocket) {
-            net::detail::close_raw_socket(socket_fd);
-            socket_fd = net::detail::kInvalidSocket;
-        }
-    }
-};
+class WebSocket;
 
 using WebSocketHandler = std::function<void(std::shared_ptr<WebSocket>)>;
 
@@ -2828,6 +2774,691 @@ inline ssize_t socket_recv(net::detail::socket_t fd, char* buf, size_t max_len) 
 }
 
 } // namespace detail
+
+// ============================================================================
+// Phase 4.2: WebSocket Framing Engine & Client Abstraction (RFC 6455)
+// ============================================================================
+
+enum class WebSocketOpcode : uint8_t {
+    Continuation = 0x0,
+    Text         = 0x1,
+    Binary       = 0x2,
+    Close        = 0x8,
+    Ping         = 0x9,
+    Pong         = 0xA
+};
+
+[[nodiscard]] inline constexpr bool is_control_opcode(WebSocketOpcode op) noexcept {
+    return (static_cast<uint8_t>(op) & 0x08) != 0;
+}
+
+/// Validates whether a byte sequence is well-formed UTF-8 according to RFC 3629.
+[[nodiscard]] inline bool is_valid_utf8(std::string_view sv) noexcept {
+    const auto* s = reinterpret_cast<const uint8_t*>(sv.data());
+    size_t len = sv.size();
+    size_t i = 0;
+    while (i < len) {
+        if (s[i] <= 0x7F) {
+            i++;
+        } else if ((s[i] & 0xE0) == 0xC0) {
+            if (i + 1 >= len || (s[i + 1] & 0xC0) != 0x80) return false;
+            if (s[i] < 0xC2) return false; // Overlong
+            i += 2;
+        } else if ((s[i] & 0xF0) == 0xE0) {
+            if (i + 2 >= len || (s[i + 1] & 0xC0) != 0x80 || (s[i + 2] & 0xC0) != 0x80) return false;
+            if (s[i] == 0xE0 && s[i + 1] < 0xA0) return false; // Overlong
+            if (s[i] == 0xED && s[i + 1] >= 0xA0) return false; // UTF-16 surrogates
+            i += 3;
+        } else if ((s[i] & 0xF8) == 0xF0) {
+            if (i + 3 >= len || (s[i + 1] & 0xC0) != 0x80 || (s[i + 2] & 0xC0) != 0x80 || (s[i + 3] & 0xC0) != 0x80) return false;
+            if (s[i] == 0xF0 && s[i + 1] < 0x90) return false; // Overlong
+            if (s[i] == 0xF4 && s[i + 1] > 0x8F) return false; // > U+10FFFF
+            if (s[i] > 0xF4) return false;
+            i += 4;
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Serializes a WebSocket frame according to RFC 6455 §5.2.
+/// Server-to-client frames MUST NOT be masked (masked = false).
+/// Client simulation / testing can set masked = true.
+inline std::string serialize_websocket_frame(
+    WebSocketOpcode opcode,
+    std::string_view payload,
+    bool masked = false,
+    std::optional<std::array<uint8_t, 4>> custom_mask = std::nullopt,
+    bool fin = true
+) {
+    std::string frame;
+    frame.reserve(14 + payload.size());
+
+    uint8_t b0 = (fin ? 0x80 : 0x00) | (static_cast<uint8_t>(opcode) & 0x0F);
+    frame.push_back(static_cast<char>(b0));
+
+    uint8_t b1 = masked ? 0x80 : 0x00;
+    size_t len = payload.size();
+
+    if (len <= 125) {
+        b1 |= static_cast<uint8_t>(len);
+        frame.push_back(static_cast<char>(b1));
+    } else if (len <= 0xFFFF) {
+        b1 |= 126;
+        frame.push_back(static_cast<char>(b1));
+        frame.push_back(static_cast<char>((len >> 8) & 0xFF));
+        frame.push_back(static_cast<char>(len & 0xFF));
+    } else {
+        b1 |= 127;
+        frame.push_back(static_cast<char>(b1));
+        uint64_t l64 = static_cast<uint64_t>(len);
+        for (int i = 7; i >= 0; --i) {
+            frame.push_back(static_cast<char>((l64 >> (i * 8)) & 0xFF));
+        }
+    }
+
+    if (masked) {
+        std::array<uint8_t, 4> mask{};
+        if (custom_mask.has_value()) {
+            mask = *custom_mask;
+        } else {
+            static std::atomic<uint32_t> seed{0x12345678};
+            uint32_t s = seed.fetch_add(0x9e3779b9, std::memory_order_relaxed);
+            mask = {
+                static_cast<uint8_t>((s >> 24) & 0xFF),
+                static_cast<uint8_t>((s >> 16) & 0xFF),
+                static_cast<uint8_t>((s >> 8) & 0xFF),
+                static_cast<uint8_t>(s & 0xFF)
+            };
+            if (mask[0] == 0 && mask[1] == 0 && mask[2] == 0 && mask[3] == 0) {
+                mask[0] = 0x42;
+            }
+        }
+
+        for (size_t i = 0; i < 4; ++i) {
+            frame.push_back(static_cast<char>(mask[i]));
+        }
+        for (size_t i = 0; i < len; ++i) {
+            frame.push_back(static_cast<char>(payload[i] ^ mask[i % 4]));
+        }
+    } else {
+        frame.append(payload);
+    }
+
+    return frame;
+}
+
+struct WebSocketFrame {
+    bool fin = true;
+    bool rsv1 = false;
+    bool rsv2 = false;
+    bool rsv3 = false;
+    WebSocketOpcode opcode = WebSocketOpcode::Text;
+    bool masked = false;
+    std::array<uint8_t, 4> mask_key{};
+    std::string payload;
+};
+
+enum class FrameParseStatus {
+    Ok,
+    NeedMoreData,
+    ProtocolError
+};
+
+struct FrameParseResult {
+    FrameParseStatus status = FrameParseStatus::NeedMoreData;
+    WebSocketFrame frame;
+    size_t bytes_consumed = 0;
+    uint16_t error_code = 1002;
+    std::string error_message;
+};
+
+/// Parses a single RFC 6455 WebSocket frame from buffer.
+inline FrameParseResult parse_websocket_frame(
+    std::string_view buf,
+    size_t max_allowed_size = 64 * 1024 * 1024
+) {
+    FrameParseResult result;
+    if (buf.size() < 2) {
+        result.status = FrameParseStatus::NeedMoreData;
+        return result;
+    }
+
+    uint8_t b0 = static_cast<uint8_t>(buf[0]);
+    bool fin = (b0 & 0x80) != 0;
+    bool rsv1 = (b0 & 0x40) != 0;
+    bool rsv2 = (b0 & 0x20) != 0;
+    bool rsv3 = (b0 & 0x10) != 0;
+
+    if (rsv1 || rsv2 || rsv3) {
+        result.status = FrameParseStatus::ProtocolError;
+        result.error_code = 1002;
+        result.error_message = "RSV bits must be 0";
+        return result;
+    }
+
+    uint8_t op_val = b0 & 0x0F;
+    if (op_val != 0x0 && op_val != 0x1 && op_val != 0x2 &&
+        op_val != 0x8 && op_val != 0x9 && op_val != 0xA) {
+        result.status = FrameParseStatus::ProtocolError;
+        result.error_code = 1002;
+        result.error_message = "Unknown or unsupported opcode: " + std::to_string(op_val);
+        return result;
+    }
+
+    auto opcode = static_cast<WebSocketOpcode>(op_val);
+    bool is_control = (op_val >= 0x8);
+
+    if (is_control && !fin) {
+        result.status = FrameParseStatus::ProtocolError;
+        result.error_code = 1002;
+        result.error_message = "Control frames must not be fragmented";
+        return result;
+    }
+
+    uint8_t b1 = static_cast<uint8_t>(buf[1]);
+    bool masked = (b1 & 0x80) != 0;
+    uint8_t len7 = b1 & 0x7F;
+
+    if (is_control && len7 > 125) {
+        result.status = FrameParseStatus::ProtocolError;
+        result.error_code = 1002;
+        result.error_message = "Control frame payload exceeds 125 bytes";
+        return result;
+    }
+
+    size_t header_len = 2;
+    uint64_t payload_len = 0;
+
+    if (len7 <= 125) {
+        payload_len = len7;
+    } else if (len7 == 126) {
+        header_len += 2;
+        if (buf.size() < header_len) {
+            result.status = FrameParseStatus::NeedMoreData;
+            return result;
+        }
+        payload_len = (static_cast<uint64_t>(static_cast<uint8_t>(buf[2])) << 8) |
+                      static_cast<uint64_t>(static_cast<uint8_t>(buf[3]));
+        if (payload_len < 126) {
+            result.status = FrameParseStatus::ProtocolError;
+            result.error_code = 1002;
+            result.error_message = "Non-minimal extended length 126 used for length < 126";
+            return result;
+        }
+    } else { // len7 == 127
+        header_len += 8;
+        if (buf.size() < header_len) {
+            result.status = FrameParseStatus::NeedMoreData;
+            return result;
+        }
+        if ((static_cast<uint8_t>(buf[2]) & 0x80) != 0) {
+            result.status = FrameParseStatus::ProtocolError;
+            result.error_code = 1002;
+            result.error_message = "Most significant bit of 64-bit length must be 0";
+            return result;
+        }
+        payload_len = 0;
+        for (size_t i = 0; i < 8; ++i) {
+            payload_len = (payload_len << 8) | static_cast<uint64_t>(static_cast<uint8_t>(buf[2 + i]));
+        }
+        if (payload_len <= 0xFFFF) {
+            result.status = FrameParseStatus::ProtocolError;
+            result.error_code = 1002;
+            result.error_message = "Non-minimal extended length 127 used for length <= 65535";
+            return result;
+        }
+    }
+
+    if (payload_len > max_allowed_size) {
+        result.status = FrameParseStatus::ProtocolError;
+        result.error_code = 1009; // Message Too Big
+        result.error_message = "Frame payload length exceeds maximum allowed limit";
+        return result;
+    }
+
+    std::array<uint8_t, 4> mask_key{};
+    if (masked) {
+        if (buf.size() < header_len + 4) {
+            result.status = FrameParseStatus::NeedMoreData;
+            return result;
+        }
+        for (size_t i = 0; i < 4; ++i) {
+            mask_key[i] = static_cast<uint8_t>(buf[header_len + i]);
+        }
+        header_len += 4;
+    }
+
+    if (buf.size() < header_len + payload_len) {
+        result.status = FrameParseStatus::NeedMoreData;
+        return result;
+    }
+
+    result.frame.fin = fin;
+    result.frame.rsv1 = rsv1;
+    result.frame.rsv2 = rsv2;
+    result.frame.rsv3 = rsv3;
+    result.frame.opcode = opcode;
+    result.frame.masked = masked;
+    result.frame.mask_key = mask_key;
+
+    result.frame.payload.resize(payload_len);
+    const char* src = buf.data() + header_len;
+    if (masked) {
+        for (size_t i = 0; i < payload_len; ++i) {
+            result.frame.payload[i] = src[i] ^ mask_key[i % 4];
+        }
+    } else {
+        result.frame.payload.assign(src, payload_len);
+    }
+
+    result.bytes_consumed = header_len + payload_len;
+    result.status = FrameParseStatus::Ok;
+    return result;
+}
+
+class WebSocket : public std::enable_shared_from_this<WebSocket> {
+public:
+    net::detail::socket_t socket_fd = net::detail::kInvalidSocket;
+    std::atomic<WebSocketState> state{WebSocketState::Connecting};
+    std::string path;
+    std::string protocol;
+    std::string pending_buffer;
+    std::unordered_map<std::string, std::string> params;
+    std::unordered_map<std::string, std::string> query;
+    HeaderMap headers;
+
+    int write_timeout_ms = 10000;
+    size_t max_message_size = 64 * 1024 * 1024;
+    bool require_client_mask = true;
+
+    // Callbacks
+    std::function<void(const std::string&)> on_message_;
+    std::function<void(const std::string&)> on_binary_;
+    std::function<void(uint16_t, const std::string&)> on_close_;
+    std::function<void(const std::string&)> on_ping_;
+    std::function<void(const std::string&)> on_pong_;
+    std::function<void(const std::string&)> on_error_;
+
+    WebSocket() = default;
+    WebSocket(net::detail::socket_t fd,
+              std::string req_path,
+              std::string subproto = "",
+              std::unordered_map<std::string, std::string> route_params = {},
+              std::unordered_map<std::string, std::string> query_params = {},
+              HeaderMap hdrs = {})
+        : socket_fd(fd),
+          state(WebSocketState::Open),
+          path(std::move(req_path)),
+          protocol(std::move(subproto)),
+          params(std::move(route_params)),
+          query(std::move(query_params)),
+          headers(std::move(hdrs)) {}
+
+    ~WebSocket() {
+        close(1001, "Going Away");
+    }
+
+    WebSocket(const WebSocket&) = delete;
+    WebSocket& operator=(const WebSocket&) = delete;
+    WebSocket(WebSocket&&) = delete;
+    WebSocket& operator=(WebSocket&&) = delete;
+
+    [[nodiscard]] bool is_open() const noexcept {
+        return state.load() == WebSocketState::Open && socket_fd != net::detail::kInvalidSocket;
+    }
+
+    [[nodiscard]] net::detail::socket_t socket() const noexcept {
+        return socket_fd;
+    }
+
+    [[nodiscard]] std::string param(std::string_view name, std::string_view fallback = "") const {
+        auto it = params.find(std::string(name));
+        return (it != params.end()) ? it->second : std::string(fallback);
+    }
+
+    [[nodiscard]] std::string query_param(std::string_view name, std::string_view fallback = "") const {
+        auto it = query.find(std::string(name));
+        return (it != query.end()) ? it->second : std::string(fallback);
+    }
+
+    [[nodiscard]] std::string header(std::string_view name, std::string_view fallback = "") const {
+        return headers.get_or(name, fallback);
+    }
+
+    void set_require_mask(bool req) noexcept {
+        require_client_mask = req;
+    }
+
+    WebSocket& onMessage(std::function<void(const std::string&)> cb) {
+        on_message_ = std::move(cb);
+        return *this;
+    }
+
+    WebSocket& onBinary(std::function<void(const std::string&)> cb) {
+        on_binary_ = std::move(cb);
+        return *this;
+    }
+
+    WebSocket& onClose(std::function<void(uint16_t, const std::string&)> cb) {
+        on_close_ = std::move(cb);
+        return *this;
+    }
+
+    WebSocket& onPing(std::function<void(const std::string&)> cb) {
+        on_ping_ = std::move(cb);
+        return *this;
+    }
+
+    WebSocket& onPong(std::function<void(const std::string&)> cb) {
+        on_pong_ = std::move(cb);
+        return *this;
+    }
+
+    WebSocket& onError(std::function<void(const std::string&)> cb) {
+        on_error_ = std::move(cb);
+        return *this;
+    }
+
+    bool send(std::string_view text) {
+        return send_frame(WebSocketOpcode::Text, text);
+    }
+
+    bool sendBinary(std::string_view bytes) {
+        return send_frame(WebSocketOpcode::Binary, bytes);
+    }
+
+    bool ping(std::string_view payload = "") {
+        return send_frame(WebSocketOpcode::Ping, payload);
+    }
+
+    bool pong(std::string_view payload = "") {
+        return send_frame(WebSocketOpcode::Pong, payload);
+    }
+
+    bool send_frame(WebSocketOpcode opcode, std::string_view payload, bool fin = true) {
+        if (state.load() != WebSocketState::Open) {
+            return false;
+        }
+        std::string frame = serialize_websocket_frame(opcode, payload, /*masked=*/false, std::nullopt, fin);
+        std::lock_guard<std::recursive_mutex> lock(send_mutex_);
+        if (socket_fd == net::detail::kInvalidSocket) {
+            return false;
+        }
+        return detail::socket_send_all(socket_fd, frame.data(), frame.size(), write_timeout_ms);
+    }
+
+    bool send_frame_direct(WebSocketOpcode opcode, std::string_view payload, bool fin = true) {
+        std::string frame = serialize_websocket_frame(opcode, payload, /*masked=*/false, std::nullopt, fin);
+        std::lock_guard<std::recursive_mutex> lock(send_mutex_);
+        if (socket_fd == net::detail::kInvalidSocket) {
+            return false;
+        }
+        return detail::socket_send_all(socket_fd, frame.data(), frame.size(), write_timeout_ms);
+    }
+
+    void close(uint16_t code = 1000, std::string_view reason = "") {
+        bool should_send = false;
+        {
+            std::lock_guard<std::recursive_mutex> lock(send_mutex_);
+            if (state.load() == WebSocketState::Closed) {
+                return;
+            }
+            if (state.load() == WebSocketState::Open) {
+                state.store(WebSocketState::Closing);
+                should_send = true;
+            }
+        }
+
+        if (should_send) {
+            std::string payload;
+            payload.reserve(2 + reason.size());
+            payload.push_back(static_cast<char>((code >> 8) & 0xFF));
+            payload.push_back(static_cast<char>(code & 0xFF));
+            payload.append(reason);
+
+            std::string frame = serialize_websocket_frame(WebSocketOpcode::Close, payload, /*masked=*/false);
+            std::lock_guard<std::recursive_mutex> lock(send_mutex_);
+            if (socket_fd != net::detail::kInvalidSocket) {
+                (void)detail::socket_send_all(socket_fd, frame.data(), frame.size(), 2000);
+            }
+        }
+
+        close_socket();
+        state.store(WebSocketState::Closed);
+        trigger_close_callback(code, std::string(reason));
+    }
+
+    void run_loop(int poll_timeout_ms = 1000) {
+        std::string in_buf = std::move(pending_buffer);
+        std::array<char, 8192> recv_buf;
+
+        while (state.load() == WebSocketState::Open && socket_fd != net::detail::kInvalidSocket) {
+            while (!in_buf.empty()) {
+                auto res = parse_websocket_frame(in_buf, max_message_size);
+                if (res.status == FrameParseStatus::Ok) {
+                    in_buf.erase(0, res.bytes_consumed);
+                    if (!handle_frame(res.frame)) {
+                        return;
+                    }
+                    if (state.load() != WebSocketState::Open) {
+                        return;
+                    }
+                } else if (res.status == FrameParseStatus::ProtocolError) {
+                    if (on_error_) {
+                        try { on_error_(res.error_message); } catch (...) {}
+                    }
+                    close(res.error_code, res.error_message);
+                    return;
+                } else {
+                    // NeedMoreData
+                    break;
+                }
+            }
+
+            if (state.load() != WebSocketState::Open || socket_fd == net::detail::kInvalidSocket) {
+                break;
+            }
+
+            int pr = detail::socket_poll(socket_fd, POLLIN, poll_timeout_ms);
+            if (pr < 0) {
+                break;
+            }
+            if (pr == 0) {
+                continue;
+            }
+
+            ssize_t n = detail::socket_recv(socket_fd, recv_buf.data(), recv_buf.size());
+            if (n <= 0) {
+                break;
+            }
+            in_buf.append(recv_buf.data(), static_cast<size_t>(n));
+        }
+
+        if (state.load() == WebSocketState::Open) {
+            state.store(WebSocketState::Closed);
+            close_socket();
+            trigger_close_callback(1006, "Connection closed abnormally");
+        }
+    }
+
+private:
+    bool handle_frame(const WebSocketFrame& frame) {
+        if (require_client_mask && !frame.masked) {
+            if (on_error_) {
+                try { on_error_("Client frames must be masked"); } catch (...) {}
+            }
+            close(1002, "Client frames must be masked");
+            return false;
+        }
+
+        if (frame.opcode == WebSocketOpcode::Ping) {
+            send_frame_direct(WebSocketOpcode::Pong, frame.payload);
+            if (on_ping_) {
+                try { on_ping_(frame.payload); } catch (...) {}
+            }
+            return true;
+        }
+
+        if (frame.opcode == WebSocketOpcode::Pong) {
+            if (on_pong_) {
+                try { on_pong_(frame.payload); } catch (...) {}
+            }
+            return true;
+        }
+
+        if (frame.opcode == WebSocketOpcode::Close) {
+            uint16_t code = 1000;
+            std::string reason;
+
+            if (frame.payload.size() == 1) {
+                if (on_error_) {
+                    try { on_error_("Close payload cannot be 1 byte"); } catch (...) {}
+                }
+                close(1002, "Close payload cannot be 1 byte");
+                return false;
+            }
+
+            if (frame.payload.size() >= 2) {
+                code = (static_cast<uint8_t>(frame.payload[0]) << 8) |
+                       static_cast<uint8_t>(frame.payload[1]);
+                reason = frame.payload.substr(2);
+                if (!is_valid_utf8(reason)) {
+                    if (on_error_) {
+                        try { on_error_("Close reason is not valid UTF-8"); } catch (...) {}
+                    }
+                    close(1007, "Close reason is not valid UTF-8");
+                    return false;
+                }
+            }
+
+            if (state.load() == WebSocketState::Open) {
+                state.store(WebSocketState::Closing);
+                send_frame_direct(WebSocketOpcode::Close, frame.payload);
+            }
+
+            close_socket();
+            state.store(WebSocketState::Closed);
+            trigger_close_callback(code, reason);
+            return false;
+        }
+
+        if (frame.opcode == WebSocketOpcode::Continuation) {
+            if (!in_fragmented_) {
+                if (on_error_) {
+                    try { on_error_("Unexpected continuation frame"); } catch (...) {}
+                }
+                close(1002, "Unexpected continuation frame");
+                return false;
+            }
+
+            if (fragment_buffer_.size() + frame.payload.size() > max_message_size) {
+                if (on_error_) {
+                    try { on_error_("Message size exceeded limit"); } catch (...) {}
+                }
+                close(1009, "Message size exceeded limit");
+                return false;
+            }
+
+            fragment_buffer_ += frame.payload;
+
+            if (frame.fin) {
+                in_fragmented_ = false;
+                auto op = fragment_opcode_;
+                std::string complete_msg = std::move(fragment_buffer_);
+                fragment_buffer_.clear();
+
+                if (op == WebSocketOpcode::Text) {
+                    if (!is_valid_utf8(complete_msg)) {
+                        if (on_error_) {
+                            try { on_error_("Text frame contains invalid UTF-8"); } catch (...) {}
+                        }
+                        close(1007, "Text frame contains invalid UTF-8");
+                        return false;
+                    }
+                    if (on_message_) {
+                        try { on_message_(complete_msg); } catch (...) {}
+                    }
+                } else if (op == WebSocketOpcode::Binary) {
+                    if (on_binary_) {
+                        try { on_binary_(complete_msg); } catch (...) {}
+                    }
+                }
+            }
+            return true;
+        }
+
+        if (frame.opcode == WebSocketOpcode::Text || frame.opcode == WebSocketOpcode::Binary) {
+            if (in_fragmented_) {
+                if (on_error_) {
+                    try { on_error_("Received new data frame before continuation finished"); } catch (...) {}
+                }
+                close(1002, "Received new data frame before continuation finished");
+                return false;
+            }
+
+            if (frame.payload.size() > max_message_size) {
+                if (on_error_) {
+                    try { on_error_("Message size exceeded limit"); } catch (...) {}
+                }
+                close(1009, "Message size exceeded limit");
+                return false;
+            }
+
+            if (frame.fin) {
+                if (frame.opcode == WebSocketOpcode::Text) {
+                    if (!is_valid_utf8(frame.payload)) {
+                        if (on_error_) {
+                            try { on_error_("Text frame contains invalid UTF-8"); } catch (...) {}
+                        }
+                        close(1007, "Text frame contains invalid UTF-8");
+                        return false;
+                    }
+                    if (on_message_) {
+                        try { on_message_(frame.payload); } catch (...) {}
+                    }
+                } else {
+                    if (on_binary_) {
+                        try { on_binary_(frame.payload); } catch (...) {}
+                    }
+                }
+            } else {
+                in_fragmented_ = true;
+                fragment_opcode_ = frame.opcode;
+                fragment_buffer_ = frame.payload;
+            }
+            return true;
+        }
+
+        return true;
+    }
+
+    void close_socket() noexcept {
+        std::lock_guard<std::recursive_mutex> lock(send_mutex_);
+        if (socket_fd != net::detail::kInvalidSocket) {
+            net::detail::close_raw_socket(socket_fd);
+            socket_fd = net::detail::kInvalidSocket;
+        }
+    }
+
+    void trigger_close_callback(uint16_t code, const std::string& reason) {
+        bool expected = false;
+        if (close_dispatched_.compare_exchange_strong(expected, true)) {
+            if (on_close_) {
+                try {
+                    on_close_(code, reason);
+                } catch (...) {}
+            }
+        }
+    }
+
+    std::recursive_mutex send_mutex_;
+    std::atomic<bool> close_dispatched_{false};
+    bool in_fragmented_ = false;
+    WebSocketOpcode fragment_opcode_ = WebSocketOpcode::Text;
+    std::string fragment_buffer_;
+};
 
 // ============================================================================
 // Worker Thread Pool
@@ -3651,6 +4282,17 @@ public:
             });
         }
 
+        // Close active WebSocket sessions
+        {
+            std::lock_guard<std::mutex> lock(ws_sessions_mutex_);
+            for (auto& weak_ws : active_ws_sessions_) {
+                if (auto ws = weak_ws.lock()) {
+                    ws->close(1001, "Server shutting down");
+                }
+            }
+            active_ws_sessions_.clear();
+        }
+
         // Stop worker pool
         thread_pool_.stop();
     }
@@ -3918,13 +4560,34 @@ private:
                             client_fd, req.path, val.selected_protocol, ws_match.params, req.query, req.headers
                         );
                         ws->pending_buffer = parser.take_buffer();
+                        ws->write_timeout_ms = config_.write_timeout_ms;
+
+                        {
+                            std::lock_guard<std::mutex> lock(ws_sessions_mutex_);
+                            active_ws_sessions_.push_back(ws);
+                        }
 
                         try {
                             ws_match.handler.handler(ws);
                         } catch (...) {
+                            ws->close(1011, "Internal Server Error");
+                            return;
+                        }
+
+                        ws->run_loop();
+
+                        {
+                            std::lock_guard<std::mutex> lock(ws_sessions_mutex_);
+                            active_ws_sessions_.erase(
+                                std::remove_if(active_ws_sessions_.begin(), active_ws_sessions_.end(),
+                                    [](const std::weak_ptr<WebSocket>& w) { return w.expired(); }),
+                                active_ws_sessions_.end());
+                        }
+
+                        if (ws->is_open()) {
                             ws->close();
                         }
-                        return; // Connection is now managed as a WebSocket session
+                        return; // Connection is now managed and finished as a WebSocket session
                     }
 
                     Response res;
@@ -4140,6 +4803,9 @@ private:
 
     RadixRouter<WebSocketRouteEntry> ws_router_;
     std::mutex ws_router_mutex_;
+
+    std::vector<std::weak_ptr<WebSocket>> active_ws_sessions_;
+    std::mutex ws_sessions_mutex_;
 
     net::detail::socket_t listen_fd_ = net::detail::kInvalidSocket;
     int bound_port_ = 0;
