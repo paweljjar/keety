@@ -5,16 +5,22 @@
 #include <keet/net.hpp>
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <cctype>
 #include <charconv>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <ctime>
 #include <iomanip>
+#include <mutex>
 #include <optional>
+#include <queue>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -308,6 +314,8 @@ struct HttpRequestMessage {
     HeaderMap headers;
     std::unordered_map<std::string, std::string> query;
     std::string body;
+    std::string client_ip = "127.0.0.1";
+    int client_port = 0;
     bool keep_alive = true;
     bool upgrade_websocket = false;
 };
@@ -334,8 +342,7 @@ public:
     explicit HttpRequestParser(HttpParserLimits limits = {})
         : limits_(limits) {}
 
-    void reset() {
-        buffer_.clear();
+    void reset_keep_buffer() {
         state_ = ParseState::RequestLine;
         message_ = HttpRequestMessage{};
         error_code_ = 200;
@@ -345,6 +352,11 @@ public:
         current_chunk_size_ = 0;
         current_chunk_read_ = 0;
         is_chunked_ = false;
+    }
+
+    void reset() {
+        buffer_.clear();
+        reset_keep_buffer();
     }
 
     [[nodiscard]] ParseState state() const noexcept { return state_; }
@@ -768,6 +780,537 @@ public:
     [[nodiscard]] static std::string format_last_chunk() {
         return "0\r\n\r\n";
     }
+};
+
+// ============================================================================
+// Phase 1.2: Server Socket Lifecycle & Concurrency Engine
+// ============================================================================
+
+namespace detail {
+
+inline void set_tcp_nodelay(net::detail::socket_t fd, bool enabled) noexcept {
+    int flag = enabled ? 1 : 0;
+#if defined(_WIN32)
+    ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&flag), sizeof(flag));
+#else
+    ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, static_cast<socklen_t>(sizeof(flag)));
+#endif
+}
+
+inline void set_reuse_addr_port(net::detail::socket_t fd) noexcept {
+    int one = 1;
+#if defined(_WIN32)
+    ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&one), sizeof(one));
+#else
+    ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, static_cast<socklen_t>(sizeof(one)));
+#if defined(SO_REUSEPORT)
+    ::setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, static_cast<socklen_t>(sizeof(one)));
+#endif
+#endif
+}
+
+inline int socket_poll(net::detail::socket_t fd, short events, int timeout_ms) {
+    if (fd == net::detail::kInvalidSocket) {
+        return -1;
+    }
+#if defined(_WIN32)
+    WSAPOLLFD pfd{};
+    pfd.fd = fd;
+    pfd.events = events;
+    return ::WSAPoll(&pfd, 1, timeout_ms);
+#else
+    struct pollfd pfd{};
+    pfd.fd = fd;
+    pfd.events = events;
+    return ::poll(&pfd, 1, timeout_ms);
+#endif
+}
+
+inline bool socket_send_all(net::detail::socket_t fd, const char* data, size_t total, int timeout_ms = 10000) {
+    size_t sent = 0;
+    while (sent < total) {
+        int pr = socket_poll(fd, POLLOUT, timeout_ms);
+        if (pr <= 0) {
+            return false;
+        }
+#if defined(_WIN32)
+        int n = ::send(fd, data + sent, static_cast<int>(total - sent), 0);
+#else
+        int flags = net::detail::send_flags();
+        ssize_t n = ::send(fd, data + sent, total - sent, flags);
+#endif
+        if (n <= 0) {
+            return false;
+        }
+        sent += static_cast<size_t>(n);
+    }
+    return true;
+}
+
+inline ssize_t socket_recv(net::detail::socket_t fd, char* buf, size_t max_len) {
+#if defined(_WIN32)
+    int n = ::recv(fd, buf, static_cast<int>(max_len), 0);
+    return static_cast<ssize_t>(n);
+#else
+    return ::recv(fd, buf, max_len, 0);
+#endif
+}
+
+} // namespace detail
+
+// ============================================================================
+// Worker Thread Pool
+// ============================================================================
+
+class HttpThreadPool {
+public:
+    explicit HttpThreadPool(size_t thread_count = 4) {
+        if (thread_count == 0) {
+            thread_count = 1;
+        }
+        workers_.reserve(thread_count);
+        for (size_t i = 0; i < thread_count; ++i) {
+            workers_.emplace_back([this]() {
+                worker_loop();
+            });
+        }
+    }
+
+    ~HttpThreadPool() {
+        stop();
+    }
+
+    HttpThreadPool(const HttpThreadPool&) = delete;
+    HttpThreadPool& operator=(const HttpThreadPool&) = delete;
+
+    void enqueue(std::function<void()> task) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (stopping_) {
+                return;
+            }
+            tasks_.push(std::move(task));
+        }
+        cv_.notify_one();
+    }
+
+    void stop() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (stopping_) {
+                return;
+            }
+            stopping_ = true;
+        }
+        cv_.notify_all();
+        for (auto& worker : workers_) {
+            if (worker.joinable()) {
+                worker.join();
+            }
+        }
+        workers_.clear();
+    }
+
+    [[nodiscard]] size_t size() const noexcept {
+        return workers_.size();
+    }
+
+private:
+    void worker_loop() {
+        while (true) {
+            std::function<void()> task;
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                cv_.wait(lock, [this]() {
+                    return stopping_ || !tasks_.empty();
+                });
+                if (stopping_ && tasks_.empty()) {
+                    return;
+                }
+                task = std::move(tasks_.front());
+                tasks_.pop();
+            }
+            if (task) {
+                try {
+                    task();
+                } catch (...) {
+                    // Swallow exceptions to keep worker threads alive
+                }
+            }
+        }
+    }
+
+    std::vector<std::thread> workers_;
+    std::queue<std::function<void()>> tasks_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    bool stopping_ = false;
+};
+
+// ============================================================================
+// Server Configuration & Lifecycle Engine
+// ============================================================================
+
+struct HttpServerConfig {
+    std::string host = "127.0.0.1";
+    int port = 8080;
+    size_t worker_threads = 4;
+    int keep_alive_timeout_ms = 5000;
+    size_t max_keep_alive_requests = 100;
+    int read_timeout_ms = 10000;
+    int write_timeout_ms = 10000;
+    int drain_timeout_ms = 3000;
+    HttpParserLimits limits{};
+};
+
+using HttpHandler = std::function<HttpResponseMessage(const HttpRequestMessage&)>;
+
+class HttpServer {
+public:
+    explicit HttpServer(HttpServerConfig config = {})
+        : config_(std::move(config)),
+          thread_pool_(config_.worker_threads) {}
+
+    ~HttpServer() {
+        stop();
+    }
+
+    HttpServer(const HttpServer&) = delete;
+    HttpServer& operator=(const HttpServer&) = delete;
+
+    void set_handler(HttpHandler handler) {
+        std::lock_guard<std::mutex> lock(handler_mutex_);
+        handler_ = std::move(handler);
+    }
+
+    /// Starts listening on the configured host/port in a background thread.
+    /// Returns true on successful socket bind & listen, false otherwise.
+    bool start() {
+        if (running_.load()) {
+            return false;
+        }
+        if (!bind_and_listen()) {
+            return false;
+        }
+        running_.store(true);
+        acceptor_thread_ = std::thread([this]() {
+            acceptor_loop();
+        });
+        return true;
+    }
+
+    /// Convenience method: sets handler and starts listening.
+    bool listen(int port = -1, const std::string& host = "") {
+        if (port >= 0) {
+            config_.port = port;
+        }
+        if (!host.empty()) {
+            config_.host = host;
+        }
+        return start();
+    }
+
+    /// Starts listening and blocks current thread until server is stopped.
+    bool listen_and_serve() {
+        if (!start()) {
+            return false;
+        }
+        if (acceptor_thread_.joinable()) {
+            acceptor_thread_.join();
+        }
+        return true;
+    }
+
+    /// Gracefully stops accepting new connections and drains in-flight requests.
+    void stop() {
+        bool expected = true;
+        if (!running_.compare_exchange_strong(expected, false)) {
+            return;
+        }
+
+        // Close listening socket to unblock accept/poll immediately
+        if (listen_fd_ != net::detail::kInvalidSocket) {
+            net::detail::socket_t fd = listen_fd_;
+            listen_fd_ = net::detail::kInvalidSocket;
+            net::detail::close_raw_socket(fd);
+        }
+
+        // Join acceptor loop thread
+        if (acceptor_thread_.joinable()) {
+            acceptor_thread_.join();
+        }
+
+        // Wait for active in-flight requests to drain
+        {
+            std::unique_lock<std::mutex> lock(in_flight_mutex_);
+            in_flight_cv_.wait_for(lock, std::chrono::milliseconds(config_.drain_timeout_ms), [this]() {
+                return in_flight_requests_.load() == 0;
+            });
+        }
+
+        // Stop worker pool
+        thread_pool_.stop();
+    }
+
+    [[nodiscard]] bool is_running() const noexcept {
+        return running_.load();
+    }
+
+    [[nodiscard]] int bound_port() const noexcept {
+        return bound_port_;
+    }
+
+    [[nodiscard]] const std::string& bound_host() const noexcept {
+        return bound_host_;
+    }
+
+    [[nodiscard]] size_t active_connections() const noexcept {
+        return active_connections_.load();
+    }
+
+    [[nodiscard]] size_t in_flight_requests() const noexcept {
+        return in_flight_requests_.load();
+    }
+
+    [[nodiscard]] const HttpServerConfig& config() const noexcept {
+        return config_;
+    }
+
+private:
+    bool bind_and_listen() {
+        net::detail::ensure_winsock_initialized();
+
+        struct addrinfo hints{};
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_flags = AI_PASSIVE;
+
+        std::string port_str = std::to_string(config_.port);
+        const char* host_str = (config_.host.empty() || config_.host == "0.0.0.0") ? nullptr : config_.host.c_str();
+
+        struct addrinfo* res = nullptr;
+        int rc = ::getaddrinfo(host_str, port_str.c_str(), &hints, &res);
+        if (rc != 0 || !res) {
+            return false;
+        }
+
+        net::detail::socket_t s = net::detail::kInvalidSocket;
+        for (struct addrinfo* p = res; p != nullptr; p = p->ai_next) {
+            s = ::socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+            if (s == net::detail::kInvalidSocket) {
+                continue;
+            }
+
+            detail::set_reuse_addr_port(s);
+            net::detail::configure_no_sigpipe(s);
+            detail::set_tcp_nodelay(s, true);
+
+            if (p->ai_family == AF_INET6) {
+                int no = 0;
+                ::setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<const char*>(&no), sizeof(no));
+            }
+
+            if (::bind(s, p->ai_addr, static_cast<socklen_t>(p->ai_addrlen)) == 0) {
+                listen_fd_ = s;
+                break;
+            }
+
+            net::detail::close_raw_socket(s);
+            s = net::detail::kInvalidSocket;
+        }
+
+        ::freeaddrinfo(res);
+
+        if (listen_fd_ == net::detail::kInvalidSocket) {
+            return false;
+        }
+
+        if (::listen(listen_fd_, 128) != 0) {
+            net::detail::close_raw_socket(listen_fd_);
+            listen_fd_ = net::detail::kInvalidSocket;
+            return false;
+        }
+
+        // Determine bound port
+        struct sockaddr_storage ss{};
+        socklen_t sslen = sizeof(ss);
+        if (::getsockname(listen_fd_, reinterpret_cast<struct sockaddr*>(&ss), &sslen) == 0) {
+            if (ss.ss_family == AF_INET) {
+                bound_port_ = ntohs(reinterpret_cast<struct sockaddr_in*>(&ss)->sin_port);
+            } else if (ss.ss_family == AF_INET6) {
+                bound_port_ = ntohs(reinterpret_cast<struct sockaddr_in6*>(&ss)->sin6_port);
+            }
+        } else {
+            bound_port_ = config_.port;
+        }
+
+        bound_host_ = config_.host.empty() ? "0.0.0.0" : config_.host;
+        return true;
+    }
+
+    void acceptor_loop() {
+        while (running_.load()) {
+            int pr = detail::socket_poll(listen_fd_, POLLIN, 100);
+            if (pr < 0) {
+                if (!running_.load()) break;
+                break;
+            }
+            if (pr == 0) {
+                continue;
+            }
+
+            struct sockaddr_storage client_addr{};
+            socklen_t client_len = sizeof(client_addr);
+            net::detail::socket_t client_fd = ::accept(
+                listen_fd_,
+                reinterpret_cast<struct sockaddr*>(&client_addr),
+                &client_len
+            );
+            if (client_fd == net::detail::kInvalidSocket) {
+                if (!running_.load()) break;
+                continue;
+            }
+
+            std::string client_ip = "127.0.0.1";
+            int client_port = 0;
+            if (client_addr.ss_family == AF_INET) {
+                auto* s4 = reinterpret_cast<struct sockaddr_in*>(&client_addr);
+                char buf[INET_ADDRSTRLEN];
+                if (::inet_ntop(AF_INET, &(s4->sin_addr), buf, sizeof(buf))) {
+                    client_ip = buf;
+                }
+                client_port = ntohs(s4->sin_port);
+            } else if (client_addr.ss_family == AF_INET6) {
+                auto* s6 = reinterpret_cast<struct sockaddr_in6*>(&client_addr);
+                char buf[INET6_ADDRSTRLEN];
+                if (::inet_ntop(AF_INET6, &(s6->sin6_addr), buf, sizeof(buf))) {
+                    client_ip = buf;
+                }
+                client_port = ntohs(s6->sin6_port);
+            }
+
+            active_connections_.fetch_add(1);
+            thread_pool_.enqueue([this, client_fd, client_ip, client_port]() {
+                handle_connection(client_fd, client_ip, client_port);
+                active_connections_.fetch_sub(1);
+            });
+        }
+    }
+
+    void handle_connection(net::detail::socket_t client_fd, std::string client_ip, int client_port) {
+        net::detail::configure_no_sigpipe(client_fd);
+        detail::set_tcp_nodelay(client_fd, true);
+
+        HttpRequestParser parser(config_.limits);
+        size_t requests_served = 0;
+        std::array<char, 8192> read_buf;
+
+        while (running_.load() && requests_served < config_.max_keep_alive_requests) {
+            int timeout = (requests_served == 0) ? config_.read_timeout_ms : config_.keep_alive_timeout_ms;
+            int pr = detail::socket_poll(client_fd, POLLIN, timeout);
+            if (pr <= 0) {
+                // Timeout or poll error
+                break;
+            }
+
+            ssize_t n = detail::socket_recv(client_fd, read_buf.data(), read_buf.size());
+            if (n <= 0) {
+                // Connection closed or error
+                break;
+            }
+
+            if (!parser.feed(std::string_view(read_buf.data(), static_cast<size_t>(n)))) {
+                // Protocol error
+                HttpResponseMessage err_resp;
+                err_resp.status = parser.error_code();
+                err_resp.body = parser.error_message();
+                err_resp.headers.set("Connection", "close");
+                std::string raw = HttpResponseSerializer::serialize(err_resp);
+                detail::socket_send_all(client_fd, raw.data(), raw.size(), config_.write_timeout_ms);
+                break;
+            }
+
+            while (parser.is_complete()) {
+                requests_served++;
+                HttpRequestMessage req = parser.message();
+                req.client_ip = client_ip;
+                req.client_port = client_port;
+
+                in_flight_requests_.fetch_add(1);
+
+                HttpResponseMessage resp;
+                try {
+                    HttpHandler handler_copy;
+                    {
+                        std::lock_guard<std::mutex> lock(handler_mutex_);
+                        handler_copy = handler_;
+                    }
+                    if (handler_copy) {
+                        resp = handler_copy(req);
+                    } else {
+                        resp.status = 404;
+                        resp.body = "Not Found";
+                    }
+                } catch (const std::exception& ex) {
+                    resp.status = 500;
+                    resp.body = std::string("Internal Server Error: ") + ex.what();
+                } catch (...) {
+                    resp.status = 500;
+                    resp.body = "Internal Server Error";
+                }
+
+                in_flight_requests_.fetch_sub(1);
+                in_flight_cv_.notify_all();
+
+                bool will_keep_alive = req.keep_alive &&
+                                       running_.load() &&
+                                       (requests_served < config_.max_keep_alive_requests) &&
+                                       (detail::to_lower_ascii(resp.headers.get_or("connection", "")) != "close");
+
+                if (will_keep_alive) {
+                    resp.headers.set("Connection", "keep-alive");
+                    resp.headers.set("Keep-Alive", "timeout=" + std::to_string(config_.keep_alive_timeout_ms / 1000) +
+                                                    ", max=" + std::to_string(config_.max_keep_alive_requests - requests_served));
+                } else {
+                    resp.headers.set("Connection", "close");
+                }
+
+                std::string raw = HttpResponseSerializer::serialize(resp);
+                if (!detail::socket_send_all(client_fd, raw.data(), raw.size(), config_.write_timeout_ms)) {
+                    net::detail::close_raw_socket(client_fd);
+                    return;
+                }
+
+                if (!will_keep_alive) {
+                    net::detail::close_raw_socket(client_fd);
+                    return;
+                }
+
+                // Reset parser keeping leftover buffer bytes for pipelining
+                parser.reset_keep_buffer();
+                parser.feed("");
+            }
+        }
+
+        net::detail::close_raw_socket(client_fd);
+    }
+
+    HttpServerConfig config_;
+    HttpThreadPool thread_pool_;
+    HttpHandler handler_;
+    std::mutex handler_mutex_;
+
+    net::detail::socket_t listen_fd_ = net::detail::kInvalidSocket;
+    int bound_port_ = 0;
+    std::string bound_host_;
+
+    std::atomic<bool> running_{false};
+    std::thread acceptor_thread_;
+
+    std::atomic<size_t> active_connections_{0};
+    std::atomic<size_t> in_flight_requests_{0};
+    std::mutex in_flight_mutex_;
+    std::condition_variable in_flight_cv_;
 };
 
 } // namespace keet::net::http
