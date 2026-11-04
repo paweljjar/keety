@@ -30,6 +30,7 @@ add_executable(keety_unit_tests
     unit/test_runtime_net.cpp
     unit/test_runtime_test.cpp
     unit/test_runtime_crypto.cpp
+    unit/test_runtime_http_parser.cpp
     unit/test_token.cpp
     unit/test_lexer.cpp
     unit/test_blank_ident.cpp
