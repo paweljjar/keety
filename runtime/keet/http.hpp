@@ -21,6 +21,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -1027,6 +1028,49 @@ public:
         return keet::json::detail::dump_node(it->second, 0);
     }
 
+    [[nodiscard]] std::string validated(std::string_view name, std::string_view fallback = "") const {
+        auto it = locals.find(std::string(name));
+        if (it != locals.end()) return it->second;
+        it = locals.find("validated." + std::string(name));
+        if (it != locals.end()) return it->second;
+        it = locals.find("body." + std::string(name));
+        if (it != locals.end()) return it->second;
+        it = locals.find("query." + std::string(name));
+        if (it != locals.end()) return it->second;
+        it = locals.find("params." + std::string(name));
+        if (it != locals.end()) return it->second;
+        return std::string(fallback);
+    }
+
+    [[nodiscard]] int64_t validated_int(std::string_view name, int64_t fallback = 0) const {
+        std::string s = validated(name);
+        if (s.empty()) return fallback;
+        int64_t val = 0;
+        auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), val);
+        if (ec == std::errc{} && ptr == s.data() + s.size()) return val;
+        return fallback;
+    }
+
+    [[nodiscard]] double validated_float(std::string_view name, double fallback = 0.0) const {
+        std::string s = validated(name);
+        if (s.empty()) return fallback;
+        try {
+            size_t idx = 0;
+            double val = std::stod(s, &idx);
+            if (idx == s.size()) return val;
+        } catch (...) {}
+        return fallback;
+    }
+
+    [[nodiscard]] bool validated_bool(std::string_view name, bool fallback = false) const {
+        std::string s = validated(name);
+        if (s.empty()) return fallback;
+        std::string l = detail::to_lower_ascii(s);
+        if (l == "true" || l == "1" || l == "yes") return true;
+        if (l == "false" || l == "0" || l == "no") return false;
+        return fallback;
+    }
+
     [[nodiscard]] HttpRequestMessage to_raw_message() const {
         HttpRequestMessage msg;
         msg.line.method = method;
@@ -1529,6 +1573,953 @@ inline Middleware recover() {
                 res.send("{\"error\":\"Internal Server Error\"}");
             }
         }
+    };
+}
+
+// ============================================================================
+// Phase 3.2: Declarative Schema Validation Engine
+// ============================================================================
+
+enum class SchemaType {
+    String,
+    Int,
+    Float,
+    Bool,
+    Array,
+    Object
+};
+
+using FieldType = SchemaType;
+
+enum class SchemaTarget {
+    Body,
+    Query,
+    Params,
+    Headers
+};
+
+using Target = SchemaTarget;
+
+class SchemaField {
+public:
+    std::string name;
+    SchemaTarget target = SchemaTarget::Body;
+    SchemaType type = SchemaType::String;
+    bool is_required = true;
+    std::optional<double> min_value;
+    std::optional<double> max_value;
+    std::optional<std::string> pattern_regex;
+    std::vector<std::string> enum_list;
+    std::optional<std::string> default_value_str;
+    std::string custom_message;
+
+    SchemaField() = default;
+
+    explicit SchemaField(std::string field_name, SchemaType field_type = SchemaType::String, SchemaTarget tgt = SchemaTarget::Body)
+        : name(std::move(field_name)), target(tgt), type(field_type) {}
+
+    SchemaField& required(bool req = true) {
+        is_required = req;
+        return *this;
+    }
+
+    SchemaField& optional() {
+        is_required = false;
+        return *this;
+    }
+
+    SchemaField& not_empty() {
+        min_value = 1.0;
+        return *this;
+    }
+
+    SchemaField& min(double min_val) {
+        min_value = min_val;
+        return *this;
+    }
+
+    SchemaField& max(double max_val) {
+        max_value = max_val;
+        return *this;
+    }
+
+    SchemaField& pattern(std::string_view regex_str) {
+        pattern_regex = std::string(regex_str);
+        return *this;
+    }
+
+    SchemaField& enum_values(std::vector<std::string> allowed) {
+        enum_list = std::move(allowed);
+        return *this;
+    }
+
+    SchemaField& enum_values(std::initializer_list<std::string> allowed) {
+        enum_list = std::vector<std::string>(allowed);
+        return *this;
+    }
+
+    SchemaField& default_value(std::string_view def) {
+        default_value_str = std::string(def);
+        is_required = false;
+        return *this;
+    }
+
+    SchemaField& message(std::string_view msg) {
+        custom_message = std::string(msg);
+        return *this;
+    }
+};
+
+class Schema {
+public:
+    std::vector<SchemaField> fields;
+
+    Schema() = default;
+
+    SchemaField& body(std::string_view name, SchemaType type = SchemaType::String) {
+        fields.emplace_back(std::string(name), type, SchemaTarget::Body);
+        return fields.back();
+    }
+
+    SchemaField& query(std::string_view name, SchemaType type = SchemaType::String) {
+        fields.emplace_back(std::string(name), type, SchemaTarget::Query);
+        return fields.back();
+    }
+
+    SchemaField& param(std::string_view name, SchemaType type = SchemaType::String) {
+        fields.emplace_back(std::string(name), type, SchemaTarget::Params);
+        return fields.back();
+    }
+
+    SchemaField& header(std::string_view name, SchemaType type = SchemaType::String) {
+        fields.emplace_back(std::string(name), type, SchemaTarget::Headers);
+        return fields.back();
+    }
+
+    Schema& add(SchemaField f) {
+        fields.push_back(std::move(f));
+        return *this;
+    }
+
+    Schema& add_body(SchemaField f) {
+        f.target = SchemaTarget::Body;
+        fields.push_back(std::move(f));
+        return *this;
+    }
+
+    Schema& add_query(SchemaField f) {
+        f.target = SchemaTarget::Query;
+        fields.push_back(std::move(f));
+        return *this;
+    }
+
+    Schema& add_param(SchemaField f) {
+        f.target = SchemaTarget::Params;
+        fields.push_back(std::move(f));
+        return *this;
+    }
+
+    Schema& add_header(SchemaField f) {
+        f.target = SchemaTarget::Headers;
+        fields.push_back(std::move(f));
+        return *this;
+    }
+};
+
+inline Schema schema() {
+    return Schema{};
+}
+
+inline SchemaField field(std::string_view name, SchemaType type = SchemaType::String, SchemaTarget target = SchemaTarget::Body) {
+    return SchemaField(std::string(name), type, target);
+}
+
+namespace detail {
+
+inline std::string format_validation_number(double v) {
+    if (std::floor(v) == v) {
+        return std::to_string(static_cast<int64_t>(v));
+    }
+    std::ostringstream ss;
+    ss << v;
+    return ss.str();
+}
+
+inline std::string make_full_field_name(SchemaTarget target, std::string_view name) {
+    std::string prefix;
+    switch (target) {
+        case SchemaTarget::Body: prefix = "body"; break;
+        case SchemaTarget::Query: prefix = "query"; break;
+        case SchemaTarget::Params: prefix = "params"; break;
+        case SchemaTarget::Headers: prefix = "headers"; break;
+    }
+    if (name.rfind(prefix + ".", 0) == 0) {
+        return std::string(name);
+    }
+    return prefix + "." + std::string(name);
+}
+
+inline const keet::json::JsonNode* find_json_path(const keet::json::JsonNode* root, std::string_view path) {
+    if (!root) return nullptr;
+    size_t start = 0;
+    const keet::json::JsonNode* curr = root;
+    while (start < path.size()) {
+        size_t dot = path.find('.', start);
+        std::string_view key = (dot == std::string_view::npos)
+            ? path.substr(start)
+            : path.substr(start, dot - start);
+        if (!curr->is_object()) {
+            return nullptr;
+        }
+        const auto& obj = std::get<keet::json::JsonNode::Object>(curr->value);
+        auto it = obj.find(std::string(key));
+        if (it == obj.end()) {
+            return nullptr;
+        }
+        curr = &(it->second);
+        if (dot == std::string_view::npos) {
+            break;
+        }
+        start = dot + 1;
+    }
+    return curr;
+}
+
+inline void set_json_default(keet::json::JsonNode* root, std::string_view path, SchemaType type, std::string_view def_str) {
+    if (!root || !root->is_object()) return;
+    keet::json::JsonNode val_node;
+    if (type == SchemaType::Int) {
+        int64_t v = 0;
+        std::from_chars(def_str.data(), def_str.data() + def_str.size(), v);
+        val_node = keet::json::JsonNode(v);
+    } else if (type == SchemaType::Float) {
+        double v = 0.0;
+        try { v = std::stod(std::string(def_str)); } catch (...) {}
+        val_node = keet::json::JsonNode(v);
+    } else if (type == SchemaType::Bool) {
+        std::string l = to_lower_ascii(def_str);
+        bool b = (l == "true" || l == "1" || l == "yes");
+        val_node = keet::json::JsonNode(b);
+    } else if (type == SchemaType::String) {
+        val_node = keet::json::JsonNode(std::string(def_str));
+    } else {
+        try {
+            val_node = keet::json::parse(def_str);
+        } catch (...) {
+            val_node = keet::json::JsonNode(std::string(def_str));
+        }
+    }
+
+    auto& obj = std::get<keet::json::JsonNode::Object>(root->value);
+    size_t dot = path.find('.');
+    if (dot == std::string_view::npos) {
+        obj[std::string(path)] = std::move(val_node);
+    }
+}
+
+inline void fail_validation(Response& res, std::string_view field_full_name, std::string_view message) {
+    res.status(400);
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    std::string json_body = "{\"error\":\"ValidationError\",\"field\":" +
+        keet::json::detail::escape_json_string(field_full_name) +
+        ",\"message\":" +
+        keet::json::detail::escape_json_string(message) +
+        "}";
+    res.send(json_body);
+}
+
+} // namespace detail
+
+inline Middleware validate(Schema schema) {
+    return [sch = std::move(schema)](Request& req, Response& res, NextFunction next) {
+        for (const auto& field : sch.fields) {
+            std::string full_name = detail::make_full_field_name(field.target, field.name);
+
+            if (field.target == SchemaTarget::Query) {
+                auto it = req.query.find(field.name);
+                std::string raw_val;
+                bool is_present = false;
+                if (it != req.query.end()) {
+                    raw_val = it->second;
+                    is_present = true;
+                }
+
+                if (!is_present) {
+                    if (field.default_value_str.has_value()) {
+                        raw_val = *field.default_value_str;
+                        req.query[field.name] = raw_val;
+                        is_present = true;
+                    } else if (field.is_required) {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' is required")
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    } else {
+                        continue;
+                    }
+                }
+
+                if (field.type == SchemaType::String) {
+                    if (field.min_value.has_value() && raw_val.size() < static_cast<size_t>(*field.min_value)) {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' length must be at least " + detail::format_validation_number(*field.min_value))
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    }
+                    if (field.max_value.has_value() && raw_val.size() > static_cast<size_t>(*field.max_value)) {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' length must be at most " + detail::format_validation_number(*field.max_value))
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    }
+                    if (field.pattern_regex.has_value()) {
+                        try {
+                            std::regex re(*field.pattern_regex);
+                            if (!std::regex_search(raw_val, re)) {
+                                std::string msg = field.custom_message.empty()
+                                    ? ("Field '" + field.name + "' does not match required pattern")
+                                    : field.custom_message;
+                                detail::fail_validation(res, full_name, msg);
+                                return;
+                            }
+                        } catch (...) {
+                            detail::fail_validation(res, full_name, "Invalid regex pattern for field '" + field.name + "'");
+                            return;
+                        }
+                    }
+                    if (!field.enum_list.empty()) {
+                        if (std::find(field.enum_list.begin(), field.enum_list.end(), raw_val) == field.enum_list.end()) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be one of allowed values")
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                    }
+                } else if (field.type == SchemaType::Int) {
+                    int64_t ival = 0;
+                    auto [ptr, ec] = std::from_chars(raw_val.data(), raw_val.data() + raw_val.size(), ival);
+                    if (ec != std::errc{} || ptr != raw_val.data() + raw_val.size()) {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' must be an integer")
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    }
+                    if (field.min_value.has_value() && ival < *field.min_value) {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' must be at least " + detail::format_validation_number(*field.min_value))
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    }
+                    if (field.max_value.has_value() && ival > *field.max_value) {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' must be at most " + detail::format_validation_number(*field.max_value))
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    }
+                    if (!field.enum_list.empty()) {
+                        std::string is = std::to_string(ival);
+                        if (std::find(field.enum_list.begin(), field.enum_list.end(), is) == field.enum_list.end()) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be one of allowed values")
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                    }
+                } else if (field.type == SchemaType::Float) {
+                    double fval = 0.0;
+                    size_t idx = 0;
+                    try {
+                        fval = std::stod(raw_val, &idx);
+                        if (idx != raw_val.size()) {
+                            throw std::runtime_error("invalid float");
+                        }
+                    } catch (...) {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' must be a number")
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    }
+                    if (field.min_value.has_value() && fval < *field.min_value) {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' must be at least " + detail::format_validation_number(*field.min_value))
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    }
+                    if (field.max_value.has_value() && fval > *field.max_value) {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' must be at most " + detail::format_validation_number(*field.max_value))
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    }
+                } else if (field.type == SchemaType::Bool) {
+                    std::string l = detail::to_lower_ascii(raw_val);
+                    if (l == "true" || l == "1" || l == "yes") {
+                        raw_val = "true";
+                    } else if (l == "false" || l == "0" || l == "no") {
+                        raw_val = "false";
+                    } else {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' must be a boolean")
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    }
+                }
+
+                req.locals[field.name] = raw_val;
+                req.locals[full_name] = raw_val;
+                req.locals["validated." + field.name] = raw_val;
+                req.locals["validated." + full_name] = raw_val;
+            } else if (field.target == SchemaTarget::Params) {
+                auto it = req.params.find(field.name);
+                std::string raw_val;
+                bool is_present = false;
+                if (it != req.params.end()) {
+                    raw_val = it->second;
+                    is_present = true;
+                }
+
+                if (!is_present) {
+                    if (field.default_value_str.has_value()) {
+                        raw_val = *field.default_value_str;
+                        req.params[field.name] = raw_val;
+                        is_present = true;
+                    } else if (field.is_required) {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' is required")
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    } else {
+                        continue;
+                    }
+                }
+
+                if (field.type == SchemaType::String) {
+                    if (field.min_value.has_value() && raw_val.size() < static_cast<size_t>(*field.min_value)) {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' length must be at least " + detail::format_validation_number(*field.min_value))
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    }
+                    if (field.max_value.has_value() && raw_val.size() > static_cast<size_t>(*field.max_value)) {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' length must be at most " + detail::format_validation_number(*field.max_value))
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    }
+                    if (field.pattern_regex.has_value()) {
+                        try {
+                            std::regex re(*field.pattern_regex);
+                            if (!std::regex_search(raw_val, re)) {
+                                std::string msg = field.custom_message.empty()
+                                    ? ("Field '" + field.name + "' does not match required pattern")
+                                    : field.custom_message;
+                                detail::fail_validation(res, full_name, msg);
+                                return;
+                            }
+                        } catch (...) {
+                            detail::fail_validation(res, full_name, "Invalid regex pattern for field '" + field.name + "'");
+                            return;
+                        }
+                    }
+                    if (!field.enum_list.empty()) {
+                        if (std::find(field.enum_list.begin(), field.enum_list.end(), raw_val) == field.enum_list.end()) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be one of allowed values")
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                    }
+                } else if (field.type == SchemaType::Int) {
+                    int64_t ival = 0;
+                    auto [ptr, ec] = std::from_chars(raw_val.data(), raw_val.data() + raw_val.size(), ival);
+                    if (ec != std::errc{} || ptr != raw_val.data() + raw_val.size()) {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' must be an integer")
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    }
+                    if (field.min_value.has_value() && ival < *field.min_value) {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' must be at least " + detail::format_validation_number(*field.min_value))
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    }
+                    if (field.max_value.has_value() && ival > *field.max_value) {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' must be at most " + detail::format_validation_number(*field.max_value))
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    }
+                    if (!field.enum_list.empty()) {
+                        std::string is = std::to_string(ival);
+                        if (std::find(field.enum_list.begin(), field.enum_list.end(), is) == field.enum_list.end()) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be one of allowed values")
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                    }
+                } else if (field.type == SchemaType::Float) {
+                    double fval = 0.0;
+                    size_t idx = 0;
+                    try {
+                        fval = std::stod(raw_val, &idx);
+                        if (idx != raw_val.size()) {
+                            throw std::runtime_error("invalid float");
+                        }
+                    } catch (...) {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' must be a number")
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    }
+                    if (field.min_value.has_value() && fval < *field.min_value) {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' must be at least " + detail::format_validation_number(*field.min_value))
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    }
+                    if (field.max_value.has_value() && fval > *field.max_value) {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' must be at most " + detail::format_validation_number(*field.max_value))
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    }
+                } else if (field.type == SchemaType::Bool) {
+                    std::string l = detail::to_lower_ascii(raw_val);
+                    if (l == "true" || l == "1" || l == "yes") {
+                        raw_val = "true";
+                    } else if (l == "false" || l == "0" || l == "no") {
+                        raw_val = "false";
+                    } else {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' must be a boolean")
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    }
+                }
+
+                req.locals[field.name] = raw_val;
+                req.locals[full_name] = raw_val;
+                req.locals["validated." + field.name] = raw_val;
+                req.locals["validated." + full_name] = raw_val;
+            } else if (field.target == SchemaTarget::Headers) {
+                auto hdr_opt = req.headers.get(field.name);
+                std::string raw_val;
+                bool is_present = false;
+                if (hdr_opt.has_value()) {
+                    raw_val = *hdr_opt;
+                    is_present = true;
+                }
+
+                if (!is_present) {
+                    if (field.default_value_str.has_value()) {
+                        raw_val = *field.default_value_str;
+                        is_present = true;
+                    } else if (field.is_required) {
+                        std::string msg = field.custom_message.empty()
+                            ? ("Field '" + field.name + "' is required")
+                            : field.custom_message;
+                        detail::fail_validation(res, full_name, msg);
+                        return;
+                    } else {
+                        continue;
+                    }
+                }
+
+                if (field.min_value.has_value() && raw_val.size() < static_cast<size_t>(*field.min_value)) {
+                    std::string msg = field.custom_message.empty()
+                        ? ("Field '" + field.name + "' length must be at least " + detail::format_validation_number(*field.min_value))
+                        : field.custom_message;
+                    detail::fail_validation(res, full_name, msg);
+                    return;
+                }
+                if (field.max_value.has_value() && raw_val.size() > static_cast<size_t>(*field.max_value)) {
+                    std::string msg = field.custom_message.empty()
+                        ? ("Field '" + field.name + "' length must be at most " + detail::format_validation_number(*field.max_value))
+                        : field.custom_message;
+                    detail::fail_validation(res, full_name, msg);
+                    return;
+                }
+
+                req.locals[field.name] = raw_val;
+                req.locals[full_name] = raw_val;
+                req.locals["validated." + field.name] = raw_val;
+                req.locals["validated." + full_name] = raw_val;
+            } else if (field.target == SchemaTarget::Body) {
+                if (!req.has_json() && !req.body.empty()) {
+                    std::string ct = detail::to_lower_ascii(req.header("content-type"));
+                    if (ct.find("application/json") != std::string::npos || req.body.front() == '{' || req.body.front() == '[') {
+                        try {
+                            req.json_value = std::make_shared<keet::json::JsonNode>(keet::json::parse(req.body));
+                        } catch (const std::exception& ex) {
+                            if (ct.find("application/json") != std::string::npos) {
+                                detail::fail_validation(res, "body", "Invalid JSON payload: " + std::string(ex.what()));
+                                return;
+                            }
+                        }
+                    }
+                }
+
+                if (req.has_json()) {
+                    const keet::json::JsonNode* node = detail::find_json_path(req.json_value.get(), field.name);
+                    if (node == nullptr || node->is_null()) {
+                        if (field.default_value_str.has_value()) {
+                            detail::set_json_default(req.json_value.get(), field.name, field.type, *field.default_value_str);
+                            node = detail::find_json_path(req.json_value.get(), field.name);
+                        }
+                    }
+
+                    if (node == nullptr || node->is_null()) {
+                        if (field.is_required) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' is required")
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        } else {
+                            continue;
+                        }
+                    }
+
+                    std::string str_val;
+                    if (field.type == SchemaType::String) {
+                        if (!node->is_string()) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be a string")
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                        str_val = std::get<std::string>(node->value);
+                        if (field.min_value.has_value() && str_val.size() < static_cast<size_t>(*field.min_value)) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' length must be at least " + detail::format_validation_number(*field.min_value))
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                        if (field.max_value.has_value() && str_val.size() > static_cast<size_t>(*field.max_value)) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' length must be at most " + detail::format_validation_number(*field.max_value))
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                        if (field.pattern_regex.has_value()) {
+                            try {
+                                std::regex re(*field.pattern_regex);
+                                if (!std::regex_search(str_val, re)) {
+                                    std::string msg = field.custom_message.empty()
+                                        ? ("Field '" + field.name + "' does not match required pattern")
+                                        : field.custom_message;
+                                    detail::fail_validation(res, full_name, msg);
+                                    return;
+                                }
+                            } catch (...) {
+                                detail::fail_validation(res, full_name, "Invalid regex pattern for field '" + field.name + "'");
+                                return;
+                            }
+                        }
+                        if (!field.enum_list.empty()) {
+                            if (std::find(field.enum_list.begin(), field.enum_list.end(), str_val) == field.enum_list.end()) {
+                                std::string msg = field.custom_message.empty()
+                                    ? ("Field '" + field.name + "' must be one of allowed values")
+                                    : field.custom_message;
+                                detail::fail_validation(res, full_name, msg);
+                                return;
+                            }
+                        }
+                    } else if (field.type == SchemaType::Int) {
+                        int64_t ival = 0;
+                        if (node->is_int()) {
+                            ival = std::get<int64_t>(node->value);
+                        } else if (node->is_float()) {
+                            double f = std::get<double>(node->value);
+                            if (std::floor(f) != f) {
+                                std::string msg = field.custom_message.empty()
+                                    ? ("Field '" + field.name + "' must be an integer")
+                                    : field.custom_message;
+                                detail::fail_validation(res, full_name, msg);
+                                return;
+                            }
+                            ival = static_cast<int64_t>(f);
+                        } else {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be an integer")
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+
+                        if (field.min_value.has_value() && ival < *field.min_value) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be at least " + detail::format_validation_number(*field.min_value))
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                        if (field.max_value.has_value() && ival > *field.max_value) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be at most " + detail::format_validation_number(*field.max_value))
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                        if (!field.enum_list.empty()) {
+                            std::string is = std::to_string(ival);
+                            if (std::find(field.enum_list.begin(), field.enum_list.end(), is) == field.enum_list.end()) {
+                                std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be one of allowed values")
+                                : field.custom_message;
+                                detail::fail_validation(res, full_name, msg);
+                                return;
+                            }
+                        }
+                        str_val = std::to_string(ival);
+                    } else if (field.type == SchemaType::Float) {
+                        double fval = 0.0;
+                        if (node->is_float()) {
+                            fval = std::get<double>(node->value);
+                        } else if (node->is_int()) {
+                            fval = static_cast<double>(std::get<int64_t>(node->value));
+                        } else {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be a number")
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+
+                        if (field.min_value.has_value() && fval < *field.min_value) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be at least " + detail::format_validation_number(*field.min_value))
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                        if (field.max_value.has_value() && fval > *field.max_value) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be at most " + detail::format_validation_number(*field.max_value))
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                        str_val = detail::format_validation_number(fval);
+                    } else if (field.type == SchemaType::Bool) {
+                        if (!node->is_bool()) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be a boolean")
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                        bool b = std::get<bool>(node->value);
+                        str_val = b ? "true" : "false";
+                    } else if (field.type == SchemaType::Array) {
+                        if (!node->is_array()) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be an array")
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                        const auto& arr = std::get<keet::json::JsonNode::Array>(node->value);
+                        if (field.min_value.has_value() && arr.size() < static_cast<size_t>(*field.min_value)) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must have at least " + detail::format_validation_number(*field.min_value) + " items")
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                        if (field.max_value.has_value() && arr.size() > static_cast<size_t>(*field.max_value)) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must have at most " + detail::format_validation_number(*field.max_value) + " items")
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                        str_val = keet::json::detail::dump_node(*node, 0);
+                    } else if (field.type == SchemaType::Object) {
+                        if (!node->is_object()) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be an object")
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                        str_val = keet::json::detail::dump_node(*node, 0);
+                    }
+
+                    req.locals[field.name] = str_val;
+                    req.locals[full_name] = str_val;
+                    req.locals["validated." + field.name] = str_val;
+                    req.locals["validated." + full_name] = str_val;
+                } else {
+                    auto it = req.body_params.find(field.name);
+                    std::string raw_val;
+                    bool is_present = false;
+                    if (it != req.body_params.end()) {
+                        raw_val = it->second;
+                        is_present = true;
+                    }
+
+                    if (!is_present) {
+                        if (field.default_value_str.has_value()) {
+                            raw_val = *field.default_value_str;
+                            req.body_params[field.name] = raw_val;
+                            is_present = true;
+                        } else if (field.is_required) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' is required")
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        } else {
+                            continue;
+                        }
+                    }
+
+                    if (field.type == SchemaType::String) {
+                        if (field.min_value.has_value() && raw_val.size() < static_cast<size_t>(*field.min_value)) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' length must be at least " + detail::format_validation_number(*field.min_value))
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                        if (field.max_value.has_value() && raw_val.size() > static_cast<size_t>(*field.max_value)) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' length must be at most " + detail::format_validation_number(*field.max_value))
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                        if (field.pattern_regex.has_value()) {
+                            try {
+                                std::regex re(*field.pattern_regex);
+                                if (!std::regex_search(raw_val, re)) {
+                                    std::string msg = field.custom_message.empty()
+                                        ? ("Field '" + field.name + "' does not match required pattern")
+                                        : field.custom_message;
+                                    detail::fail_validation(res, full_name, msg);
+                                    return;
+                                }
+                            } catch (...) {
+                                detail::fail_validation(res, full_name, "Invalid regex pattern for field '" + field.name + "'");
+                                return;
+                            }
+                        }
+                        if (!field.enum_list.empty()) {
+                            if (std::find(field.enum_list.begin(), field.enum_list.end(), raw_val) == field.enum_list.end()) {
+                                std::string msg = field.custom_message.empty()
+                                    ? ("Field '" + field.name + "' must be one of allowed values")
+                                    : field.custom_message;
+                                detail::fail_validation(res, full_name, msg);
+                                return;
+                            }
+                        }
+                    } else if (field.type == SchemaType::Int) {
+                        int64_t ival = 0;
+                        auto [ptr, ec] = std::from_chars(raw_val.data(), raw_val.data() + raw_val.size(), ival);
+                        if (ec != std::errc{} || ptr != raw_val.data() + raw_val.size()) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be an integer")
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                        if (field.min_value.has_value() && ival < *field.min_value) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be at least " + detail::format_validation_number(*field.min_value))
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                        if (field.max_value.has_value() && ival > *field.max_value) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be at most " + detail::format_validation_number(*field.max_value))
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                    } else if (field.type == SchemaType::Float) {
+                        double fval = 0.0;
+                        size_t idx = 0;
+                        try {
+                            fval = std::stod(raw_val, &idx);
+                            if (idx != raw_val.size()) {
+                                throw std::runtime_error("invalid float");
+                            }
+                        } catch (...) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be a number")
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                        if (field.min_value.has_value() && fval < *field.min_value) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be at least " + detail::format_validation_number(*field.min_value))
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                        if (field.max_value.has_value() && fval > *field.max_value) {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be at most " + detail::format_validation_number(*field.max_value))
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                    } else if (field.type == SchemaType::Bool) {
+                        std::string l = detail::to_lower_ascii(raw_val);
+                        if (l == "true" || l == "1" || l == "yes") {
+                            raw_val = "true";
+                        } else if (l == "false" || l == "0" || l == "no") {
+                            raw_val = "false";
+                        } else {
+                            std::string msg = field.custom_message.empty()
+                                ? ("Field '" + field.name + "' must be a boolean")
+                                : field.custom_message;
+                            detail::fail_validation(res, full_name, msg);
+                            return;
+                        }
+                    }
+
+                    req.locals[field.name] = raw_val;
+                    req.locals[full_name] = raw_val;
+                    req.locals["validated." + field.name] = raw_val;
+                    req.locals["validated." + full_name] = raw_val;
+                }
+            }
+        }
+
+        next();
     };
 }
 
