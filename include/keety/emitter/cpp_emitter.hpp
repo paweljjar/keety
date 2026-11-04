@@ -3,6 +3,7 @@
 #include <keety/ast/decl.hpp>
 #include <keety/ast/type.hpp>
 #include <keety/emitter/header_emitter.hpp>
+#include <keety/emitter/line_directive_tracker.hpp>
 #include <keety/ir/module.hpp>
 #include <keety/ir/operand.hpp>
 #include <keety/parser/parser.hpp>
@@ -28,6 +29,9 @@ struct CppEmitterOptions {
         "<iostream>"
     };
     bool is_root_module{false};                 ///< Emits main() process entry wrapper if true
+    bool emit_line_directives{true};            ///< Emits #line directives for source-to-source mapping
+    const diag::SourceManager* source_manager{nullptr}; ///< SourceManager to resolve FileId to paths
+    std::string source_file_path{""};           ///< Fallback or override source file path
 };
 
 /// Emits standard-compliant C++17 module implementation files (<module>.cpp).
@@ -48,6 +52,10 @@ public:
     // Configuration accessors
     [[nodiscard]] const CppEmitterOptions& get_options() const noexcept { return options_; }
     CppEmitterOptions& get_options() noexcept { return options_; }
+    [[nodiscard]] bool emits_line_directives() const noexcept { return options_.emit_line_directives; }
+    void set_emit_line_directives(bool emit) noexcept { options_.emit_line_directives = emit; }
+    void set_source_manager(const diag::SourceManager* sm) noexcept { options_.source_manager = sm; }
+    void set_source_file_path(std::string path) { options_.source_file_path = std::move(path); }
 
     // Header include management
     [[nodiscard]] std::string get_header_include() const;
@@ -62,9 +70,11 @@ public:
     [[nodiscard]] static std::string make_internal_var_name(std::string_view var_name);
 
     // Storage allocation management
-    void add_storage_allocation(std::string name, std::string cpp_type, std::string initial_value = "{}");
+    void add_storage_allocation(std::string name, std::string cpp_type, std::string initial_value = "{}", std::string line_directive = "");
     [[nodiscard]] const std::vector<std::string>& get_storage_allocations() const noexcept { return storage_allocations_; }
     void clear_storage_allocations() noexcept { storage_allocations_.clear(); }
+
+    [[nodiscard]] std::string format_line(const diag::SourceSpan& span) const;
 
     // Function definition management
     void add_function_definition(std::string function_def);
@@ -167,6 +177,7 @@ private:
     std::unordered_set<std::string> imported_crypto_symbols_{};
     std::vector<std::string> test_function_names_{};
     std::unordered_set<std::string> user_imported_modules_{};
+    mutable LineDirectiveTracker line_tracker_;
 };
 
 } // namespace keety::emitter

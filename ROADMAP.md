@@ -23,14 +23,13 @@ flowchart TD
         A4["Package Manager (kattery)"]
         A5["Language Server Protocol (keet-lsp)"]
         A6["VS Code Extension"]
+        A7["Testing Framework (keety test)"]
+        A8["Source Line Mapping (#line)"]
     end
 
     subgraph B["Category B: To Do"]
         subgraph B1["B1: Near-Term"]
-            B1_1["Testing Framework (keety test)"]
-            B1_2["HTTP Server (std::net::http)"]
-            B1_3["Cryptography (std::crypto)"]
-            B1_4["Source-to-Source Line Mapping"]
+            B1_1["HTTP Server (std::net::http)"]
         end
         subgraph B2["B2: Mid-Term"]
             B2_1["Code Formatter (keety fmt)"]
@@ -120,6 +119,16 @@ Production-ready components fully implemented, tested with 100% test coverage, a
   - Formatted terminal reporters with pass/fail counts, execution timings, and error traces.
   - Integration with package manager runner (`kattery test`).
 
+### 8. Source-to-Source Line Mapping (`#line`)
+- **Emitted C++ Line Directives (`#line`):**
+  - Deduplicated `#line <lineno> "<source>.keet"` directives emitted across AST and KeetIR C++ / Header emitters.
+  - Originating `.keet` source line reporting for host compiler diagnostics and static assertions (Clang, GCC, MSVC).
+- **Debugger Line Tables:**
+  - LLDB, GDB, and VS Code native debuggers bind breakpoints, step through statements, and format stack traces directly against `.keet` files.
+- **CLI & Toolchain Coordination:**
+  - Automatic native debug symbol emission (`-g` / `/Z7`) on debug builds.
+  - `--no-line-directives` CLI flag for clean C++ emission and debugging compiler internals.
+
 ---
 
 ## B. To Do
@@ -147,13 +156,6 @@ High-priority deliverables focusing on immediate networking capabilities, crypto
   - Composable middleware support (request logging, CORS headers, gzip compression).
 - **Static File Serving:**
   - `http.serveDir("/static", "./public")` with automatic MIME-type detection.
-
-#### 2. Source-to-Source Line Mapping
-- **Emitted C++ Line Directives (`#line`):**
-  - Emit `#line <lineno> "<source>.keet"` directives in generated `.hpp` and `.cpp` files.
-  - Ensure compiler errors from host toolchains (Clang, GCC, MSVC) point directly to the originating `.keet` source lines.
-- **Debugger Line Tables:**
-  - Ensure native debugger call stacks (LLDB/GDB) display original KeetScript line numbers and filenames rather than intermediate C++ lines.
 
 ---
 

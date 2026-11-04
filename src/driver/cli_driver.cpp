@@ -463,6 +463,10 @@ CliOptions CliDriver::parse_args(const std::vector<std::string>& args) {
             options.verbose = true;
         } else if (arg == "--verbose-cpp") {
             options.verbose_cpp = true;
+        } else if (arg == "-g" || arg == "--debug") {
+            options.debug_info = true;
+        } else if (arg == "--no-line-directives") {
+            options.emit_line_directives = false;
         } else if (arg == "--benchmarks") {
             options.test_benchmarks = true;
         } else if (arg == "--conformance") {
@@ -591,6 +595,8 @@ void CliDriver::print_help(std::ostream& out) {
         << "  --benchmarks                         Run performance benchmarks suite\n"
         << "  --conformance                        Run conformance test suite\n"
         << "  --no-color                           Disable ANSI color escape sequences in output\n"
+        << "  --no-line-directives                 Suppress #line source mapping directives in emitted C++\n"
+        << "  -g, --debug                          Emit native debug symbols (-g / /Z7)\n"
         << "  --diagnostic-format <human|json>     Format diagnostics as human-readable terminal text or JSON array\n"
         << "  --json-diagnostics                   Shorthand for --diagnostic-format=json\n"
         << "  -h, --help                           Display usage documentation\n"
@@ -944,7 +950,9 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
             }
             return 1;
         }
-        emitter::HeaderEmitter header_emitter(*target_node->ast, *ir_mod);
+        emitter::HeaderEmitterOptions h_opts;
+        h_opts.emit_line_directives = options.emit_line_directives;
+        emitter::HeaderEmitter header_emitter(*target_node->ast, *ir_mod, h_opts);
         content = header_emitter.emit();
         break;
     }
@@ -957,7 +965,11 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
             }
             return 1;
         }
-        emitter::CppEmitter cpp_emitter(*target_node->ast, *ir_mod);
+        emitter::CppEmitterOptions cpp_opts;
+        cpp_opts.emit_line_directives = options.emit_line_directives;
+        cpp_opts.source_manager = &sm;
+        cpp_opts.source_file_path = target_node->canonicalPath;
+        emitter::CppEmitter cpp_emitter(*target_node->ast, *ir_mod, cpp_opts);
         content = cpp_emitter.emit();
         break;
     }
@@ -1207,7 +1219,9 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
         }
 
         // Header emission
-        emitter::HeaderEmitter header_emitter(*node->ast, *ir_mod);
+        emitter::HeaderEmitterOptions h_opts;
+        h_opts.emit_line_directives = options.emit_line_directives;
+        emitter::HeaderEmitter header_emitter(*node->ast, *ir_mod, h_opts);
         std::string hpp_content = header_emitter.emit();
         std::filesystem::path hpp_path = build_dir / (node->moduleName + ".hpp");
         std::ofstream hpp_file(hpp_path);
@@ -1216,6 +1230,9 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
         // C++ source emission
         emitter::CppEmitterOptions cpp_opts;
         cpp_opts.header_include = "\"" + node->moduleName + ".hpp\"";
+        cpp_opts.emit_line_directives = options.emit_line_directives;
+        cpp_opts.source_manager = &sm;
+        cpp_opts.source_file_path = node->canonicalPath;
         if (node->canonicalPath == canonical_entry.string()) {
             cpp_opts.is_root_module = true;
         }
@@ -1264,11 +1281,13 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     comp_opts.wrapv = options.wrapv;
     comp_opts.cpp_standard = "c++17";
     comp_opts.compile_only = true;
+    comp_opts.debug_symbols = options.debug_info || (options.opt_level == OptimizationLevel::O0);
     comp_opts.include_directories.push_back(build_dir);
 
     if (options.verbose) {
         out << "[verbose] Optimization level: " << to_string(options.opt_level)
             << " (flag: " << to_compiler_flag(options.opt_level, toolchain_driver.get_toolchain().kind) << ")\n";
+        out << "[verbose] Debug symbols: " << (comp_opts.debug_symbols ? "enabled" : "disabled") << "\n";
         out << "[verbose] Two's-complement overflow semantics: " << (options.wrapv ? "enabled" : "disabled") << "\n";
     }
 
@@ -1311,6 +1330,7 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
 
     LinkOptions link_opts;
     link_opts.kind = BinaryKind::Executable;
+    link_opts.debug_symbols = comp_opts.debug_symbols;
 #if defined(_WIN32)
     link_opts.libraries.push_back("ws2_32");
     link_opts.libraries.push_back("bcrypt");

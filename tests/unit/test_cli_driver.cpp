@@ -28,6 +28,21 @@ TEST_CASE("CLI argument parser extracts commands and options", "[driver][cli]") 
         CHECK(ver_opts.command == CliCommand::Version);
     }
 
+    SECTION("Parse debug and line directive flags") {
+        auto def_opts = CliDriver::parse_args({"build", "main.keet"});
+        CHECK(def_opts.emit_line_directives == true);
+        CHECK(def_opts.debug_info == false);
+
+        auto no_line_opts = CliDriver::parse_args({"build", "main.keet", "--no-line-directives"});
+        CHECK(no_line_opts.emit_line_directives == false);
+
+        auto debug_opts = CliDriver::parse_args({"build", "main.keet", "-g"});
+        CHECK(debug_opts.debug_info == true);
+
+        auto debug_long_opts = CliDriver::parse_args({"build", "main.keet", "--debug"});
+        CHECK(debug_long_opts.debug_info == true);
+    }
+
     SECTION("Parse emit, build and run stubs with flags") {
         auto emit_opts = CliDriver::parse_args({"emit", "app.keet", "--cpp", "-o", "build/out"});
         CHECK(emit_opts.command == CliCommand::Emit);
@@ -939,6 +954,109 @@ TEST_CASE("CLI test runner end-to-end execution", "[driver][cli][test]") {
         CHECK(!std::filesystem::exists(proj_dir / "src" / "math.test"));
     }
 
+    std::filesystem::remove_all(temp_dir, ec);
+}
+
+TEST_CASE("CLI emit and build handle line directives correctly", "[driver][cli][line_mapping]") {
+    auto temp_dir = std::filesystem::temp_directory_path() / "keety_cli_line_directive_test";
+    std::filesystem::create_directories(temp_dir);
+
+    auto src_file = temp_dir / "app.keet";
+    {
+        std::ofstream out(src_file);
+        out << "fn compute(x: int): int {\n"
+            << "    let y: int = x * 2;\n"
+            << "    return y + 1;\n"
+            << "}\n\n"
+            << "fn main(): int {\n"
+            << "    return compute(5);\n"
+            << "}\n";
+    }
+
+    SECTION("Emit CPP with default options contains #line directives") {
+        std::ostringstream out;
+        std::ostringstream err;
+        CliOptions opts;
+        opts.command = CliCommand::Emit;
+        opts.input_file = src_file;
+        opts.emit_target = EmitTarget::Cpp;
+
+        int res = CliDriver::run(opts, out, err);
+        CHECK(res == 0);
+        std::string cpp_str = out.str();
+        CHECK(cpp_str.find("#line 1 ") != std::string::npos);
+        CHECK(cpp_str.find("app.keet") != std::string::npos);
+    }
+
+    SECTION("Emit CPP with --no-line-directives contains no #line directives") {
+        std::ostringstream out;
+        std::ostringstream err;
+        CliOptions opts;
+        opts.command = CliCommand::Emit;
+        opts.input_file = src_file;
+        opts.emit_target = EmitTarget::Cpp;
+        opts.emit_line_directives = false;
+
+        int res = CliDriver::run(opts, out, err);
+        CHECK(res == 0);
+        std::string cpp_str = out.str();
+        CHECK(cpp_str.find("#line") == std::string::npos);
+    }
+
+    SECTION("Build binary with and without line directives") {
+        ToolchainDriver driver;
+        if (!driver.has_valid_toolchain()) {
+            std::error_code ec;
+            std::filesystem::remove_all(temp_dir, ec);
+            return;
+        }
+
+        auto build_out = temp_dir / "out";
+        std::filesystem::create_directories(build_out);
+
+        // Default build: #line should be emitted into generated .cpp
+        {
+            std::ostringstream out, err;
+            CliOptions opts;
+            opts.command = CliCommand::Build;
+            opts.input_file = src_file;
+            opts.output_dir = build_out;
+            opts.output_is_dir = true;
+
+            int res = CliDriver::run(opts, out, err);
+            CHECK(res == 0);
+
+            auto gen_cpp = build_out / ".keety_build" / "app.cpp";
+            REQUIRE(std::filesystem::exists(gen_cpp));
+            std::ifstream in(gen_cpp);
+            std::stringstream ss;
+            ss << in.rdbuf();
+            CHECK(ss.str().find("#line") != std::string::npos);
+        }
+
+        // Build with --no-line-directives: generated .cpp should contain no #line
+        {
+            std::ostringstream out, err;
+            CliOptions opts;
+            opts.command = CliCommand::Build;
+            opts.input_file = src_file;
+            opts.output_dir = build_out;
+            opts.output_is_dir = true;
+            opts.emit_line_directives = false;
+
+            int res = CliDriver::run(opts, out, err);
+            CHECK(res == 0);
+
+            auto gen_cpp = build_out / ".keety_build" / "app.cpp";
+            REQUIRE(std::filesystem::exists(gen_cpp));
+            std::ifstream in(gen_cpp);
+            std::stringstream ss;
+            ss << in.rdbuf();
+            CHECK(ss.str().find("#line") == std::string::npos);
+        }
+    }
+
+    std::error_code ec;
     std::filesystem::remove_all(temp_dir, ec);
 }
 

@@ -8,6 +8,24 @@ namespace keety::ir {
 AstLowerer::AstLowerer(diag::DiagnosticEmitter* emitter)
     : emitter_(emitter) {}
 
+namespace {
+struct SpanGuard {
+    diag::SourceSpan& target;
+    diag::SourceSpan prev;
+
+    SpanGuard(diag::SourceSpan& t, diag::SourceSpan next)
+        : target(t), prev(t) {
+        if (next.isValid()) {
+            target = next;
+        }
+    }
+
+    ~SpanGuard() {
+        target = prev;
+    }
+};
+} // namespace
+
 BasicBlock* AstLowerer::create_block(const std::string& prefix) {
     if (!current_fn_) {
         throw std::runtime_error("Cannot create basic block outside of a function context");
@@ -18,6 +36,9 @@ BasicBlock* AstLowerer::create_block(const std::string& prefix) {
 void AstLowerer::emit(std::unique_ptr<Instruction> inst) {
     if (!current_bb_) {
         throw std::runtime_error("Cannot emit instruction into null basic block");
+    }
+    if (!inst->get_span().isValid() && current_span_.isValid()) {
+        inst->set_span(current_span_);
     }
     current_bb_->append_instruction(std::move(inst));
 }
@@ -148,6 +169,8 @@ std::unique_ptr<Module> AstLowerer::lower_module(const parser::ModuleAST& module
 }
 
 std::unique_ptr<Function> AstLowerer::lower_function(const ast::FnDecl& fn_decl) {
+    SpanGuard guard(current_span_, fn_decl.getSpan());
+
     typechecker::TypePtr return_type = fn_decl.getReturnType()
         ? typechecker::Type::fromAnnotation(fn_decl.getReturnType())
         : typechecker::Type::voidType();
@@ -188,6 +211,8 @@ std::unique_ptr<Function> AstLowerer::lower_function(const ast::FnDecl& fn_decl)
 }
 
 void AstLowerer::lower_statement(const ast::Stmt& stmt) {
+    SpanGuard guard(current_span_, stmt.getSpan());
+
     if (current_bb_ && current_bb_->has_terminator()) {
         // Current block is already terminated; any subsequent statement would be unreachable
         current_bb_ = create_block("unreachable");
@@ -624,6 +649,8 @@ BasicBlock* AstLowerer::find_continue_target(const std::string& label) const {
 // -----------------------------------------------------------------------------
 
 Operand AstLowerer::lower_expression(const ast::Expr& expr) {
+    SpanGuard guard(current_span_, expr.getSpan());
+
     if (const auto* lit = dynamic_cast<const ast::LiteralExpr*>(&expr)) {
         return lower_literal_expr(*lit);
     } else if (const auto* ident = dynamic_cast<const ast::IdentExpr*>(&expr)) {

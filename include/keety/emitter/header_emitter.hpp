@@ -1,6 +1,7 @@
 #pragma once
 
 #include <keety/ast/decl.hpp>
+#include <keety/emitter/line_directive_tracker.hpp>
 #include <keety/ir/module.hpp>
 #include <keety/parser/parser.hpp>
 
@@ -35,6 +36,9 @@ struct HeaderEmitterOptions {
         "<vector>"
     };
     std::vector<std::string> imported_headers{};
+    bool emit_line_directives{true};            ///< Emits #line directives for source-to-source mapping
+    const diag::SourceManager* source_manager{nullptr}; ///< SourceManager to resolve FileId to paths
+    std::string source_file_path{""};           ///< Fallback or override source file path
 };
 
 /// Emits deterministic, standard-compliant C++17 module header files (<module>.hpp).
@@ -55,6 +59,10 @@ public:
     // Configuration accessors
     [[nodiscard]] const HeaderEmitterOptions& get_options() const noexcept { return options_; }
     HeaderEmitterOptions& get_options() noexcept { return options_; }
+    [[nodiscard]] bool emits_line_directives() const noexcept { return options_.emit_line_directives; }
+    void set_emit_line_directives(bool emit) noexcept { options_.emit_line_directives = emit; }
+    void set_source_manager(const diag::SourceManager* sm) noexcept { options_.source_manager = sm; }
+    void set_source_file_path(std::string path) { options_.source_file_path = std::move(path); }
 
     // Header management
     void add_standard_header(std::string header);
@@ -129,6 +137,8 @@ public:
     [[nodiscard]] const std::vector<std::string>& get_function_templates() const noexcept { return function_templates_; }
     [[nodiscard]] const std::vector<std::string>& get_function_prototypes() const noexcept { return function_prototypes_; }
 
+    [[nodiscard]] std::string format_line(const diag::SourceSpan& span) const;
+
     // Full header generation
     [[nodiscard]] std::string emit() const;
     void emit(std::ostream& os) const;
@@ -151,6 +161,7 @@ private:
     std::vector<std::string> const_views_{};
     std::vector<std::string> function_templates_{};
     std::vector<std::string> function_prototypes_{};
+    mutable LineDirectiveTracker line_tracker_;
 };
 
 } // namespace keety::emitter
