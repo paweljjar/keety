@@ -1,5 +1,6 @@
 #pragma once
 
+#include <keet/crypto.hpp>
 #include <keet/error.hpp>
 #include <keet/json.hpp>
 #include <keet/net.hpp>
@@ -292,6 +293,7 @@ private:
     case 415: return "Unsupported Media Type";
     case 418: return "I'm a teapot";
     case 422: return "Unprocessable Entity";
+    case 426: return "Upgrade Required";
     case 429: return "Too Many Requests";
     case 431: return "Request Header Fields Too Large";
     case 500: return "Internal Server Error";
@@ -415,6 +417,12 @@ public:
     [[nodiscard]] const std::string& error_message() const noexcept { return error_msg_; }
     [[nodiscard]] const HttpRequestMessage& message() const noexcept { return message_; }
     [[nodiscard]] HttpRequestMessage& message() noexcept { return message_; }
+    [[nodiscard]] const std::string& buffer() const noexcept { return buffer_; }
+    [[nodiscard]] std::string take_buffer() {
+        std::string b = std::move(buffer_);
+        buffer_.clear();
+        return b;
+    }
 
     /// Feeds incoming raw socket bytes to the incremental HTTP state machine.
     /// Returns true if more data is accepted or complete, false on unrecoverable protocol error.
@@ -2524,6 +2532,228 @@ inline Middleware validate(Schema schema) {
 }
 
 // ============================================================================
+// Part 4: WebSockets (RFC 6455)
+// Phase 4.1: WebSocket Upgrade Handshake
+// ============================================================================
+
+inline constexpr std::string_view kWebSocketGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+/// Computes RFC 6455 Sec-WebSocket-Accept token: Base64(SHA1(client_key + GUID))
+inline std::string compute_websocket_accept(std::string_view client_key) {
+    std::string concat = std::string(client_key) + std::string(kWebSocketGuid);
+    std::string digest = keet::crypto::sha1Bytes(concat);
+    return keet::crypto::toBase64(digest);
+}
+
+enum class WebSocketUpgradeStatus {
+    Success,
+    NotAnUpgrade,
+    VersionMismatch,
+    InvalidKey,
+    BadRequest
+};
+
+struct WebSocketUpgradeValidation {
+    WebSocketUpgradeStatus status = WebSocketUpgradeStatus::NotAnUpgrade;
+    std::string client_key;
+    std::string accept_key;
+    std::string selected_protocol;
+    std::string error_message;
+};
+
+inline bool is_websocket_upgrade(std::string_view method, const HeaderMap& headers) {
+    if (detail::to_upper_ascii(method) != "GET") {
+        return false;
+    }
+    std::string up = detail::to_lower_ascii(headers.get_or("upgrade", ""));
+    if (up != "websocket") {
+        return false;
+    }
+    std::string conn = detail::to_lower_ascii(headers.get_or("connection", ""));
+    return conn.find("upgrade") != std::string::npos;
+}
+
+inline bool is_websocket_upgrade(const HttpRequestMessage& msg) {
+    return is_websocket_upgrade(msg.line.method, msg.headers);
+}
+
+inline bool is_websocket_upgrade(const Request& req) {
+    return is_websocket_upgrade(req.method, req.headers);
+}
+
+inline WebSocketUpgradeValidation validate_websocket_upgrade(
+    const Request& req,
+    const std::vector<std::string>& supported_subprotocols = {}
+) {
+    WebSocketUpgradeValidation result;
+
+    if (!is_websocket_upgrade(req)) {
+        result.status = WebSocketUpgradeStatus::NotAnUpgrade;
+        result.error_message = "Not a WebSocket upgrade request (requires GET with Upgrade: websocket and Connection: Upgrade)";
+        return result;
+    }
+
+    std::string version = req.header("sec-websocket-version");
+    if (version != "13") {
+        result.status = WebSocketUpgradeStatus::VersionMismatch;
+        result.error_message = "Unsupported WebSocket version '" + version + "' (requires version 13)";
+        return result;
+    }
+
+    std::string key = req.header("sec-websocket-key");
+    if (key.empty()) {
+        result.status = WebSocketUpgradeStatus::InvalidKey;
+        result.error_message = "Missing Sec-WebSocket-Key header";
+        return result;
+    }
+
+    try {
+        std::string decoded_key = keet::crypto::fromBase64(key);
+        if (decoded_key.size() != 16) {
+            result.status = WebSocketUpgradeStatus::InvalidKey;
+            result.error_message = "Sec-WebSocket-Key must decode to exactly 16 bytes (got " + std::to_string(decoded_key.size()) + ")";
+            return result;
+        }
+    } catch (...) {
+        result.status = WebSocketUpgradeStatus::InvalidKey;
+        result.error_message = "Sec-WebSocket-Key is not valid Base64";
+        return result;
+    }
+
+    result.client_key = key;
+    result.accept_key = compute_websocket_accept(key);
+
+    // Subprotocol negotiation (RFC 6455 Sec 1.9 / 4.2.2)
+    std::string client_proto = req.header("sec-websocket-protocol");
+    if (!client_proto.empty() && !supported_subprotocols.empty()) {
+        size_t start = 0;
+        while (start < client_proto.size()) {
+            size_t comma = client_proto.find(',', start);
+            std::string_view p = (comma == std::string_view::npos)
+                ? std::string_view(client_proto).substr(start)
+                : std::string_view(client_proto).substr(start, comma - start);
+            p = detail::trim_ascii(p);
+            for (const auto& sup : supported_subprotocols) {
+                if (p == sup) {
+                    result.selected_protocol = std::string(p);
+                    break;
+                }
+            }
+            if (!result.selected_protocol.empty()) break;
+            if (comma == std::string_view::npos) break;
+            start = comma + 1;
+        }
+    }
+
+    result.status = WebSocketUpgradeStatus::Success;
+    return result;
+}
+
+inline HttpResponseMessage make_websocket_upgrade_response(
+    const Request& req,
+    const std::vector<std::string>& supported_subprotocols = {}
+) {
+    auto val = validate_websocket_upgrade(req, supported_subprotocols);
+    HttpResponseMessage resp;
+
+    if (val.status == WebSocketUpgradeStatus::Success) {
+        resp.status = 101;
+        resp.headers.set("Upgrade", "websocket");
+        resp.headers.set("Connection", "Upgrade");
+        resp.headers.set("Sec-WebSocket-Accept", val.accept_key);
+        if (!val.selected_protocol.empty()) {
+            resp.headers.set("Sec-WebSocket-Protocol", val.selected_protocol);
+        }
+        return resp;
+    }
+
+    if (val.status == WebSocketUpgradeStatus::VersionMismatch) {
+        resp.status = 426;
+        resp.headers.set("Sec-WebSocket-Version", "13");
+        resp.headers.set("Connection", "close");
+        resp.headers.set("Content-Type", "text/plain; charset=utf-8");
+        resp.body = "Upgrade Required: WebSocket version 13 required";
+        return resp;
+    }
+
+    resp.status = 400;
+    resp.headers.set("Connection", "close");
+    resp.headers.set("Content-Type", "text/plain; charset=utf-8");
+    resp.body = "Bad Request: " + val.error_message;
+    return resp;
+}
+
+enum class WebSocketState {
+    Connecting,
+    Open,
+    Closing,
+    Closed
+};
+
+class WebSocket {
+public:
+    net::detail::socket_t socket_fd = net::detail::kInvalidSocket;
+    WebSocketState state = WebSocketState::Connecting;
+    std::string path;
+    std::string protocol;
+    std::string pending_buffer;
+    std::unordered_map<std::string, std::string> params;
+    std::unordered_map<std::string, std::string> query;
+    HeaderMap headers;
+
+    WebSocket() = default;
+    WebSocket(net::detail::socket_t fd,
+              std::string req_path,
+              std::string subproto = "",
+              std::unordered_map<std::string, std::string> route_params = {},
+              std::unordered_map<std::string, std::string> query_params = {},
+              HeaderMap hdrs = {})
+        : socket_fd(fd),
+          state(WebSocketState::Open),
+          path(std::move(req_path)),
+          protocol(std::move(subproto)),
+          params(std::move(route_params)),
+          query(std::move(query_params)),
+          headers(std::move(hdrs)) {}
+
+    [[nodiscard]] bool is_open() const noexcept {
+        return state == WebSocketState::Open && socket_fd != net::detail::kInvalidSocket;
+    }
+
+    [[nodiscard]] net::detail::socket_t socket() const noexcept {
+        return socket_fd;
+    }
+
+    [[nodiscard]] std::string param(std::string_view name, std::string_view fallback = "") const {
+        auto it = params.find(std::string(name));
+        return (it != params.end()) ? it->second : std::string(fallback);
+    }
+
+    [[nodiscard]] std::string query_param(std::string_view name, std::string_view fallback = "") const {
+        auto it = query.find(std::string(name));
+        return (it != query.end()) ? it->second : std::string(fallback);
+    }
+
+    void close(uint16_t code = 1000, std::string_view reason = "") {
+        (void)code;
+        (void)reason;
+        if (state == WebSocketState::Closed) return;
+        state = WebSocketState::Closed;
+        if (socket_fd != net::detail::kInvalidSocket) {
+            net::detail::close_raw_socket(socket_fd);
+            socket_fd = net::detail::kInvalidSocket;
+        }
+    }
+};
+
+using WebSocketHandler = std::function<void(std::shared_ptr<WebSocket>)>;
+
+struct WebSocketRouteEntry {
+    std::vector<std::string> subprotocols;
+    WebSocketHandler handler;
+};
+
+// ============================================================================
 // Phase 1.2: Server Socket Lifecycle & Concurrency Engine
 // ============================================================================
 
@@ -3319,6 +3549,30 @@ public:
         router_.all(path, std::move(handler));
     }
 
+    void ws(std::string_view path, WebSocketHandler handler) {
+        ws(path, std::vector<std::string>{}, std::move(handler));
+    }
+
+    void ws(std::string_view path, std::vector<std::string> subprotocols, WebSocketHandler handler) {
+        std::lock_guard<std::mutex> lock(ws_router_mutex_);
+        WebSocketRouteEntry entry;
+        entry.subprotocols = std::move(subprotocols);
+        entry.handler = std::move(handler);
+        ws_router_.add("GET", path, std::move(entry));
+    }
+
+    void ws(std::string_view path, std::function<void(WebSocket&)> handler) {
+        ws(path, std::vector<std::string>{}, [h = std::move(handler)](std::shared_ptr<WebSocket> ws) {
+            if (ws) h(*ws);
+        });
+    }
+
+    void ws(std::string_view path, std::vector<std::string> subprotocols, std::function<void(WebSocket&)> handler) {
+        ws(path, std::move(subprotocols), [h = std::move(handler)](std::shared_ptr<WebSocket> ws) {
+            if (ws) h(*ws);
+        });
+    }
+
     void use_router(const HttpRouter& r) {
         std::lock_guard<std::mutex> lock(router_mutex_);
         router_ = r;
@@ -3591,6 +3845,88 @@ private:
                 bool keep_alive_flag = raw_req.keep_alive;
                 try {
                     Request req(raw_req);
+
+                    // Check WebSocket routes
+                    RouteMatchResult<WebSocketRouteEntry> ws_match;
+                    {
+                        std::lock_guard<std::mutex> lock(ws_router_mutex_);
+                        if (!ws_router_.empty()) {
+                            ws_match = ws_router_.match(req.method, req.path);
+                        }
+                    }
+
+                    if (ws_match.status == RouteMatchStatus::Found) {
+                        in_flight_requests_.fetch_sub(1);
+                        in_flight_cv_.notify_all();
+
+                        auto val = validate_websocket_upgrade(req, ws_match.handler.subprotocols);
+
+                        if (val.status == WebSocketUpgradeStatus::VersionMismatch) {
+                            HttpResponseMessage err_resp;
+                            err_resp.status = 426;
+                            err_resp.headers.set("Sec-WebSocket-Version", "13");
+                            err_resp.headers.set("Connection", "close");
+                            err_resp.headers.set("Content-Type", "text/plain; charset=utf-8");
+                            err_resp.body = "Upgrade Required: WebSocket version 13 required";
+                            std::string raw = HttpResponseSerializer::serialize(err_resp);
+                            detail::socket_send_all(client_fd, raw.data(), raw.size(), config_.write_timeout_ms);
+                            net::detail::close_raw_socket(client_fd);
+                            return;
+                        }
+
+                        if (val.status == WebSocketUpgradeStatus::InvalidKey) {
+                            HttpResponseMessage err_resp;
+                            err_resp.status = 400;
+                            err_resp.headers.set("Connection", "close");
+                            err_resp.headers.set("Content-Type", "text/plain; charset=utf-8");
+                            err_resp.body = "Bad Request: " + val.error_message;
+                            std::string raw = HttpResponseSerializer::serialize(err_resp);
+                            detail::socket_send_all(client_fd, raw.data(), raw.size(), config_.write_timeout_ms);
+                            net::detail::close_raw_socket(client_fd);
+                            return;
+                        }
+
+                        if (val.status != WebSocketUpgradeStatus::Success) {
+                            HttpResponseMessage err_resp;
+                            err_resp.status = 400;
+                            err_resp.headers.set("Connection", "close");
+                            err_resp.headers.set("Content-Type", "text/plain; charset=utf-8");
+                            err_resp.body = "Bad Request: Expected WebSocket Upgrade";
+                            std::string raw = HttpResponseSerializer::serialize(err_resp);
+                            detail::socket_send_all(client_fd, raw.data(), raw.size(), config_.write_timeout_ms);
+                            net::detail::close_raw_socket(client_fd);
+                            return;
+                        }
+
+                        // Handshake Success: Send 101 Switching Protocols
+                        std::string handshake_raw = "HTTP/1.1 101 Switching Protocols\r\n"
+                                                    "Upgrade: websocket\r\n"
+                                                    "Connection: Upgrade\r\n"
+                                                    "Sec-WebSocket-Accept: " + val.accept_key + "\r\n";
+                        if (!val.selected_protocol.empty()) {
+                            handshake_raw += "Sec-WebSocket-Protocol: " + val.selected_protocol + "\r\n";
+                        }
+                        handshake_raw += "\r\n";
+
+                        if (!detail::socket_send_all(client_fd, handshake_raw.data(), handshake_raw.size(), config_.write_timeout_ms)) {
+                            net::detail::close_raw_socket(client_fd);
+                            return;
+                        }
+
+                        // Transition socket to WebSocket frame mode
+                        auto ws = std::make_shared<WebSocket>(
+                            client_fd, req.path, val.selected_protocol, ws_match.params, req.query, req.headers
+                        );
+                        ws->pending_buffer = parser.take_buffer();
+
+                        try {
+                            ws_match.handler.handler(ws);
+                        } catch (...) {
+                            ws->close();
+                        }
+                        return; // Connection is now managed as a WebSocket session
+                    }
+
                     Response res;
 
                     std::vector<MiddlewareEntry> mws;
@@ -3751,12 +4087,15 @@ private:
                 in_flight_requests_.fetch_sub(1);
                 in_flight_cv_.notify_all();
 
-                bool will_keep_alive = keep_alive_flag &&
+                bool will_keep_alive = (resp.status != 101) &&
+                                       keep_alive_flag &&
                                        running_.load() &&
                                        (requests_served < config_.max_keep_alive_requests) &&
                                        (detail::to_lower_ascii(resp.headers.get_or("connection", "")) != "close");
 
-                if (will_keep_alive) {
+                if (resp.status == 101) {
+                    // Handshake response already sets Upgrade and Connection: Upgrade headers
+                } else if (will_keep_alive) {
                     resp.headers.set("Connection", "keep-alive");
                     resp.headers.set("Keep-Alive", "timeout=" + std::to_string(config_.keep_alive_timeout_ms / 1000) +
                                                     ", max=" + std::to_string(config_.max_keep_alive_requests - requests_served));
@@ -3768,6 +4107,10 @@ private:
                 if (!detail::socket_send_all(client_fd, raw.data(), raw.size(), config_.write_timeout_ms)) {
                     net::detail::close_raw_socket(client_fd);
                     return;
+                }
+
+                if (resp.status == 101) {
+                    return; // Switched protocols; socket handed over
                 }
 
                 if (!will_keep_alive) {
@@ -3794,6 +4137,9 @@ private:
 
     std::vector<MiddlewareEntry> middlewares_;
     std::mutex middleware_mutex_;
+
+    RadixRouter<WebSocketRouteEntry> ws_router_;
+    std::mutex ws_router_mutex_;
 
     net::detail::socket_t listen_fd_ = net::detail::kInvalidSocket;
     int bound_port_ = 0;

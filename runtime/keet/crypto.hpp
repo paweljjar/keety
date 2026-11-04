@@ -382,6 +382,119 @@ inline BoolByte timingSafeEqual(const std::string& a, const std::string& b) noex
 namespace detail {
 
 // ----------------------------------------------------------------------------
+// SHA-1 Implementation (FIPS 180-1, RFC 3174)
+// ----------------------------------------------------------------------------
+struct Sha1Core {
+    uint32_t state[5]{0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0};
+    uint8_t buffer[64]{0};
+    size_t buffer_len{0};
+    uint64_t total_bits{0};
+
+    void processBlock(const uint8_t* block) {
+        uint32_t W[80];
+        for (int t = 0; t < 16; ++t) {
+            W[t] = (static_cast<uint32_t>(block[t * 4]) << 24) |
+                   (static_cast<uint32_t>(block[t * 4 + 1]) << 16) |
+                   (static_cast<uint32_t>(block[t * 4 + 2]) << 8) |
+                   (static_cast<uint32_t>(block[t * 4 + 3]));
+        }
+        for (int t = 16; t < 80; ++t) {
+            W[t] = rotl(W[t - 3] ^ W[t - 8] ^ W[t - 14] ^ W[t - 16], 1);
+        }
+
+        uint32_t a = state[0], b = state[1], c = state[2], d = state[3], e = state[4];
+
+        for (int t = 0; t < 80; ++t) {
+            uint32_t f = 0, k = 0;
+            if (t < 20) {
+                f = (b & c) | ((~b) & d);
+                k = 0x5A827999;
+            } else if (t < 40) {
+                f = b ^ c ^ d;
+                k = 0x6ED9EBA1;
+            } else if (t < 60) {
+                f = (b & c) | (b & d) | (c & d);
+                k = 0x8F1BBCDC;
+            } else {
+                f = b ^ c ^ d;
+                k = 0xCA62C1D6;
+            }
+            uint32_t temp = rotl(a, 5) + f + e + k + W[t];
+            e = d;
+            d = c;
+            c = rotl(b, 30);
+            b = a;
+            a = temp;
+        }
+
+        state[0] += a;
+        state[1] += b;
+        state[2] += c;
+        state[3] += d;
+        state[4] += e;
+    }
+
+    void update(const char* data, size_t len) {
+        total_bits += static_cast<uint64_t>(len) * 8;
+        size_t offset = 0;
+        if (buffer_len > 0) {
+            size_t needed = 64 - buffer_len;
+            size_t to_copy = (len < needed) ? len : needed;
+            std::memcpy(buffer + buffer_len, data, to_copy);
+            buffer_len += to_copy;
+            offset += to_copy;
+            if (buffer_len == 64) {
+                processBlock(buffer);
+                buffer_len = 0;
+            }
+        }
+        while (offset + 64 <= len) {
+            processBlock(reinterpret_cast<const uint8_t*>(data + offset));
+            offset += 64;
+        }
+        if (offset < len) {
+            size_t remaining = len - offset;
+            std::memcpy(buffer + buffer_len, data + offset, remaining);
+            buffer_len += remaining;
+        }
+    }
+
+    std::string finalize() {
+        buffer[buffer_len++] = 0x80;
+        if (buffer_len > 56) {
+            std::memset(buffer + buffer_len, 0, 64 - buffer_len);
+            processBlock(buffer);
+            buffer_len = 0;
+        }
+        std::memset(buffer + buffer_len, 0, 56 - buffer_len);
+        for (int i = 0; i < 8; ++i) {
+            buffer[56 + i] = static_cast<uint8_t>((total_bits >> ((7 - i) * 8)) & 0xFF);
+        }
+        processBlock(buffer);
+
+        std::string digest;
+        digest.resize(20);
+        for (int i = 0; i < 5; ++i) {
+            digest[i * 4] = static_cast<char>((state[i] >> 24) & 0xFF);
+            digest[i * 4 + 1] = static_cast<char>((state[i] >> 16) & 0xFF);
+            digest[i * 4 + 2] = static_cast<char>((state[i] >> 8) & 0xFF);
+            digest[i * 4 + 3] = static_cast<char>(state[i] & 0xFF);
+        }
+        return digest;
+    }
+
+    void reset() {
+        state[0] = 0x67452301;
+        state[1] = 0xEFCDAB89;
+        state[2] = 0x98BADCFE;
+        state[3] = 0x10325476;
+        state[4] = 0xC3D2E1F0;
+        buffer_len = 0;
+        total_bits = 0;
+    }
+};
+
+// ----------------------------------------------------------------------------
 // SHA-256 Implementation (FIPS 180-4)
 // ----------------------------------------------------------------------------
 struct Sha256Core {
@@ -970,6 +1083,18 @@ struct Blake3Core {
 // One-Shot Hash Functions
 // ============================================================================
 
+/// Computes SHA-1 hash of input string and returns 20-byte raw binary string.
+inline std::string sha1Bytes(const std::string& data) {
+    detail::Sha1Core core;
+    core.update(data.data(), data.size());
+    return core.finalize();
+}
+
+/// Computes SHA-1 hash of input string and returns lowercase hexadecimal string.
+inline std::string sha1(const std::string& data) {
+    return toHex(sha1Bytes(data));
+}
+
 /// Computes SHA-256 hash of input string and returns lowercase hexadecimal string.
 inline std::string sha256(const std::string& data) {
     detail::Sha256Core core;
@@ -1020,6 +1145,29 @@ public:
         return toHex(digestBytes());
     }
     virtual void reset() = 0;
+};
+
+class Sha1Hasher : public HasherEngine {
+    Sha1Core core_;
+    bool finalized_{false};
+    std::string digest_;
+public:
+    void update(const std::string& chunk) override {
+        if (finalized_) throw keet::error("CryptoError", "Hasher already finalized");
+        core_.update(chunk.data(), chunk.size());
+    }
+    std::string digestBytes() override {
+        if (!finalized_) {
+            digest_ = core_.finalize();
+            finalized_ = true;
+        }
+        return digest_;
+    }
+    void reset() override {
+        core_.reset();
+        finalized_ = false;
+        digest_.clear();
+    }
 };
 
 class Sha256Hasher : public HasherEngine {
@@ -1152,6 +1300,9 @@ inline Hasher createHash(std::string algo) {
     for (char& c : algo) {
         if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + 32);
     }
+    if (algo == "sha1" || algo == "sha-1") {
+        return Hasher(std::make_shared<detail::Sha1Hasher>());
+    }
     if (algo == "sha256" || algo == "sha-256") {
         return Hasher(std::make_shared<detail::Sha256Hasher>());
     }
@@ -1177,6 +1328,7 @@ inline Hasher createHash(std::string algo) {
 namespace detail {
 
 inline size_t getHashBlockSize(std::string_view algo) {
+    if (algo == "sha1" || algo == "sha-1") return 64;
     if (algo == "sha256" || algo == "sha-256") return 64;
     if (algo == "sha512" || algo == "sha-512") return 128;
     if (algo == "sha3-256" || algo == "sha3_256") return 136;
