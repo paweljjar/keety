@@ -23,7 +23,7 @@ struct TempDirectory {
     }
 
     [[nodiscard]] std::filesystem::path createFile(const std::string& relativePath, const std::string& content) {
-        auto fullPath = path / relativePath;
+        auto fullPath = (path / std::filesystem::path(relativePath)).make_preferred();
         std::filesystem::create_directories(fullPath.parent_path());
         std::ofstream ofs(fullPath, std::ios::binary);
         ofs << content;
@@ -313,8 +313,10 @@ TEST_CASE("CLI driver execute_fmt directory recursion and file discovery", "[dri
 
         int res = CliDriver::run(opts, out, err);
         CHECK(res == 1);
-        CHECK(err.str().find(messyFile.string()) != std::string::npos);
-        CHECK(err.str().find(cleanFile.string()) == std::string::npos);
+        CHECK((err.str().find(messyFile.string()) != std::string::npos ||
+               err.str().find(messyFile.generic_string()) != std::string::npos));
+        CHECK((err.str().find(cleanFile.string()) == std::string::npos &&
+               err.str().find(cleanFile.generic_string()) == std::string::npos));
     }
 
     SECTION("Recursive formatting in-place cleans all files in directory") {

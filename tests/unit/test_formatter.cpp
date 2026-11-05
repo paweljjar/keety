@@ -202,10 +202,19 @@ TEST_CASE("Formatter formats zonk fallback and recovery blocks", "[fmt][formatte
         "    return val1 + val2;\n"
         "}\n";
 
+    std::string_view expected =
+        "fn testZonk(): int {\n"
+        "    let val1: int = parseNumber(\"123\") zonk 0;\n"
+        "    let val2: int = parseNumber(\"abc\") zonk (err) {\n"
+        "        yield -1;\n"
+        "    };\n"
+        "    return val1 + val2;\n"
+        "}\n";
+
     Formatter formatter;
     std::string formatted = formatter.format(unformatted);
 
-    CHECK(formatted == unformatted);
+    CHECK(formatted == expected);
     CHECK(formatter.format(formatted) == formatted);
 }
 
