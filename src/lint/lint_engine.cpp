@@ -1,4 +1,8 @@
 #include <keety/lint/lint_engine.hpp>
+#include <keety/lint/rules/unreachable_code_rule.hpp>
+#include <keety/lint/rules/unused_import_rule.hpp>
+#include <keety/lint/rules/unused_parameter_rule.hpp>
+#include <keety/lint/rules/unused_variable_rule.hpp>
 
 #include <algorithm>
 
@@ -13,7 +17,10 @@ void LintEngine::registerRule(std::unique_ptr<LintRule> rule) {
 }
 
 void LintEngine::registerDefaultRules() {
-    // Note: Built-in rules from Categories A, B, C, D will be added here in Phases 2 & 3.
+    registerRule(std::make_unique<UnusedImportRule>());
+    registerRule(std::make_unique<UnusedVariableRule>());
+    registerRule(std::make_unique<UnusedParameterRule>());
+    registerRule(std::make_unique<UnreachableCodeRule>());
 }
 
 std::vector<std::string_view> LintEngine::getRegisteredRuleNames() const {
