@@ -15,6 +15,8 @@
 #include <keety/typechecker/type_checker.hpp>
 #include <keety/fmt/formatter.hpp>
 #include <keety/fmt/formatter_options.hpp>
+#include <keety/lint/lint_config.hpp>
+#include <keety/lint/lint_engine.hpp>
 #include <keety/version.hpp>
 
 #include <keet/json.hpp>
@@ -375,6 +377,60 @@ bool parse_opt_level(std::string_view val, OptimizationLevel& level) {
     return false;
 }
 
+bool apply_lint_fixes(std::string& source, const std::vector<keety::lint::LintDiagnostic>& diagnostics) {
+    struct EditWithSpan {
+        keety::diag::SourceSpan span;
+        std::string replacement;
+    };
+    std::vector<EditWithSpan> edits;
+    for (const auto& d : diagnostics) {
+        if (d.quickFix && d.quickFix->span.isValid()) {
+            edits.push_back({d.quickFix->span, d.quickFix->replacement});
+        }
+    }
+    if (edits.empty()) {
+        return false;
+    }
+    // Sort descending by start offset, then end offset
+    std::stable_sort(edits.begin(), edits.end(), [](const EditWithSpan& a, const EditWithSpan& b) {
+        if (a.span.start.offset != b.span.start.offset) {
+            return a.span.start.offset > b.span.start.offset;
+        }
+        return a.span.end.offset > b.span.end.offset;
+    });
+
+    bool applied = false;
+    size_t lastStart = std::string::npos;
+    for (const auto& edit : edits) {
+        uint32_t start = edit.span.start.offset;
+        uint32_t end = edit.span.end.offset;
+        if (end <= source.size() && start <= end) {
+            if (lastStart == std::string::npos || end <= lastStart) {
+                size_t len = end - start;
+                if (edit.replacement.empty()) {
+                    size_t lineStart = start;
+                    while (lineStart > 0 && source[lineStart - 1] != '\n' && (source[lineStart - 1] == ' ' || source[lineStart - 1] == '\t')) {
+                        --lineStart;
+                    }
+                    if (lineStart == 0 || source[lineStart - 1] == '\n') {
+                        len += (start - lineStart);
+                        start = lineStart;
+                    }
+                    if (start + len < source.size() && source[start + len] == '\r' && start + len + 1 < source.size() && source[start + len + 1] == '\n') {
+                        len += 2;
+                    } else if (start + len < source.size() && source[start + len] == '\n') {
+                        len += 1;
+                    }
+                }
+                source.replace(start, len, edit.replacement);
+                lastStart = start;
+                applied = true;
+            }
+        }
+    }
+    return applied;
+}
+
 } // namespace
 
 std::string_view to_string(CliCommand cmd) noexcept {
@@ -385,6 +441,7 @@ std::string_view to_string(CliCommand cmd) noexcept {
     case CliCommand::Run:     return "run";
     case CliCommand::Test:    return "test";
     case CliCommand::Fmt:     return "fmt";
+    case CliCommand::Lint:    return "lint";
     case CliCommand::Version: return "version";
     case CliCommand::Help:    return "help";
     case CliCommand::Unknown: return "unknown";
@@ -451,6 +508,9 @@ CliOptions CliDriver::parse_args(const std::vector<std::string>& args) {
         idx = 1;
     } else if (first == "fmt") {
         options.command = CliCommand::Fmt;
+        idx = 1;
+    } else if (first == "lint") {
+        options.command = CliCommand::Lint;
         idx = 1;
     }
 
@@ -562,10 +622,18 @@ CliOptions CliDriver::parse_args(const std::vector<std::string>& args) {
             parse_opt_level(arg.substr(6), options.opt_level);
         } else if (arg.rfind("-O=", 0) == 0) {
             parse_opt_level(arg.substr(3), options.opt_level);
-        } else if (arg == "--check" && options.command == CliCommand::Fmt) {
-            options.fmt_check = true;
+        } else if (arg == "--check") {
+            if (options.command == CliCommand::Fmt) {
+                options.fmt_check = true;
+            } else if (options.command == CliCommand::Lint) {
+                options.lint_check = true;
+            }
         } else if (arg == "--diff" && options.command == CliCommand::Fmt) {
             options.fmt_diff = true;
+        } else if (arg == "--fix" && options.command == CliCommand::Lint) {
+            options.lint_fix = true;
+        } else if (arg == "--strict" && options.command == CliCommand::Lint) {
+            options.lint_strict = true;
         } else if ((arg == "-w" || arg == "--write") && options.command == CliCommand::Fmt) {
             options.fmt_write = true;
             fmt_write_explicit = true;
@@ -576,11 +644,20 @@ CliOptions CliDriver::parse_args(const std::vector<std::string>& args) {
             options.fmt_recursive = true;
         } else if (arg == "--no-recursive" && options.command == CliCommand::Fmt) {
             options.fmt_recursive = false;
-        } else if (arg == "-" && options.command == CliCommand::Fmt) {
-            options.fmt_stdin = true;
+        } else if (arg == "-") {
+            if (options.command == CliCommand::Fmt) {
+                options.fmt_stdin = true;
+            } else if (options.command == CliCommand::Lint) {
+                options.lint_stdin = true;
+            }
         } else if (!arg.empty() && arg[0] != '-') {
             if (options.command == CliCommand::Fmt) {
                 options.fmt_paths.emplace_back(arg);
+                if (options.input_file.empty()) {
+                    options.input_file = arg;
+                }
+            } else if (options.command == CliCommand::Lint) {
+                options.lint_paths.emplace_back(arg);
                 if (options.input_file.empty()) {
                     options.input_file = arg;
                 }
@@ -610,6 +687,19 @@ CliOptions CliDriver::parse_args(const std::vector<std::string>& args) {
         }
     }
 
+    if (options.command == CliCommand::Lint) {
+        if (options.lint_paths.empty() && !options.lint_stdin) {
+#if defined(_WIN32)
+            bool is_tty = _isatty(_fileno(stdin)) != 0;
+#else
+            bool is_tty = isatty(fileno(stdin)) != 0;
+#endif
+            if (!is_tty && !options.lint_check && !options.lint_fix) {
+                options.lint_stdin = true;
+            }
+        }
+    }
+
     if (options.command == CliCommand::Unknown && !options.input_file.empty()) {
         options.command = CliCommand::Check;
     }
@@ -630,12 +720,15 @@ void CliDriver::print_help(std::ostream& out) {
         << "  run <file> [-- args]                 Compile and immediately execute the target binary\n"
         << "  test [path] [options]                Auto-discover and run unit tests, or run benchmarks/conformance\n"
         << "  fmt [paths...] [options]             Format KeetScript source files according to canonical style\n"
+        << "  lint [paths...] [options]            Analyze KeetScript source files for bugs, style, and hygiene\n"
         << "  version                              Display keety version information\n"
         << "  help                                 Display this help message\n\n"
         << "Options:\n"
-        << "  --check                              Check code format without writing; exit 1 if unformatted\n"
+        << "  --check                              Check code format or lint without writing; exit 1 if violations found\n"
         << "  --diff                               Display unified diffs of formatting changes\n"
         << "  -w, --write                          Overwrite formatted files in place (default)\n"
+        << "  --fix                                Automatically apply quick-fixes for lint violations in place\n"
+        << "  --strict                             Treat all lint warnings as errors\n"
         << "  -o, --output-dir <dir>               Target output directory for emitted sources or binaries\n"
         << "  --cxx <compiler>                     Explicit native C++ compiler binary (clang++, g++, cl.exe)\n"
         << "  -O, --opt <0|1|2|3|s|z>              Optimization level (default: 3)\n"
@@ -2231,6 +2324,223 @@ int CliDriver::execute_fmt(const CliOptions& options, std::ostream& out, std::os
     return 0;
 }
 
+int CliDriver::execute_lint(const CliOptions& options, std::ostream& out, std::ostream& err, std::istream& in) {
+    // 1. Stdin mode
+    if (options.lint_stdin) {
+        std::string original((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+
+        lint::LintConfig config = lint::LintConfig::discover(std::filesystem::current_path());
+        if (options.lint_strict) {
+            config.setStrict(true);
+        }
+
+        lint::LintEngine engine(config);
+        engine.registerDefaultRules();
+
+        if (options.lint_fix) {
+            std::string content = original;
+            for (int iter = 0; iter < 10; ++iter) {
+                auto diags = engine.lintSource(content, "<stdin>");
+                if (!apply_lint_fixes(content, diags)) {
+                    break;
+                }
+            }
+            out << content;
+
+            auto remaining = engine.lintSource(content, "<stdin>");
+            diag::SourceManager sm;
+            sm.addBuffer("<stdin>", content);
+            diag::DiagnosticEmitter emitter(sm, options.color_mode);
+            for (const auto& d : remaining) {
+                emitter.report(d.toCompilerDiagnostic());
+            }
+
+            if (emitter.hasErrors()) {
+                return 1;
+            }
+            if (options.lint_check && emitter.getWarningCount() > 0) {
+                return 1;
+            }
+            return 0;
+        }
+
+        diag::SourceManager sm;
+        auto fileId = sm.addBuffer("<stdin>", original);
+        lexer::Lexer lexer(fileId, original);
+        lexer.setCaptureComments(true);
+        diag::DiagnosticEmitter parseEmitter(sm, options.color_mode);
+        parser::Parser parser(lexer, &parseEmitter);
+        auto moduleAst = parser.parseModule("<stdin>");
+        auto comments = lexer.getCapturedComments();
+
+        if (parseEmitter.hasErrors()) {
+            if (options.diagnostic_format == DiagnosticFormat::Json) {
+                parseEmitter.emitJson(out);
+            } else {
+                for (const auto& d : parseEmitter.getDiagnostics()) {
+                    err << parseEmitter.format(d);
+                }
+            }
+            return 1;
+        }
+
+        auto diags = engine.lintModule(moduleAst, comments, sm, original, "<stdin>");
+
+        diag::DiagnosticEmitter emitter(sm, options.color_mode);
+        for (const auto& d : diags) {
+            emitter.report(d.toCompilerDiagnostic());
+        }
+
+        if (options.diagnostic_format == DiagnosticFormat::Json) {
+            emitter.emitJson(out);
+        } else {
+            for (const auto& d : emitter.getDiagnostics()) {
+                err << emitter.format(d);
+            }
+        }
+
+        if (emitter.hasErrors()) {
+            return 1;
+        }
+        if (options.lint_check && emitter.getWarningCount() > 0) {
+            return 1;
+        }
+        return 0;
+    }
+
+    // 2. File / Directory mode
+    std::vector<std::filesystem::path> search_paths = options.lint_paths;
+    if (search_paths.empty()) {
+        search_paths.emplace_back(".");
+    }
+
+    std::vector<std::filesystem::path> all_files;
+    bool not_found_error = false;
+
+    for (const auto& p : search_paths) {
+        std::error_code ec;
+        if (!std::filesystem::exists(p, ec)) {
+            err << "error: path not found: " << p.string() << "\n";
+            not_found_error = true;
+            continue;
+        }
+        auto files = discover_keet_files(p);
+        all_files.insert(all_files.end(), files.begin(), files.end());
+    }
+
+    if (not_found_error) {
+        return 1;
+    }
+
+    // Deduplicate discovered files
+    std::sort(all_files.begin(), all_files.end());
+    all_files.erase(std::unique(all_files.begin(), all_files.end()), all_files.end());
+
+    if (all_files.empty()) {
+        if (options.verbose) {
+            out << "[verbose] No .keet files found to lint.\n";
+        }
+        if (options.diagnostic_format == DiagnosticFormat::Json) {
+            out << "[]\n";
+        }
+        return 0;
+    }
+
+    diag::SourceManager sm;
+    diag::DiagnosticEmitter emitter(sm, options.color_mode);
+    int read_write_errors = 0;
+
+    for (const auto& file_path : all_files) {
+        lint::LintConfig config = lint::LintConfig::discover(file_path.parent_path());
+        if (options.lint_strict) {
+            config.setStrict(true);
+        }
+        if (config.isPathIgnored(file_path)) {
+            continue;
+        }
+
+        std::ifstream ifs(file_path, std::ios::binary);
+        if (!ifs) {
+            err << "error: unable to read file: " << file_path.string() << "\n";
+            ++read_write_errors;
+            continue;
+        }
+        std::string source((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+        ifs.close();
+
+        lint::LintEngine engine(config);
+        engine.registerDefaultRules();
+
+        if (options.lint_fix) {
+            bool fileChanged = false;
+            for (int iter = 0; iter < 10; ++iter) {
+                auto diags = engine.lintSource(source, file_path.string());
+                if (!apply_lint_fixes(source, diags)) {
+                    break;
+                }
+                fileChanged = true;
+            }
+            if (fileChanged) {
+                std::ofstream ofs(file_path, std::ios::binary | std::ios::trunc);
+                if (!ofs) {
+                    err << "error: failed to write to " << file_path.string() << "\n";
+                    ++read_write_errors;
+                } else {
+                    ofs << source;
+                    ofs.close();
+                    if (options.verbose) {
+                        out << "[verbose] Fixed " << file_path.string() << "\n";
+                    }
+                }
+            }
+        }
+
+        auto fileId = sm.addBuffer(file_path.string(), source);
+        lexer::Lexer lexer(fileId, source);
+        lexer.setCaptureComments(true);
+        diag::DiagnosticEmitter parseEmitter(sm, options.color_mode);
+        parser::Parser parser(lexer, &parseEmitter);
+        auto moduleAst = parser.parseModule(file_path.string());
+        auto comments = lexer.getCapturedComments();
+
+        if (parseEmitter.hasErrors()) {
+            for (const auto& d : parseEmitter.getDiagnostics()) {
+                emitter.report(d);
+                if (options.diagnostic_format != DiagnosticFormat::Json) {
+                    err << emitter.format(d);
+                }
+            }
+            continue;
+        }
+
+        auto diags = engine.lintModule(moduleAst, comments, sm, source, file_path.string());
+
+        for (const auto& d : diags) {
+            auto compDiag = d.toCompilerDiagnostic();
+            emitter.report(compDiag);
+            if (options.diagnostic_format != DiagnosticFormat::Json) {
+                err << emitter.format(compDiag);
+            }
+        }
+
+        if (options.verbose && diags.empty() && options.diagnostic_format != DiagnosticFormat::Json) {
+            out << "[verbose] Clean " << file_path.string() << "\n";
+        }
+    }
+
+    if (options.diagnostic_format == DiagnosticFormat::Json) {
+        emitter.emitJson(out);
+    }
+
+    if (read_write_errors > 0 || emitter.hasErrors()) {
+        return 1;
+    }
+    if (options.lint_check && emitter.getWarningCount() > 0) {
+        return 1;
+    }
+    return 0;
+}
+
 int CliDriver::run(const CliOptions& options, std::ostream& out, std::ostream& err, std::istream& in) {
     switch (options.command) {
     case CliCommand::Help:
@@ -2251,6 +2561,8 @@ int CliDriver::run(const CliOptions& options, std::ostream& out, std::ostream& e
         return execute_test(options, out, err);
     case CliCommand::Fmt:
         return execute_fmt(options, out, err, in);
+    case CliCommand::Lint:
+        return execute_lint(options, out, err, in);
     case CliCommand::Unknown:
         err << "error: unknown command or missing arguments.\n"
             << "Run 'keety --help' for usage.\n";

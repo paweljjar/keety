@@ -20,6 +20,7 @@ enum class CliCommand {
     Run,     ///< keety run <file> [-- args]
     Test,    ///< keety test [--benchmarks | --conformance]
     Fmt,     ///< keety fmt [paths...] [--check] [--diff] [-w]
+    Lint,    ///< keety lint [paths...] [--check] [--fix] [--strict]
     Version, ///< keety --version / -V
     Help,    ///< keety --help / -h
     Unknown  ///< Unrecognized command
@@ -73,6 +74,11 @@ struct CliOptions {
     bool fmt_stdin{false};
     bool fmt_recursive{true};
     std::vector<std::filesystem::path> fmt_paths{};
+    bool lint_check{false};
+    bool lint_fix{false};
+    bool lint_strict{false};
+    bool lint_stdin{false};
+    std::vector<std::filesystem::path> lint_paths{};
 };
 
 /// CLI command driver and entry point
@@ -113,6 +119,9 @@ public:
 
     /// Executes `keety fmt [paths...] [options]` formatting pipeline
     static int execute_fmt(const CliOptions& options, std::ostream& out = std::cout, std::ostream& err = std::cerr, std::istream& in = std::cin);
+
+    /// Executes `keety lint [paths...] [options]` static analysis and linting pipeline
+    static int execute_lint(const CliOptions& options, std::ostream& out = std::cout, std::ostream& err = std::cerr, std::istream& in = std::cin);
 
     /// Helper to compile and link to a binary, returning target binary path if successful
     static std::optional<std::filesystem::path> build_binary(const CliOptions& options, std::ostream& out, std::ostream& err);
