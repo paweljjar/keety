@@ -369,7 +369,7 @@ TEST_CASE("HTTP Server Port Binding Conflict and Optional SO_REUSEPORT", "[runti
         }
     }
 
-#if defined(SO_REUSEPORT)
+#if defined(SO_REUSEPORT) || defined(_WIN32)
     SECTION("Optional reuse_port allows shared port binding when both servers enable it") {
         server1.stop();
 

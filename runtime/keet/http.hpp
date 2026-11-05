@@ -2726,8 +2726,11 @@ inline void set_tcp_nodelay(net::detail::socket_t fd, bool enabled) noexcept {
 inline void set_reuse_addr_port(net::detail::socket_t fd, bool reuse_port = false) noexcept {
     int one = 1;
 #if defined(_WIN32)
-    ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&one), sizeof(one));
-    (void)reuse_port;
+    if (reuse_port) {
+        ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&one), sizeof(one));
+    } else {
+        ::setsockopt(fd, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&one), sizeof(one));
+    }
 #else
     ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, static_cast<socklen_t>(sizeof(one)));
 #if defined(SO_REUSEPORT)
