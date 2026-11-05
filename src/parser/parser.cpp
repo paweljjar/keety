@@ -583,13 +583,20 @@ std::unique_ptr<ast::ErrTypeDecl> Parser::parseErrTypeDecl(bool isExported) {
 
 std::unique_ptr<ast::ImportDecl> Parser::parseImportDecl(bool isReExported) {
     diag::SourceLocation startLoc = lastConsumed_.span.start;
-    // import "path" [as alias]; or import io;
+    // import "path" [as alias]; or import io; or import net.http;
     std::string path;
     if (check(lexer::TokenKind::StringLiteral) || check(lexer::TokenKind::Identifier)) {
         path = std::string(advance().lexeme);
         // Strip quotes if string literal
         if (path.size() >= 2 && (path.front() == '"' || path.front() == '\'')) {
             path = path.substr(1, path.size() - 2);
+        } else {
+            while (match(lexer::TokenKind::Dot)) {
+                path += ".";
+                if (check(lexer::TokenKind::Identifier)) {
+                    path += std::string(advance().lexeme);
+                }
+            }
         }
     }
 
@@ -613,6 +620,13 @@ std::unique_ptr<ast::ImportDecl> Parser::parseFromImportDecl(bool isReExported) 
         path = std::string(advance().lexeme);
         if (path.size() >= 2 && (path.front() == '"' || path.front() == '\'')) {
             path = path.substr(1, path.size() - 2);
+        } else {
+            while (match(lexer::TokenKind::Dot)) {
+                path += ".";
+                if (check(lexer::TokenKind::Identifier)) {
+                    path += std::string(advance().lexeme);
+                }
+            }
         }
     } else {
         expect(lexer::TokenKind::StringLiteral, diag::ErrorCode::UnexpectedToken, "expected module path after 'from'");

@@ -6,6 +6,7 @@ add_executable(keety_benchmarks
     bench_hash_map.cpp
     bench_string_ingestion.cpp
     bench_task_concurrency.cpp
+    bench_http_server.cpp
 )
 
 target_include_directories(keety_benchmarks PRIVATE
@@ -47,5 +48,9 @@ if(KEETY_BUILD_TESTS)
     add_test(
         NAME bench_task_concurrency
         COMMAND keety_benchmarks --benchmark 4 --size 10000 --warmup 2 --measure 3
+    )
+    add_test(
+        NAME bench_http_server
+        COMMAND keety_benchmarks --benchmark 5 --size 50000 --warmup 2 --measure 3
     )
 endif()

@@ -203,7 +203,7 @@ TEST_CASE("Standard library net module scope population", "[sema][universe][net]
         "udpBind", "udpLocalPort", "udpSendTo", "udpRecvFrom", "udpClose"
     };
 
-    CHECK(netScope->size() == expectedFunctions.size());
+    CHECK(netScope->size() == expectedFunctions.size() + 1);
     for (const auto& fnName : expectedFunctions) {
         auto sym = netScope->lookupCurrent(fnName);
         REQUIRE(sym != nullptr);
@@ -212,8 +212,57 @@ TEST_CASE("Standard library net module scope population", "[sema][universe][net]
         CHECK(sym->isExported());
     }
 
+    auto httpSubmodule = netScope->lookupCurrent("http");
+    REQUIRE(httpSubmodule != nullptr);
+    CHECK(httpSubmodule->getKind() == SymbolKind::Module);
+    CHECK(httpSubmodule->isExported());
+
     CHECK(netScope->lookupCurrent("url_encode") == nullptr);
     CHECK(netScope->lookupCurrent("tcp_connect") == nullptr);
+}
+
+TEST_CASE("Standard library http module scope population", "[sema][universe][http]") {
+    auto universe = Scope::createUniverse();
+    REQUIRE(universe != nullptr);
+
+    CHECK(isStdlibModule("net.http"));
+    CHECK(isStdlibModule("std.net.http"));
+    CHECK(isStdlibModule("keet.net.http"));
+    CHECK(isStdlibModule("http"));
+    CHECK(isStdlibModule("std.http"));
+    CHECK(isStdlibModule("keet.http"));
+
+    auto httpScope = createStdlibModuleScope("net.http", universe);
+    REQUIRE(httpScope != nullptr);
+
+    const std::vector<std::string> expectedFunctions = {
+        "app", "createServer", "cors", "json", "jsonParser", "urlencoded",
+        "logger", "staticDir", "recover", "schema", "validate"
+    };
+
+    for (const auto& fnName : expectedFunctions) {
+        auto sym = httpScope->lookupCurrent(fnName);
+        REQUIRE(sym != nullptr);
+        CHECK(sym->getName() == fnName);
+        CHECK(sym->getKind() == SymbolKind::Function);
+        CHECK(sym->isExported());
+    }
+
+    const std::vector<std::string> expectedTypes = {
+        "Request", "Response", "WebSocket", "HttpServer", "App", "Server", "Schema", "SchemaValidator"
+    };
+
+    for (const auto& typeName : expectedTypes) {
+        auto sym = httpScope->lookupCurrent(typeName);
+        REQUIRE(sym != nullptr);
+        CHECK(sym->getName() == typeName);
+        CHECK(sym->getKind() == SymbolKind::Class);
+        CHECK(sym->isType());
+        CHECK(sym->isExported());
+    }
+
+    CHECK(httpScope->size() == expectedFunctions.size() + expectedTypes.size());
+    CHECK(httpScope->lookupCurrent("unknown_http") == nullptr);
 }
 
 TEST_CASE("Standard library test module scope population", "[sema][universe][test]") {

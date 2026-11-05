@@ -19,5 +19,6 @@
 
 namespace keet_module_io_console {
     // --- Exported Function Prototypes ---
+#line 3 "io_console.keet"
     int64_t main();
 } // namespace keet_module_io_console

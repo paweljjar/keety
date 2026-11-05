@@ -20,5 +20,6 @@
 
 namespace keet_module_sys_environment {
     // --- Exported Function Prototypes ---
+#line 4 "sys_environment.keet"
     int64_t main();
 } // namespace keet_module_sys_environment

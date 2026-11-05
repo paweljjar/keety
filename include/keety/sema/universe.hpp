@@ -68,4 +68,7 @@ void populateTestModuleScope(Scope& testScope);
 /// Populates an existing Scope with all exported symbols of the 'crypto' standard library module.
 void populateCryptoModuleScope(Scope& cryptoScope);
 
+/// Populates an existing Scope with all exported symbols of the 'net.http' standard library module.
+void populateNetHttpModuleScope(Scope& httpScope);
+
 } // namespace keety::sema

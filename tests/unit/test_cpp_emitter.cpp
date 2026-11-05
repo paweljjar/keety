@@ -860,3 +860,47 @@ TEST_CASE("C++ Implementation Emitter emits test module calls properly", "[emitt
         REQUIRE(cpp.find("::keet_module_test::assertTrue(") != std::string::npos);
     }
 }
+
+TEST_CASE("C++ Implementation Emitter emits http module calls and bindings properly", "[emitter][http]") {
+    SECTION("Translates http.app and http.createServer via module member access") {
+        const std::string source = R"(
+            import "net.http";
+
+            fn start(): void {
+                let s = http.app();
+                let s2 = http.createServer();
+                let c = http.cors();
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "http_emitter");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("#include <keet/runtime.hpp>") != std::string::npos);
+        REQUIRE(cpp.find("::keet::net::http::app()") != std::string::npos);
+        REQUIRE(cpp.find("::keet::net::http::createServer()") != std::string::npos);
+        REQUIRE(cpp.find("::keet::net::http::cors()") != std::string::npos);
+    }
+
+    SECTION("Translates direct calls to imported HTTP functions") {
+        const std::string source = R"(
+            import { app, cors, jsonParser } from "net.http";
+
+            fn run(): void {
+                let server = app();
+                let mw1 = cors();
+                let mw2 = jsonParser();
+            }
+        )";
+
+        keety::parser::ModuleAST ast = parseSource(source, "http_direct_emitter");
+        keety::emitter::CppEmitter emitter(ast);
+
+        std::string cpp = emitter.emit();
+        REQUIRE(cpp.find("::keet::net::http::app()") != std::string::npos);
+        REQUIRE(cpp.find("::keet::net::http::cors()") != std::string::npos);
+        REQUIRE(cpp.find("::keet::net::http::jsonParser()") != std::string::npos);
+    }
+}
+

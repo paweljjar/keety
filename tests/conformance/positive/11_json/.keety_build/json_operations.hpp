@@ -21,5 +21,6 @@
 
 namespace keet_module_json_operations {
     // --- Exported Function Prototypes ---
+#line 7 "json_operations.keet"
     int64_t main();
 } // namespace keet_module_json_operations

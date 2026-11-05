@@ -30,6 +30,14 @@ add_executable(keety_unit_tests
     unit/test_runtime_net.cpp
     unit/test_runtime_test.cpp
     unit/test_runtime_crypto.cpp
+    unit/test_runtime_http_parser.cpp
+    unit/test_runtime_http_server.cpp
+    unit/test_runtime_http_router.cpp
+    unit/test_runtime_http_middleware.cpp
+    unit/test_runtime_http_standard_middlewares.cpp
+    unit/test_runtime_http_validation.cpp
+    unit/test_runtime_http_websocket_upgrade.cpp
+    unit/test_runtime_http_websocket_frames.cpp
     unit/test_token.cpp
     unit/test_lexer.cpp
     unit/test_blank_ident.cpp
@@ -84,6 +92,7 @@ add_executable(keety_unit_tests
     conformance/test_conformance_net.cpp
     conformance/test_conformance_test.cpp
     conformance/test_conformance_crypto.cpp
+    conformance/test_conformance_http.cpp
     conformance/test_conformance_negative.cpp
     unit/test_pkg_source_spec.cpp
     unit/test_pkg_manifest.cpp

@@ -22,6 +22,7 @@ bool ModulePathResolver::isStandardLibraryModule(std::string_view importPath) no
         "net.http",
         "net.tcp",
         "net.udp",
+        "http",
         "crypto",
         "crypto.hash",
         "encoding",

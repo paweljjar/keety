@@ -17,5 +17,6 @@
 
 namespace keet_module_scalars_wraparound {
     // --- Exported Function Prototypes ---
+#line 1 "scalars_wraparound.keet"
     int64_t main();
 } // namespace keet_module_scalars_wraparound

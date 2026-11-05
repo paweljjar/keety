@@ -3702,6 +3702,52 @@ TEST_CASE("TypeChecker: Standard Library test Module", "[typechecker][test]") {
     }
 }
 
+TEST_CASE("Standard library net.http module type checking", "[typechecker][http]") {
+    SECTION("Valid import and call to http.app and http.cors") {
+        ParseResult res(
+            "import net.http;\n"
+            "fn runServer(): void {\n"
+            "    let s = http.app();\n"
+            "    let c = http.cors();\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+    }
+
+    SECTION("Valid selective import from net.http module") {
+        ParseResult res(
+            "from \"net.http\" import app, createServer, cors;\n"
+            "fn run(): void {\n"
+            "    let s1 = app();\n"
+            "    let s2 = createServer();\n"
+            "    let c = cors();\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+    }
+
+    SECTION("Reject unknown member on http with E3011") {
+        ParseResult res(
+            "import net.http;\n"
+            "fn test_invalid(): void {\n"
+            "    http.nonExistentHttpHelper();\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::InvalidMemberAccess));
+    }
+
+    SECTION("Reject non-exported symbol from net.http with E1005") {
+        ParseResult res(
+            "from \"net.http\" import nonExistentHttpSymbol;\n"
+            "fn test_invalid(): void {}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::SymbolNotExported));
+    }
+}
+
+
 
 
 

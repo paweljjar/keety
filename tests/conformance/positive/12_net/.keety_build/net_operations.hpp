@@ -21,5 +21,6 @@
 
 namespace keet_module_net_operations {
     // --- Exported Function Prototypes ---
+#line 7 "net_operations.keet"
     int64_t main();
 } // namespace keet_module_net_operations

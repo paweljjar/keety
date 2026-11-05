@@ -1,0 +1,103 @@
+import net.http;
+import net;
+import io;
+
+fn main(): int {
+    io.println("Running KeetScript HTTP server conformance tests...");
+
+    // 1. Initialize HTTP Server application
+    let server: HttpServer = http.app();
+
+    // 2. Register Standard Middlewares
+    server.use(http.cors());
+    server.use(http.recover());
+
+    // 3. Register HTTP Routes
+    server.get("/", fn(mut req: Request, mut res: Response): void {
+        res.status(200).send("ROOT_OK");
+    });
+
+    server.get("/users/:id", fn(mut req: Request, mut res: Response): void {
+        res.status(200).send("USER_" + req.param("id"));
+    });
+
+    server.post("/echo", fn(mut req: Request, mut res: Response): void {
+        res.status(200).send("ECHO_" + req.body);
+    });
+
+    server.put("/items/:id", fn(mut req: Request, mut res: Response): void {
+        res.status(200).send("PUT_" + req.param("id"));
+    });
+
+    server.delete("/items/:id", fn(mut req: Request, mut res: Response): void {
+        res.status(200).send("DEL_" + req.param("id"));
+    });
+
+    // 4. Register WebSocket Route
+    server.ws("/ws", fn(mut ws: WebSocket): void {
+        ws.onMessage(fn(msg: string): void {
+            ws.send("WS_ECHO:" + msg);
+        });
+    });
+
+    // 5. Start Server on Ephemeral Port
+    server.listen(0);
+    let port: int = server.port();
+    if (port <= 0) {
+        return 1;
+    }
+    if (!server.isRunning()) {
+        return 2;
+    }
+
+    let baseUrl: string = "http://127.0.0.1:" + port.toString();
+
+    // 6. Test GET Root Route
+    let rootRes: string = net.get(baseUrl + "/");
+    if (rootRes != "ROOT_OK") {
+        return 3;
+    }
+
+    // 7. Test Parameterized GET Route
+    let userRes: string = net.get(baseUrl + "/users/42");
+    if (userRes != "USER_42") {
+        return 4;
+    }
+
+    // 8. Test POST Route with Body
+    let postRes: string = net.post(baseUrl + "/echo", "KeetHTTP", "text/plain");
+    if (postRes != "ECHO_KeetHTTP") {
+        return 5;
+    }
+
+    // 9. Test 404 Route
+    let status404: int = net.getStatus(baseUrl + "/non-existent-route");
+    if (status404 != 404) {
+        return 6;
+    }
+
+    // 10. Test WebSocket Upgrade Handshake via loopback TCP socket
+    let wsSock: int = net.tcpConnectTimeout("127.0.0.1", port, 3000);
+    if (wsSock <= 0) {
+        return 7;
+    }
+    let handshakeReq: string = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+    let sent: int = net.tcpSend(wsSock, handshakeReq);
+    if (sent <= 0) {
+        return 8;
+    }
+    let handshakeResp: string = net.tcpRecv(wsSock, 1024);
+    if (handshakeResp.length() == 0) {
+        return 9;
+    }
+    net.tcpClose(wsSock);
+
+    // 11. Graceful Server Shutdown
+    server.stop();
+    if (server.isRunning()) {
+        return 10;
+    }
+
+    io.println("All KeetScript HTTP server conformance tests passed successfully!");
+    return 0;
+}

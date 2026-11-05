@@ -17,3 +17,4 @@
 #include <keet/json.hpp>
 #include <keet/net.hpp>
 #include <keet/crypto.hpp>
+#include <keet/http.hpp>

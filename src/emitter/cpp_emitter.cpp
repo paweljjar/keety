@@ -256,6 +256,16 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                 for (const auto& s : imp->getSymbols()) {
                     imported_crypto_symbols_.insert(s.getEffectiveName());
                 }
+            } else if (p == "net.http" || p == "std.net.http" || p == "keet.net.http" ||
+                       p == "http" || p == "std.http" || p == "keet.http") {
+                has_http_import_ = true;
+                add_standard_header("<keet/runtime.hpp>");
+                if (!imp->getModuleAlias().empty()) {
+                    http_aliases_.insert(imp->getModuleAlias());
+                }
+                for (const auto& s : imp->getSymbols()) {
+                    imported_http_symbols_.insert(s.getEffectiveName());
+                }
             } else {
                 std::string mod_id = !imp->getModuleAlias().empty() ? imp->getModuleAlias() : p;
                 if (mod_id.find('/') != std::string::npos || mod_id.find('\\') != std::string::npos) {
@@ -547,11 +557,17 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             if (obj_id->getName() == "crypto" || crypto_aliases_.count(obj_id->getName())) {
                 return "::keet::crypto::" + mem->getMemberName();
             }
+            if (obj_id->getName() == "http" || http_aliases_.count(obj_id->getName())) {
+                return "::keet::net::http::" + mem->getMemberName();
+            }
         }
         if (const auto* obj_mem = dynamic_cast<const ast::MemberExpr*>(mem->getObject())) {
             if (const auto* root_id = dynamic_cast<const ast::IdentExpr*>(obj_mem->getObject())) {
                 if (root_id->getName() == "io" && obj_mem->getMemberName() == "Color") {
                     return "::keet::io::Color::" + mem->getMemberName();
+                }
+                if (root_id->getName() == "net" && obj_mem->getMemberName() == "http") {
+                    return "::keet::net::http::" + mem->getMemberName();
                 }
             }
         }
@@ -653,7 +669,13 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             if (obj_s == "crypto" || crypto_aliases_.count(obj_s)) {
                 return "::keet::crypto::" + m_name + "(" + args_str + ")";
             }
-            // Container member mapping
+            if (obj_s == "http" || obj_s == "::keet::net::http" || http_aliases_.count(obj_s)) {
+                return "::keet::net::http::" + m_name + "(" + args_str + ")";
+            }
+            // Container & method mapping
+            if (m_name == "delete") {
+                return obj_s + ".del(" + args_str + ")";
+            }
             if (m_name == "push") {
                 return obj_s + ".push_back(" + args_str + ")";
             }
@@ -823,6 +845,12 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
                 name == "encodeCode128" || name == "encodeCode128Svg" || name == "encodeCode128Ascii" ||
                 name == "decodeCode128" || name == "generateQr" || name == "decodeQr")) {
                 return "::keet::crypto::" + name + "(" + args_str + ")";
+            }
+            if (has_http_import_ && (imported_http_symbols_.count(name) ||
+                name == "app" || name == "createServer" || name == "cors" ||
+                name == "jsonParser" || name == "urlencoded" || name == "logger" ||
+                name == "staticDir" || name == "recover" || name == "validate")) {
+                return "::keet::net::http::" + name + "(" + args_str + ")";
             }
         }
 
