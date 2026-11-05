@@ -40,6 +40,7 @@ add_executable(keety_unit_tests
     unit/test_runtime_http_websocket_frames.cpp
     unit/test_token.cpp
     unit/test_lexer.cpp
+    unit/test_comment_attachment.cpp
     unit/test_blank_ident.cpp
     unit/test_angle_brackets.cpp
     unit/test_template_literals.cpp

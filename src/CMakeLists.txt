@@ -35,6 +35,7 @@ add_library(keety_core STATIC
     driver/toolchain_driver.cpp
     driver/cli_driver.cpp
     driver/project_root.cpp
+    fmt/comment_attacher.cpp
 )
 
 target_include_directories(keety_core PUBLIC
