@@ -82,6 +82,7 @@ add_executable(keety_unit_tests
     unit/test_toolchain_driver.cpp
     unit/test_cli_driver.cpp
     unit/test_cli_fmt.cpp
+    unit/test_lint_framework.cpp
     conformance/test_conformance_scalars.cpp
     conformance/test_conformance_values_mut.cpp
     conformance/test_conformance_unions.cpp

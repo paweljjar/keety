@@ -38,6 +38,9 @@ add_library(keety_core STATIC
     fmt/comment_attacher.cpp
     fmt/import_sorter.cpp
     fmt/formatter.cpp
+    lint/lint_config.cpp
+    lint/suppression_map.cpp
+    lint/lint_engine.cpp
 )
 
 target_include_directories(keety_core PUBLIC
