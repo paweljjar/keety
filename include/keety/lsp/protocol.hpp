@@ -285,6 +285,37 @@ struct TextEdit {
     static TextEdit fromJson(const JsonValue& j);
 };
 
+struct WorkspaceEdit {
+    std::map<std::string, std::vector<TextEdit>> changes;
+
+    JsonValue toJson() const;
+    static WorkspaceEdit fromJson(const JsonValue& j);
+};
+
+struct CodeActionContext {
+    std::vector<Diagnostic> diagnostics;
+
+    static CodeActionContext fromJson(const JsonValue& j);
+};
+
+struct CodeActionParams {
+    TextDocumentIdentifier textDocument;
+    Range range;
+    CodeActionContext context;
+
+    static CodeActionParams fromJson(const JsonValue& j);
+};
+
+struct CodeAction {
+    std::string title;
+    std::string kind = "quickfix";
+    std::vector<Diagnostic> diagnostics;
+    bool isPreferred = true;
+    std::optional<WorkspaceEdit> edit;
+
+    JsonValue toJson() const;
+};
+
 // Outgoing JSON-RPC message
 struct JsonRpcResponse {
     std::optional<RequestId> id;

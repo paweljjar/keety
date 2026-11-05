@@ -190,6 +190,7 @@ std::unique_ptr<ast::VarDecl> Parser::parseVarDecl(bool isExported) {
     diag::SourceLocation startLoc = lastConsumed_.span.start;
     const auto& nameTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected variable name");
     std::string name = std::string(nameTok.lexeme);
+    diag::SourceSpan nameSpan = nameTok.span;
 
     std::unique_ptr<ast::TypeAnnotation> type = nullptr;
     auto isLikelyTypeToken = [](const lexer::Token& t) {
@@ -224,7 +225,7 @@ std::unique_ptr<ast::VarDecl> Parser::parseVarDecl(bool isExported) {
             }
             type = parseTypeAnnotation();
         } else if (emitter_) {
-            diag::SourceSpan span = nameTok.span;
+            diag::SourceSpan span = nameSpan;
             emitter_->report(diag::Diagnostic::makeError(
                 diag::ErrorCode::MissingTypeAnnotation,
                 "missing explicit type annotation for variable '" + name + "'",
@@ -243,13 +244,14 @@ std::unique_ptr<ast::VarDecl> Parser::parseVarDecl(bool isExported) {
     const auto& semiTok = expect(lexer::TokenKind::Semicolon, diag::ErrorCode::ExpectedSemicolon, "expected ';' after variable declaration");
     diag::SourceSpan span{startLoc, semiTok.span.end};
 
-    return std::make_unique<ast::VarDecl>(span, std::move(name), std::move(type), std::move(init), isExported);
+    return std::make_unique<ast::VarDecl>(span, std::move(name), std::move(type), std::move(init), isExported, nameSpan);
 }
 
 std::unique_ptr<ast::ConstDecl> Parser::parseConstDecl(bool isExported) {
     diag::SourceLocation startLoc = lastConsumed_.span.start;
     const auto& nameTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected constant name");
     std::string name = std::string(nameTok.lexeme);
+    diag::SourceSpan nameSpan = nameTok.span;
 
     auto isLikelyTypeToken = [](const lexer::Token& t) {
         if (t.kind == lexer::TokenKind::Identifier && t.lexeme != "=" && t.lexeme != ";") return true;
@@ -284,7 +286,7 @@ std::unique_ptr<ast::ConstDecl> Parser::parseConstDecl(bool isExported) {
             }
             type = parseTypeAnnotation();
         } else if (emitter_) {
-            diag::SourceSpan span = nameTok.span;
+            diag::SourceSpan span = nameSpan;
             emitter_->report(diag::Diagnostic::makeError(
                 diag::ErrorCode::MissingTypeAnnotation,
                 "missing explicit type annotation for constant '" + name + "'",
@@ -301,7 +303,7 @@ std::unique_ptr<ast::ConstDecl> Parser::parseConstDecl(bool isExported) {
     const auto& semiTok = expect(lexer::TokenKind::Semicolon, diag::ErrorCode::ExpectedSemicolon, "expected ';' after constant declaration");
     diag::SourceSpan span{startLoc, semiTok.span.end};
 
-    return std::make_unique<ast::ConstDecl>(span, std::move(name), std::move(type), std::move(init), isExported);
+    return std::make_unique<ast::ConstDecl>(span, std::move(name), std::move(type), std::move(init), isExported, nameSpan);
 }
 
 std::unique_ptr<ast::DefineDecl> Parser::parseDefineDecl(bool isExported) {
@@ -391,10 +393,12 @@ std::vector<ast::Param> Parser::parseParamList() {
 
 ast::Param Parser::parseParam() {
     bool isMut = match(lexer::TokenKind::KwMut);
+    diag::SourceSpan mutSpan = isMut ? lastConsumed_.span : diag::SourceSpan{};
     diag::SourceLocation startLoc = isMut ? lastConsumed_.span.start : peek().span.start;
 
     const auto& nameTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected parameter name");
     std::string name = std::string(nameTok.lexeme);
+    diag::SourceSpan nameSpan = nameTok.span;
 
     std::unique_ptr<ast::TypeAnnotation> type = nullptr;
     if (match(lexer::TokenKind::Colon)) {
@@ -418,7 +422,7 @@ ast::Param Parser::parseParam() {
     }
 
     diag::SourceSpan span{startLoc, defVal ? defVal->getSpan().end : (type ? type->getSpan().end : nameTok.span.end)};
-    return ast::Param{span, std::move(name), std::move(type), isMut, std::move(defVal)};
+    return ast::Param{span, std::move(name), std::move(type), isMut, std::move(defVal), nameSpan, mutSpan};
 }
 
 std::unique_ptr<ast::ClassDecl> Parser::parseClassDecl(bool isExported) {

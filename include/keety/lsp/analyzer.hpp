@@ -31,6 +31,9 @@ public:
     /// Formats the document according to canonical formatting rules.
     /// Returns a list of TextEdits (empty if already formatted or on syntax errors).
     std::vector<TextEdit> format(const Document& doc, const FormattingOptions& options = {});
+
+    /// Computes Code Actions (Quick Fixes) for the given range in the document.
+    std::vector<CodeAction> getCodeActions(const Document& doc, Range range, const std::vector<Diagnostic>& contextDiagnostics = {});
 };
 
 } // namespace keety::lsp

@@ -15,6 +15,8 @@
 #include <keety/sema/universe.hpp>
 #include <keety/fmt/formatter.hpp>
 #include <keety/fmt/formatter_options.hpp>
+#include <keety/lint/lint_config.hpp>
+#include <keety/lint/lint_engine.hpp>
 #include <keety/typechecker/type_checker.hpp>
 
 #include <algorithm>
@@ -620,6 +622,7 @@ std::vector<Diagnostic> Analyzer::analyze(const Document& doc) {
 
     // 1. Lexical & Syntactic Analysis (Parser)
     lexer::Lexer lexer(fileId, doc.text());
+    lexer.setCaptureComments(true);
     parser::Parser parser(lexer, &emitter);
 
     std::filesystem::path fsPath(pathStr);
@@ -673,6 +676,29 @@ std::vector<Diagnostic> Analyzer::analyze(const Document& doc) {
     }
 
     collectLspDiagnostics(doc, emitter.getDiagnostics(), lspDiagnostics);
+
+    // 5. Static Linter (keetlint)
+    if (!emitter.hasErrors()) {
+        auto comments = lexer.getCapturedComments();
+        lint::LintConfig lintConfig = lint::LintConfig::discover(fsPath.parent_path());
+        lint::LintEngine lintEngine(lintConfig);
+        lintEngine.registerDefaultRules();
+
+        auto lintDiags = lintEngine.lintModule(ast, comments, sm, doc.text(), pathStr, universe.get());
+        for (const auto& ld : lintDiags) {
+            Diagnostic lspDiag;
+            lspDiag.severity = convertSeverity(ld.severity);
+            lspDiag.code = ld.ruleCode;
+            lspDiag.source = "keetlint";
+            lspDiag.message = ld.message;
+            lspDiag.range = spanToRange(doc, ld.span);
+            for (const auto& f : ld.footers) {
+                lspDiag.message += "\n" + f.message;
+            }
+            lspDiagnostics.push_back(std::move(lspDiag));
+        }
+    }
+
     return lspDiagnostics;
 }
 
@@ -1839,6 +1865,126 @@ std::vector<TextEdit> Analyzer::format(const Document& doc, const FormattingOpti
     edit.newText = std::move(formatted);
 
     return {std::move(edit)};
+}
+
+std::vector<CodeAction> Analyzer::getCodeActions(
+    const Document& doc,
+    Range range,
+    const std::vector<Diagnostic>& /*contextDiagnostics*/
+) {
+    std::vector<CodeAction> actions;
+
+    diag::SourceManager sm;
+    std::string pathStr = uriToPath(doc.uri());
+    diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
+
+    lexer::Lexer lexer(fileId, doc.text());
+    lexer.setCaptureComments(true);
+    parser::Parser parser(lexer);
+
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+    auto ast = parser.parseModule(moduleName);
+    auto comments = lexer.getCapturedComments();
+
+    lint::LintConfig lintConfig = lint::LintConfig::discover(fsPath.parent_path());
+    lint::LintEngine lintEngine(lintConfig);
+    lintEngine.registerDefaultRules();
+
+    auto lintDiags = lintEngine.lintModule(ast, comments, sm, doc.text(), pathStr);
+
+    for (const auto& ld : lintDiags) {
+        if (!ld.quickFix || !ld.quickFix->span.isValid()) {
+            continue;
+        }
+
+        Range diagRange = spanToRange(doc, ld.span);
+        Range fixRange = spanToRange(doc, ld.quickFix->span);
+
+        // Check if the requested range overlaps with the diagnostic span or fix span
+        bool overlaps = true;
+        if (range.end.line < diagRange.start.line ||
+            (range.end.line == diagRange.start.line && range.end.character < diagRange.start.character)) {
+            overlaps = false;
+        } else if (diagRange.end.line < range.start.line ||
+                   (diagRange.end.line == range.start.line && diagRange.end.character < range.start.character)) {
+            overlaps = false;
+        }
+
+        if (!overlaps) {
+            bool fixOverlaps = true;
+            if (range.end.line < fixRange.start.line ||
+                (range.end.line == fixRange.start.line && range.end.character < fixRange.start.character)) {
+                fixOverlaps = false;
+            } else if (fixRange.end.line < range.start.line ||
+                       (fixRange.end.line == range.start.line && fixRange.end.character < range.start.character)) {
+                fixOverlaps = false;
+            }
+            if (!fixOverlaps) {
+                continue;
+            }
+        }
+
+        std::string title;
+        if (ld.ruleCode == "L001") {
+            title = "Remove unused import";
+        } else if (ld.ruleCode == "L002") {
+            title = "Prefix unused variable with '_'";
+        } else if (ld.ruleCode == "L003") {
+            title = "Prefix unused parameter with '_'";
+        } else if (ld.ruleCode == "L010") {
+            title = "Remove unnecessary 'mut'";
+        } else {
+            title = "Fix " + ld.ruleName + ": " + ld.message;
+        }
+
+        TextEdit edit;
+        edit.range = fixRange;
+        edit.newText = ld.quickFix->replacement;
+
+        if (ld.ruleCode == "L001" && edit.newText.empty()) {
+            size_t startOff = ld.quickFix->span.start.offset;
+            size_t endOff = ld.quickFix->span.end.offset;
+            const std::string& src = doc.text();
+            if (endOff <= src.size() && startOff <= endOff) {
+                size_t lineStart = startOff;
+                while (lineStart > 0 && src[lineStart - 1] != '\n' && (src[lineStart - 1] == ' ' || src[lineStart - 1] == '\t')) {
+                    --lineStart;
+                }
+                if (lineStart == 0 || src[lineStart - 1] == '\n') {
+                    startOff = lineStart;
+                }
+                if (endOff < src.size() && src[endOff] == '\r' && endOff + 1 < src.size() && src[endOff + 1] == '\n') {
+                    endOff += 2;
+                } else if (endOff < src.size() && src[endOff] == '\n') {
+                    endOff += 1;
+                }
+                edit.range.start = doc.offsetToPosition(startOff);
+                edit.range.end = doc.offsetToPosition(endOff);
+            }
+        }
+
+        CodeAction action;
+        action.title = title;
+        action.kind = "quickfix";
+        action.isPreferred = true;
+
+        WorkspaceEdit wsEdit;
+        wsEdit.changes[doc.uri()] = { edit };
+        action.edit = std::move(wsEdit);
+
+        Diagnostic d;
+        d.range = diagRange;
+        d.severity = convertSeverity(ld.severity);
+        d.code = ld.ruleCode;
+        d.source = "keetlint";
+        d.message = ld.message;
+        action.diagnostics.push_back(std::move(d));
+
+        actions.push_back(std::move(action));
+    }
+
+    return actions;
 }
 
 } // namespace keety::lsp

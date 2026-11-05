@@ -392,6 +392,82 @@ TextEdit TextEdit::fromJson(const JsonValue& j) {
     return edit;
 }
 
+JsonValue WorkspaceEdit::toJson() const {
+    JsonValue::Object changesObj;
+    for (const auto& [uri, edits] : changes) {
+        JsonValue::Array arr;
+        arr.reserve(edits.size());
+        for (const auto& edit : edits) {
+            arr.push_back(edit.toJson());
+        }
+        changesObj[uri] = JsonValue(std::move(arr));
+    }
+    JsonValue::Object obj;
+    obj["changes"] = JsonValue(std::move(changesObj));
+    return JsonValue(std::move(obj));
+}
+
+WorkspaceEdit WorkspaceEdit::fromJson(const JsonValue& j) {
+    WorkspaceEdit edit;
+    if (auto* obj = asObject(j)) {
+        if (auto* changesNode = findField(*obj, "changes")) {
+            if (auto* chObj = asObject(*changesNode)) {
+                for (const auto& [uri, editList] : *chObj) {
+                    if (auto* arr = asArray(editList)) {
+                        for (const auto& item : *arr) {
+                            edit.changes[uri].push_back(TextEdit::fromJson(item));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return edit;
+}
+
+CodeActionContext CodeActionContext::fromJson(const JsonValue& /*j*/) {
+    CodeActionContext ctx;
+    return ctx;
+}
+
+CodeActionParams CodeActionParams::fromJson(const JsonValue& j) {
+    CodeActionParams params;
+    if (auto* obj = asObject(j)) {
+        if (auto* doc = findField(*obj, "textDocument")) {
+            params.textDocument = TextDocumentIdentifier::fromJson(*doc);
+        }
+        if (auto* r = findField(*obj, "range")) {
+            params.range = Range::fromJson(*r);
+        }
+        if (auto* ctx = findField(*obj, "context")) {
+            params.context = CodeActionContext::fromJson(*ctx);
+        }
+    }
+    return params;
+}
+
+JsonValue CodeAction::toJson() const {
+    JsonValue::Object obj;
+    obj["title"] = JsonValue(title);
+    obj["kind"] = JsonValue(kind);
+    obj["isPreferred"] = JsonValue(isPreferred);
+
+    if (edit.has_value()) {
+        obj["edit"] = edit->toJson();
+    }
+
+    if (!diagnostics.empty()) {
+        JsonValue::Array diagArr;
+        diagArr.reserve(diagnostics.size());
+        for (const auto& d : diagnostics) {
+            diagArr.push_back(d.toJson());
+        }
+        obj["diagnostics"] = JsonValue(std::move(diagArr));
+    }
+
+    return JsonValue(std::move(obj));
+}
+
 std::string JsonRpcResponse::serialize() const {
     JsonValue::Object obj;
     obj["jsonrpc"] = JsonValue(std::string("2.0"));
