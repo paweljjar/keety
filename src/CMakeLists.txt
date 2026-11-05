@@ -36,6 +36,8 @@ add_library(keety_core STATIC
     driver/cli_driver.cpp
     driver/project_root.cpp
     fmt/comment_attacher.cpp
+    fmt/import_sorter.cpp
+    fmt/formatter.cpp
 )
 
 target_include_directories(keety_core PUBLIC
