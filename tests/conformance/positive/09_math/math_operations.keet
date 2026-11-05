@@ -1,6 +1,6 @@
-import math;
 import io;
-from "math" import PI, sin, cos, absInt, clampInt;
+import math;
+from math import PI, sin, cos, absInt, clampInt;
 
 fn main(): int {
     io.println("Running KeetScript math conformance tests...");

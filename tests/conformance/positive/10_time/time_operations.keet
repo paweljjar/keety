@@ -1,6 +1,6 @@
-import time;
 import io;
-from "time" import nowMs, sleepMs, MS_PER_SEC, formatIso8601;
+import time;
+from time import nowMs, sleepMs, MS_PER_SEC, formatIso8601;
 
 fn main(): int {
     io.println("Running KeetScript time conformance tests...");

@@ -642,11 +642,20 @@ private:
         out_ += "\n";
         indent();
 
-        for (const auto& stmt : block->getStatements()) {
-            emitLeadingComments(stmt.get());
+        const auto& stmts = block->getStatements();
+        for (size_t i = 0; i < stmts.size(); ++i) {
+            const auto* stmt = stmts[i].get();
+            if (i > 0) {
+                const auto* prevStmt = stmts[i - 1].get();
+                if (stmt->getSpan().isValid() && prevStmt->getSpan().isValid() &&
+                    stmt->getSpan().start.line > prevStmt->getSpan().end.line + 1) {
+                    ensureBlankLine();
+                }
+            }
+            emitLeadingComments(stmt);
             emitIndent();
-            printStmt(stmt.get());
-            emitTrailingComments(stmt.get());
+            printStmt(stmt);
+            emitTrailingComments(stmt);
             out_ += "\n";
         }
 
@@ -956,7 +965,7 @@ private:
                 subPrinter.printBlock(znk->getRecoveryBlock());
                 return res + subPrinter.out_;
             }
-            return formatExpr(znk->getPrimary(), 3) + " zonk (" + formatExpr(znk->getFallback()) + ")";
+            return formatExpr(znk->getPrimary(), 3) + " zonk " + formatExpr(znk->getFallback(), 3);
         }
         if (const auto* tern = dynamic_cast<const ast::TernaryExpr*>(expr)) {
             std::string res = formatExpr(tern->getCondition(), 3) + " ? " +

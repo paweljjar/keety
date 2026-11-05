@@ -1,8 +1,8 @@
-import json;
-import json as j;
-import io;
 import fs;
-from "json" import getString, getIntOr, stringify;
+import io;
+import json;
+from json import getString, getIntOr, stringify;
+import json as j;
 
 fn main(): int {
     io.println("Running KeetScript json conformance tests...");

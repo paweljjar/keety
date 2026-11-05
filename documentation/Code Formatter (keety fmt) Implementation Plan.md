@@ -310,9 +310,9 @@ Extend [`src/lsp/server.cpp`](file:///Users/pawel/CLionProjects/keety/src/lsp/se
 
 ## 7. Definition of Done (DoD)
 
-- [ ] All KeetScript syntax forms (enums, classes, generics, closures, match/switch, zonk blocks, template strings) format cleanly and deterministically.
-- [ ] Idempotency test suite passes for 100% of tested sources.
-- [ ] Comments (single-line, multi-line, doc-comments) are 100% preserved in place without duplication or loss.
-- [ ] `keety fmt --check` succeeds on formatted files and fails with non-zero exit code on unformatted files.
-- [ ] `textDocument/formatting` works seamlessly in `keet-lsp`.
-- [ ] All existing compiler and runtime conformance tests pass with 100% test coverage.
+- [x] All KeetScript syntax forms (enums, classes, generics, closures, match/switch, zonk blocks, template strings) format cleanly and deterministically.
+- [x] Idempotency test suite passes for 100% of tested sources.
+- [x] Comments (single-line, multi-line, doc-comments) are 100% preserved in place without duplication or loss.
+- [x] `keety fmt --check` succeeds on formatted files and fails with non-zero exit code on unformatted files.
+- [x] `textDocument/formatting` works seamlessly in `keet-lsp`.
+- [x] All existing compiler and runtime conformance tests pass with 100% test coverage.

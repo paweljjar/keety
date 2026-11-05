@@ -1,5 +1,5 @@
 fn safeDiv(a: int, b: int): int {
-    return (a / b) zonk -1;
+    return a / b zonk -1;
 }
 
 fn main(): int {
