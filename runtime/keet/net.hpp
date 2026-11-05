@@ -33,8 +33,13 @@
 #endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <basetsd.h>
 #if defined(_MSC_VER)
 #pragma comment(lib, "ws2_32.lib")
+#endif
+#ifndef _SSIZE_T_DEFINED
+#define _SSIZE_T_DEFINED
+using ssize_t = SSIZE_T;
 #endif
 #else
 #include <arpa/inet.h>

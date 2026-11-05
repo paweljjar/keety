@@ -16,9 +16,18 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <memory>
+
+#if defined(_WIN32)
+#include <basetsd.h>
+#ifndef _SSIZE_T_DEFINED
+#define _SSIZE_T_DEFINED
+using ssize_t = SSIZE_T;
+#endif
+#endif
 #include <mutex>
 #include <optional>
 #include <queue>
