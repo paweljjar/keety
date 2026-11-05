@@ -1,5 +1,5 @@
 import test;
-from "test" import assertEq, assertNe, assertTrue, assertFalse, assertZonks, fail;
+from test import assertEq, assertNe, assertTrue, assertFalse, assertZonks, fail;
 
 fn main(): void {
     // 1. Suite and Case Registration

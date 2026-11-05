@@ -40,6 +40,9 @@ add_executable(keety_unit_tests
     unit/test_runtime_http_websocket_frames.cpp
     unit/test_token.cpp
     unit/test_lexer.cpp
+    unit/test_comment_attachment.cpp
+    unit/test_import_sorter.cpp
+    unit/test_formatter.cpp
     unit/test_blank_ident.cpp
     unit/test_angle_brackets.cpp
     unit/test_template_literals.cpp
@@ -78,6 +81,7 @@ add_executable(keety_unit_tests
     unit/test_toolchain_detector.cpp
     unit/test_toolchain_driver.cpp
     unit/test_cli_driver.cpp
+    unit/test_cli_fmt.cpp
     conformance/test_conformance_scalars.cpp
     conformance/test_conformance_values_mut.cpp
     conformance/test_conformance_unions.cpp
@@ -115,6 +119,7 @@ add_executable(keety_unit_tests
     unit/test_lsp_hover.cpp
     unit/test_lsp_completion.cpp
     unit/test_lsp_symbols.cpp
+    unit/test_lsp_formatting.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE

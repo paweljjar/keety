@@ -1,5 +1,5 @@
-import sys;
 import io;
+import sys;
 
 fn main(): int {
     io.println("Running KeetScript sys conformance tests...");

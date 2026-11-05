@@ -15,8 +15,8 @@
 
 #include <keet/runtime.hpp>
 
-#include <keet/std/time.hpp>
 #include <keet/std/io.hpp>
+#include <keet/std/time.hpp>
 
 namespace keet_module_time_operations {
     // --- Exported Function Prototypes ---

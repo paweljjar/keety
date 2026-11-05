@@ -1,7 +1,7 @@
 fn main(): int {
     let overflowInt: int = int(1e25) zonk -999;
     let nanInt: int = int(0.0 / 0.0) zonk -111;
-    let clamped: float = (15.5).clamp(0.0, 10.0);
+    let clamped: float = 15.5.clamp(0.0, 10.0);
 
     if (overflowInt != -999) {
         return 1;

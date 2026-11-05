@@ -1,7 +1,7 @@
 import crypto;
+from crypto import sha256, toHex, fromHex, toBase64, fromBase64, randomUuid;
 import crypto as c;
 import io;
-from "crypto" import sha256, toHex, fromHex, toBase64, fromBase64, randomUuid;
 
 fn main(): int {
     io.println("Running KeetScript crypto conformance tests...");

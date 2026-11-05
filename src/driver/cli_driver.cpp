@@ -13,6 +13,8 @@
 #include <keety/sema/const_view_checker.hpp>
 #include <keety/sema/universe.hpp>
 #include <keety/typechecker/type_checker.hpp>
+#include <keety/fmt/formatter.hpp>
+#include <keety/fmt/formatter_options.hpp>
 #include <keety/version.hpp>
 
 #include <keet/json.hpp>
@@ -382,6 +384,7 @@ std::string_view to_string(CliCommand cmd) noexcept {
     case CliCommand::Build:   return "build";
     case CliCommand::Run:     return "run";
     case CliCommand::Test:    return "test";
+    case CliCommand::Fmt:     return "fmt";
     case CliCommand::Version: return "version";
     case CliCommand::Help:    return "help";
     case CliCommand::Unknown: return "unknown";
@@ -446,7 +449,12 @@ CliOptions CliDriver::parse_args(const std::vector<std::string>& args) {
     } else if (first == "test") {
         options.command = CliCommand::Test;
         idx = 1;
+    } else if (first == "fmt") {
+        options.command = CliCommand::Fmt;
+        idx = 1;
     }
+
+    bool fmt_write_explicit = false;
 
     for (; idx < args.size(); ++idx) {
         const std::string& arg = args[idx];
@@ -554,9 +562,50 @@ CliOptions CliDriver::parse_args(const std::vector<std::string>& args) {
             parse_opt_level(arg.substr(6), options.opt_level);
         } else if (arg.rfind("-O=", 0) == 0) {
             parse_opt_level(arg.substr(3), options.opt_level);
+        } else if (arg == "--check" && options.command == CliCommand::Fmt) {
+            options.fmt_check = true;
+        } else if (arg == "--diff" && options.command == CliCommand::Fmt) {
+            options.fmt_diff = true;
+        } else if ((arg == "-w" || arg == "--write") && options.command == CliCommand::Fmt) {
+            options.fmt_write = true;
+            fmt_write_explicit = true;
+        } else if (arg == "--no-write" && options.command == CliCommand::Fmt) {
+            options.fmt_write = false;
+            fmt_write_explicit = true;
+        } else if ((arg == "-r" || arg == "--recursive") && options.command == CliCommand::Fmt) {
+            options.fmt_recursive = true;
+        } else if (arg == "--no-recursive" && options.command == CliCommand::Fmt) {
+            options.fmt_recursive = false;
+        } else if (arg == "-" && options.command == CliCommand::Fmt) {
+            options.fmt_stdin = true;
         } else if (!arg.empty() && arg[0] != '-') {
-            if (options.input_file.empty()) {
+            if (options.command == CliCommand::Fmt) {
+                options.fmt_paths.emplace_back(arg);
+                if (options.input_file.empty()) {
+                    options.input_file = arg;
+                }
+            } else if (options.input_file.empty()) {
                 options.input_file = arg;
+            }
+        }
+    }
+
+    if (options.command == CliCommand::Fmt) {
+        if (!fmt_write_explicit) {
+            if (options.fmt_check || options.fmt_diff) {
+                options.fmt_write = false;
+            } else {
+                options.fmt_write = true;
+            }
+        }
+        if (options.fmt_paths.empty() && !options.fmt_stdin) {
+#if defined(_WIN32)
+            bool is_tty = _isatty(_fileno(stdin)) != 0;
+#else
+            bool is_tty = isatty(fileno(stdin)) != 0;
+#endif
+            if (!is_tty && !options.fmt_check && !options.fmt_diff) {
+                options.fmt_stdin = true;
             }
         }
     }
@@ -580,9 +629,13 @@ void CliDriver::print_help(std::ostream& out) {
         << "  build <file>                         Compile KeetScript source into a native binary\n"
         << "  run <file> [-- args]                 Compile and immediately execute the target binary\n"
         << "  test [path] [options]                Auto-discover and run unit tests, or run benchmarks/conformance\n"
+        << "  fmt [paths...] [options]             Format KeetScript source files according to canonical style\n"
         << "  version                              Display keety version information\n"
         << "  help                                 Display this help message\n\n"
         << "Options:\n"
+        << "  --check                              Check code format without writing; exit 1 if unformatted\n"
+        << "  --diff                               Display unified diffs of formatting changes\n"
+        << "  -w, --write                          Overwrite formatted files in place (default)\n"
         << "  -o, --output-dir <dir>               Target output directory for emitted sources or binaries\n"
         << "  --cxx <compiler>                     Explicit native C++ compiler binary (clang++, g++, cl.exe)\n"
         << "  -O, --opt <0|1|2|3|s|z>              Optimization level (default: 3)\n"
@@ -1975,7 +2028,210 @@ int CliDriver::execute_test(const CliOptions& options, std::ostream& out, std::o
     return (files_failed > 0 || total_cases_failed > 0) ? 1 : 0;
 }
 
-int CliDriver::run(const CliOptions& options, std::ostream& out, std::ostream& err) {
+std::vector<std::filesystem::path> CliDriver::discover_keet_files(const std::filesystem::path& target_path) {
+    std::vector<std::filesystem::path> results;
+    std::error_code ec;
+
+    std::filesystem::path target = target_path.empty() ? std::filesystem::current_path() : target_path;
+    if (!std::filesystem::exists(target, ec)) {
+        return results;
+    }
+
+    if (std::filesystem::is_regular_file(target, ec)) {
+        results.push_back(target);
+        return results;
+    }
+
+    if (!std::filesystem::is_directory(target, ec)) {
+        return results;
+    }
+
+    for (std::filesystem::recursive_directory_iterator it(target, std::filesystem::directory_options::skip_permission_denied, ec), end;
+         it != end && !ec; it.increment(ec)) {
+        if (ec) break;
+
+        const auto& entry = *it;
+        auto filename = entry.path().filename().string();
+
+        if (entry.is_directory(ec)) {
+            // Skip hidden directories (.git, .keety_build, etc.), build, node_modules, cmake-build-*
+            if (!filename.empty() && filename[0] == '.') {
+                it.disable_recursion_pending();
+                continue;
+            }
+            if (filename == "build" || filename == "node_modules" || filename.rfind("cmake-build-", 0) == 0) {
+                it.disable_recursion_pending();
+                continue;
+            }
+            continue;
+        }
+
+        if (entry.is_regular_file(ec) && entry.path().extension() == ".keet") {
+            results.push_back(entry.path());
+        }
+    }
+
+    std::sort(results.begin(), results.end());
+    return results;
+}
+
+int CliDriver::execute_fmt(const CliOptions& options, std::ostream& out, std::ostream& err, std::istream& in) {
+    keety::fmt::FormatterOptions fmt_opts;
+    keety::fmt::Formatter formatter(fmt_opts);
+
+    // Stdin mode
+    if (options.fmt_stdin) {
+        std::string original((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        diag::SourceManager sm;
+        diag::DiagnosticEmitter emitter(sm, options.color_mode);
+        std::string formatted = formatter.format(original, "<stdin>", &emitter);
+
+        if (emitter.hasErrors()) {
+            if (options.diagnostic_format == DiagnosticFormat::Json) {
+                emitter.emitJson(out);
+            } else {
+                for (const auto& d : emitter.getDiagnostics()) {
+                    err << emitter.format(d);
+                }
+            }
+            return 1;
+        }
+
+        bool changed = (original != formatted);
+        if (options.fmt_check) {
+            if (changed) {
+                err << "<stdin>\n";
+                if (options.fmt_diff) {
+                    std::string diff = keety::fmt::Formatter::generateDiff(original, formatted, "<stdin>");
+                    out << diff;
+                }
+                return 1;
+            }
+            return 0;
+        }
+
+        if (options.fmt_diff) {
+            if (changed) {
+                std::string diff = keety::fmt::Formatter::generateDiff(original, formatted, "<stdin>");
+                out << diff;
+            }
+            return 0;
+        }
+
+        out << formatted;
+        return 0;
+    }
+
+    // File / Directory mode
+    std::vector<std::filesystem::path> search_paths = options.fmt_paths;
+    if (search_paths.empty()) {
+        search_paths.emplace_back(".");
+    }
+
+    std::vector<std::filesystem::path> all_files;
+    bool not_found_error = false;
+
+    for (const auto& p : search_paths) {
+        std::error_code ec;
+        if (!std::filesystem::exists(p, ec)) {
+            err << "error: path not found: " << p.string() << "\n";
+            not_found_error = true;
+            continue;
+        }
+        auto files = discover_keet_files(p);
+        all_files.insert(all_files.end(), files.begin(), files.end());
+    }
+
+    if (not_found_error) {
+        return 1;
+    }
+
+    // Deduplicate discovered files
+    std::sort(all_files.begin(), all_files.end());
+    all_files.erase(std::unique(all_files.begin(), all_files.end()), all_files.end());
+
+    if (all_files.empty()) {
+        if (options.verbose) {
+            out << "[verbose] No .keet files found to format.\n";
+        }
+        return 0;
+    }
+
+    int unformatted_count = 0;
+    int error_count = 0;
+
+    for (const auto& file_path : all_files) {
+        std::ifstream ifs(file_path, std::ios::binary);
+        if (!ifs) {
+            err << "error: unable to read file: " << file_path.string() << "\n";
+            ++error_count;
+            continue;
+        }
+        std::string original((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+        ifs.close();
+
+        diag::SourceManager sm;
+        diag::DiagnosticEmitter emitter(sm, options.color_mode);
+        std::string formatted = formatter.format(original, file_path.string(), &emitter);
+
+        if (emitter.hasErrors()) {
+            if (options.diagnostic_format == DiagnosticFormat::Json) {
+                emitter.emitJson(out);
+            } else {
+                for (const auto& d : emitter.getDiagnostics()) {
+                    err << emitter.format(d);
+                }
+            }
+            ++error_count;
+            continue;
+        }
+
+        bool changed = (original != formatted);
+        if (changed) {
+            ++unformatted_count;
+
+            if (options.fmt_check) {
+                err << file_path.string() << "\n";
+            }
+
+            if (options.fmt_diff) {
+                std::string diff = keety::fmt::Formatter::generateDiff(original, formatted, file_path.string());
+                out << diff;
+            }
+
+            if (options.fmt_write) {
+                std::ofstream ofs(file_path, std::ios::binary | std::ios::trunc);
+                if (!ofs) {
+                    err << "error: failed to write to " << file_path.string() << "\n";
+                    ++error_count;
+                    continue;
+                }
+                ofs << formatted;
+                ofs.close();
+
+                if (options.verbose) {
+                    out << "[verbose] Formatted " << file_path.string() << "\n";
+                }
+            }
+        } else {
+            if (options.verbose) {
+                out << "[verbose] Clean " << file_path.string() << "\n";
+            }
+        }
+    }
+
+    if (error_count > 0) {
+        return 1;
+    }
+
+    if (options.fmt_check && unformatted_count > 0) {
+        return 1;
+    }
+
+    return 0;
+}
+
+int CliDriver::run(const CliOptions& options, std::ostream& out, std::ostream& err, std::istream& in) {
     switch (options.command) {
     case CliCommand::Help:
         print_help(out);
@@ -1993,6 +2249,8 @@ int CliDriver::run(const CliOptions& options, std::ostream& out, std::ostream& e
         return execute_run(options, out, err);
     case CliCommand::Test:
         return execute_test(options, out, err);
+    case CliCommand::Fmt:
+        return execute_fmt(options, out, err, in);
     case CliCommand::Unknown:
         err << "error: unknown command or missing arguments.\n"
             << "Run 'keety --help' for usage.\n";
@@ -2001,9 +2259,9 @@ int CliDriver::run(const CliOptions& options, std::ostream& out, std::ostream& e
     return 1;
 }
 
-int CliDriver::run(int argc, char* argv[], std::ostream& out, std::ostream& err) {
+int CliDriver::run(int argc, char* argv[], std::ostream& out, std::ostream& err, std::istream& in) {
     auto options = parse_args(argc, argv);
-    return run(options, out, err);
+    return run(options, out, err, in);
 }
 
 } // namespace keety::driver

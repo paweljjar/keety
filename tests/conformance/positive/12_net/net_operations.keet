@@ -1,8 +1,8 @@
-import net;
-import net as n;
-import json;
 import io;
-from "net" import urlEncode, urlDecode, isIpv4, isLoopback;
+import json;
+import net;
+from net import urlEncode, urlDecode, isIpv4, isLoopback;
+import net as n;
 
 fn main(): int {
     io.println("Running KeetScript net conformance tests...");

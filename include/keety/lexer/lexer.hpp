@@ -9,6 +9,23 @@
 
 namespace keety::lexer {
 
+/// Classification of source code comments
+enum class CommentKind : uint8_t {
+    Line,   // Single-line comment: `// ...`
+    Block   // Multi-line block comment: `/* ... */`
+};
+
+/// Represents a comment captured from the source stream
+struct Comment {
+    CommentKind kind{CommentKind::Line};
+    diag::SourceSpan span{};
+    std::string text{};
+    bool hasPrecedingBlankLine{false};
+
+    [[nodiscard]] bool isLine() const noexcept { return kind == CommentKind::Line; }
+    [[nodiscard]] bool isBlock() const noexcept { return kind == CommentKind::Block; }
+};
+
 /// Contextual flags influencing tokenization rules
 enum class LexerMode {
     Normal,
@@ -25,6 +42,16 @@ public:
 
     /// Scans all remaining tokens until EOF.
     std::vector<Token> tokenizeAll();
+
+    /// Configures whether comments are captured during tokenization
+    void setCaptureComments(bool capture) noexcept { captureComments_ = capture; }
+    [[nodiscard]] bool isCapturingComments() const noexcept { return captureComments_; }
+
+    /// Returns all comments captured so far
+    [[nodiscard]] const std::vector<Comment>& getCapturedComments() const noexcept { return comments_; }
+
+    /// Extracts and resets captured comments
+    std::vector<Comment> takeCapturedComments() noexcept { return std::move(comments_); }
 
     /// Sets the current lexer mode (e.g. TypeContext).
     void setMode(LexerMode mode) noexcept { mode_ = mode; }
@@ -78,6 +105,10 @@ private:
 
     // Tracking state for template interpolation depth
     std::vector<int> templateBraceStack_;
+
+    // Comment capture state
+    bool captureComments_{false};
+    std::vector<Comment> comments_;
 };
 
 } // namespace keety::lexer

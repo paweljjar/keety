@@ -15,8 +15,8 @@
 
 #include <keet/runtime.hpp>
 
-#include <keet/std/math.hpp>
 #include <keet/std/io.hpp>
+#include <keet/std/math.hpp>
 
 namespace keet_module_math_operations {
     // --- Exported Function Prototypes ---

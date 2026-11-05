@@ -1,6 +1,6 @@
-import net.http;
-import net;
 import io;
+import net;
+import net.http;
 
 fn main(): int {
     io.println("Running KeetScript HTTP server conformance tests...");

@@ -15,8 +15,8 @@
 
 #include <keet/runtime.hpp>
 
-#include <keet/std/sys.hpp>
 #include <keet/std/io.hpp>
+#include <keet/std/sys.hpp>
 
 namespace keet_module_sys_environment {
     // --- Exported Function Prototypes ---

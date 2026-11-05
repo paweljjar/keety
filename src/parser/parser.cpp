@@ -1740,15 +1740,15 @@ std::unique_ptr<ast::Expr> Parser::parsePrimaryExpression() {
 
             if (match(lexer::TokenKind::TemplateMiddle)) {
                 std::string midRaw(lastConsumed_.lexeme);
-                // Middle is }middle${
-                std::string mid = midRaw.size() >= 3 ? midRaw.substr(1, midRaw.size() - 3) : "";
+                // Middle is middle${ (preceding '}' was already consumed)
+                std::string mid = midRaw.size() >= 2 ? midRaw.substr(0, midRaw.size() - 2) : "";
                 if (!mid.empty()) {
                     parts.push_back(ast::TemplatePart{std::move(mid), nullptr, false});
                 }
             } else if (match(lexer::TokenKind::TemplateTail)) {
                 std::string tailRaw(lastConsumed_.lexeme);
-                // Tail is }suffix`
-                std::string tail = tailRaw.size() >= 2 ? tailRaw.substr(1, tailRaw.size() - 2) : "";
+                // Tail is suffix` (preceding '}' was already consumed)
+                std::string tail = tailRaw.size() >= 1 ? tailRaw.substr(0, tailRaw.size() - 1) : "";
                 if (!tail.empty()) {
                     parts.push_back(ast::TemplatePart{std::move(tail), nullptr, false});
                 }
@@ -1802,7 +1802,13 @@ std::unique_ptr<ast::Expr> Parser::parsePrimaryExpression() {
         std::vector<std::unique_ptr<ast::Expr>> elements;
         if (!check(lexer::TokenKind::RBracket)) {
             do {
-                elements.push_back(parseExpression());
+                if (check(lexer::TokenKind::RBracket)) {
+                    break;
+                }
+                auto elem = parseExpression();
+                if (elem) {
+                    elements.push_back(std::move(elem));
+                }
             } while (match(lexer::TokenKind::Comma));
         }
         const auto& endBracket = expect(lexer::TokenKind::RBracket, diag::ErrorCode::ExpectedClosingBracket, "expected ']' after array elements");
@@ -1815,10 +1821,15 @@ std::unique_ptr<ast::Expr> Parser::parsePrimaryExpression() {
         std::vector<ast::MapEntry> entries;
         if (!check(lexer::TokenKind::RBrace)) {
             do {
+                if (check(lexer::TokenKind::RBrace)) {
+                    break;
+                }
                 auto keyExpr = parseExpression();
                 expect(lexer::TokenKind::Colon, diag::ErrorCode::ExpectedColon, "expected ':' between map key and value");
                 auto valExpr = parseExpression();
-                entries.push_back(ast::MapEntry{std::move(keyExpr), std::move(valExpr)});
+                if (keyExpr && valExpr) {
+                    entries.push_back(ast::MapEntry{std::move(keyExpr), std::move(valExpr)});
+                }
             } while (match(lexer::TokenKind::Comma));
         }
         const auto& endBrace = expect(lexer::TokenKind::RBrace, diag::ErrorCode::ExpectedClosingBrace, "expected '}' after map entries");

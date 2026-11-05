@@ -138,29 +138,50 @@ bool Lexer::match(char expected) noexcept {
 
 void Lexer::skipWhitespaceAndComments() {
     hadPrecedingWhitespace_ = false;
+    size_t newlinesSinceItem = 0;
     while (!isAtEnd()) {
         char c = peek();
         switch (c) {
         case ' ':
         case '\t':
         case '\r':
+            hadPrecedingWhitespace_ = true;
+            advance();
+            break;
         case '\n':
             hadPrecedingWhitespace_ = true;
+            ++newlinesSinceItem;
             advance();
             break;
         case '/':
             if (peekNext() == '/') {
                 hadPrecedingWhitespace_ = true;
                 // Line comment: skip until end of line or EOF
+                size_t commentStart = cursor_;
+                uint32_t cStartLine = line_;
+                uint32_t cStartCol = column_;
                 advance(); // '/'
                 advance(); // '/'
                 while (!isAtEnd() && peek() != '\n') {
                     advance();
                 }
+                if (captureComments_) {
+                    diag::SourceLocation start{fileId_, static_cast<uint32_t>(commentStart), cStartLine, cStartCol};
+                    diag::SourceLocation end{fileId_, static_cast<uint32_t>(cursor_), line_, column_};
+                    comments_.push_back(Comment{
+                        CommentKind::Line,
+                        diag::SourceSpan{start, end},
+                        std::string(source_.substr(commentStart, cursor_ - commentStart)),
+                        newlinesSinceItem >= 2
+                    });
+                }
+                newlinesSinceItem = 0;
             } else if (peekNext() == '*') {
                 hadPrecedingWhitespace_ = true;
                 // Block comment: skip until '*/'
                 size_t commentStart = cursor_;
+                uint32_t cStartLine = line_;
+                uint32_t cStartCol = column_;
                 advance(); // '/'
                 advance(); // '*'
                 bool closed = false;
@@ -173,14 +194,26 @@ void Lexer::skipWhitespaceAndComments() {
                     }
                     advance();
                 }
+                diag::SourceLocation start{fileId_, static_cast<uint32_t>(commentStart), cStartLine, cStartCol};
+                diag::SourceLocation end{fileId_, static_cast<uint32_t>(cursor_), line_, column_};
+                diag::SourceSpan span{start, end};
+
                 if (!closed && emitter_) {
-                    diag::SourceSpan span = makeSpan(commentStart, cursor_);
                     emitter_->report(diag::Diagnostic::makeError(
                         diag::ErrorCode::UnterminatedComment,
                         "unterminated block comment",
                         span.start
                     ).withLabel(span, "unclosed block comment begins here"));
                 }
+                if (captureComments_) {
+                    comments_.push_back(Comment{
+                        CommentKind::Block,
+                        span,
+                        std::string(source_.substr(commentStart, cursor_ - commentStart)),
+                        newlinesSinceItem >= 2
+                    });
+                }
+                newlinesSinceItem = 0;
             } else {
                 return;
             }

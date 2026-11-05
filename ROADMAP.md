@@ -153,7 +153,7 @@ Active development backlog organized by implementation priority and time horizon
 
 High-priority deliverables focusing on developer tooling, formatting, and static analysis.
 
-#### 1. Code Formatter (`keety fmt`)
+#### 1. Code Formatter (`keety fmt`) [Completed]
 - **Deterministic Canonical Style:**
   - Opinionated AST/CST pretty-printer (inspired by `gofmt` and `rustfmt`).
   - Standardized 4-space indentation, operator padding, brace placement, and trailing commas in multi-line literals.
