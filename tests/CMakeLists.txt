@@ -84,6 +84,7 @@ add_executable(keety_unit_tests
     unit/test_cli_fmt.cpp
     unit/test_lint_framework.cpp
     unit/test_lint_dead_code.cpp
+    unit/test_lint_mutability_style.cpp
     conformance/test_conformance_scalars.cpp
     conformance/test_conformance_values_mut.cpp
     conformance/test_conformance_unions.cpp

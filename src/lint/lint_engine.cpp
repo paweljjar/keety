@@ -1,8 +1,12 @@
 #include <keety/lint/lint_engine.hpp>
+#include <keety/lint/rules/empty_block_rule.hpp>
+#include <keety/lint/rules/redundant_type_annotation_rule.hpp>
+#include <keety/lint/rules/unnecessary_mut_rule.hpp>
 #include <keety/lint/rules/unreachable_code_rule.hpp>
 #include <keety/lint/rules/unused_import_rule.hpp>
 #include <keety/lint/rules/unused_parameter_rule.hpp>
 #include <keety/lint/rules/unused_variable_rule.hpp>
+#include <keety/lint/rules/variable_shadowing_rule.hpp>
 
 #include <algorithm>
 
@@ -17,10 +21,19 @@ void LintEngine::registerRule(std::unique_ptr<LintRule> rule) {
 }
 
 void LintEngine::registerDefaultRules() {
+    // Category A: Dead Code & Hygiene
     registerRule(std::make_unique<UnusedImportRule>());
     registerRule(std::make_unique<UnusedVariableRule>());
     registerRule(std::make_unique<UnusedParameterRule>());
     registerRule(std::make_unique<UnreachableCodeRule>());
+
+    // Category B: Immutability & Scoping
+    registerRule(std::make_unique<UnnecessaryMutRule>());
+    registerRule(std::make_unique<VariableShadowingRule>());
+
+    // Category C: Redundancy & Idiomatic Style
+    registerRule(std::make_unique<RedundantTypeAnnotationRule>());
+    registerRule(std::make_unique<EmptyBlockRule>());
 }
 
 std::vector<std::string_view> LintEngine::getRegisteredRuleNames() const {
