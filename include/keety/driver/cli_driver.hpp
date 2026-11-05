@@ -19,6 +19,7 @@ enum class CliCommand {
     Build,   ///< keety build <file>
     Run,     ///< keety run <file> [-- args]
     Test,    ///< keety test [--benchmarks | --conformance]
+    Fmt,     ///< keety fmt [paths...] [--check] [--diff] [-w]
     Version, ///< keety --version / -V
     Help,    ///< keety --help / -h
     Unknown  ///< Unrecognized command
@@ -66,6 +67,12 @@ struct CliOptions {
     std::vector<std::string> run_args{};
     diag::ColorMode color_mode{diag::ColorMode::Never};
     DiagnosticFormat diagnostic_format{DiagnosticFormat::Human};
+    bool fmt_check{false};
+    bool fmt_diff{false};
+    bool fmt_write{true};
+    bool fmt_stdin{false};
+    bool fmt_recursive{true};
+    std::vector<std::filesystem::path> fmt_paths{};
 };
 
 /// CLI command driver and entry point
@@ -78,10 +85,10 @@ public:
     [[nodiscard]] static CliOptions parse_args(const std::vector<std::string>& args);
 
     /// Main entry execution dispatcher
-    static int run(const CliOptions& options, std::ostream& out = std::cout, std::ostream& err = std::cerr);
+    static int run(const CliOptions& options, std::ostream& out = std::cout, std::ostream& err = std::cerr, std::istream& in = std::cin);
 
     /// Overload taking argc and argv directly
-    static int run(int argc, char* argv[], std::ostream& out = std::cout, std::ostream& err = std::cerr);
+    static int run(int argc, char* argv[], std::ostream& out = std::cout, std::ostream& err = std::cerr, std::istream& in = std::cin);
 
     /// Executes `keety check <file>` validation pipeline
     static int execute_check(const CliOptions& options, std::ostream& out = std::cout, std::ostream& err = std::cerr);
@@ -100,6 +107,12 @@ public:
 
     /// Executes `keety test [path] [options]` test runner or benchmark/conformance suite
     static int execute_test(const CliOptions& options, std::ostream& out = std::cout, std::ostream& err = std::cerr);
+
+    /// Discovers KeetScript source files (*.keet) recursively in target directory or returns regular file
+    [[nodiscard]] static std::vector<std::filesystem::path> discover_keet_files(const std::filesystem::path& target_path);
+
+    /// Executes `keety fmt [paths...] [options]` formatting pipeline
+    static int execute_fmt(const CliOptions& options, std::ostream& out = std::cout, std::ostream& err = std::cerr, std::istream& in = std::cin);
 
     /// Helper to compile and link to a binary, returning target binary path if successful
     static std::optional<std::filesystem::path> build_binary(const CliOptions& options, std::ostream& out, std::ostream& err);
