@@ -124,6 +124,7 @@ add_executable(keety_unit_tests
     unit/test_lsp_completion.cpp
     unit/test_lsp_symbols.cpp
     unit/test_lsp_formatting.cpp
+    unit/test_lsp_code_action.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE

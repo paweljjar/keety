@@ -34,6 +34,7 @@ private:
     struct LocalVar {
         std::string name;
         diag::SourceSpan span;
+        diag::SourceSpan nameSpan;
     };
 
     void checkDecl(const ast::Decl* decl, std::vector<LintDiagnostic>& diags) {
@@ -86,11 +87,11 @@ private:
                 if (const auto* var = dynamic_cast<const ast::VarDecl*>(d)) {
                     // Ignore variables prefixed with '_'
                     if (!var->getName().empty() && !var->getName().starts_with("_")) {
-                        locals.push_back({var->getName(), var->getSpan()});
+                        locals.push_back({var->getName(), var->getSpan(), var->getNameSpan()});
                     }
                 } else if (const auto* c = dynamic_cast<const ast::ConstDecl*>(d)) {
                     if (!c->getName().empty() && !c->getName().starts_with("_")) {
-                        locals.push_back({c->getName(), c->getSpan()});
+                        locals.push_back({c->getName(), c->getSpan(), c->getNameSpan()});
                     }
                 }
             }
@@ -119,13 +120,14 @@ private:
         for (const auto& local : locals) {
             if (!references.contains(local.name)) {
                 std::string msg = "Variable '" + local.name + "' is declared but never read. Prefix with '_' if intentional.";
+                diag::SourceSpan targetSpan = local.nameSpan.isValid() ? local.nameSpan : local.span;
                 diags.emplace_back(
                     std::string(getCode()),
                     std::string(getName()),
                     getDefaultSeverity(),
                     std::move(msg),
-                    local.span,
-                    FixEdit{local.span, "_" + local.name}
+                    targetSpan,
+                    FixEdit{targetSpan, "_" + local.name}
                 );
             }
         }

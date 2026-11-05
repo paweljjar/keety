@@ -28,11 +28,14 @@ public:
 class VarDecl : public Decl {
 public:
     VarDecl(diag::SourceSpan span, std::string name, std::unique_ptr<TypeAnnotation> type,
-            std::unique_ptr<Expr> initializer = nullptr, bool isExported = false)
+            std::unique_ptr<Expr> initializer = nullptr, bool isExported = false,
+            diag::SourceSpan nameSpan = {})
         : Decl(span), name_(std::move(name)), type_(std::move(type)),
-          initializer_(std::move(initializer)), isExported_(isExported) {}
+          initializer_(std::move(initializer)), isExported_(isExported),
+          nameSpan_(nameSpan) {}
 
     [[nodiscard]] const std::string& getName() const noexcept { return name_; }
+    [[nodiscard]] diag::SourceSpan getNameSpan() const noexcept { return nameSpan_; }
     [[nodiscard]] const TypeAnnotation* getType() const noexcept { return type_.get(); }
     [[nodiscard]] const Expr* getInitializer() const noexcept { return initializer_.get(); }
     [[nodiscard]] bool hasInitializer() const noexcept { return initializer_ != nullptr; }
@@ -43,17 +46,21 @@ private:
     std::unique_ptr<TypeAnnotation> type_;
     std::unique_ptr<Expr> initializer_;
     bool isExported_{false};
+    diag::SourceSpan nameSpan_{};
 };
 
 /// Represents an immutable runtime constant: `const MAX_RETRIES: int = 5;`
 class ConstDecl : public Decl {
 public:
     ConstDecl(diag::SourceSpan span, std::string name, std::unique_ptr<TypeAnnotation> type,
-              std::unique_ptr<Expr> initializer, bool isExported = false)
+              std::unique_ptr<Expr> initializer, bool isExported = false,
+              diag::SourceSpan nameSpan = {})
         : Decl(span), name_(std::move(name)), type_(std::move(type)),
-          initializer_(std::move(initializer)), isExported_(isExported) {}
+          initializer_(std::move(initializer)), isExported_(isExported),
+          nameSpan_(nameSpan) {}
 
     [[nodiscard]] const std::string& getName() const noexcept { return name_; }
+    [[nodiscard]] diag::SourceSpan getNameSpan() const noexcept { return nameSpan_; }
     [[nodiscard]] const TypeAnnotation* getType() const noexcept { return type_.get(); }
     [[nodiscard]] const Expr* getInitializer() const noexcept { return initializer_.get(); }
     [[nodiscard]] bool isExported() const noexcept { return isExported_; }
@@ -63,6 +70,7 @@ private:
     std::unique_ptr<TypeAnnotation> type_;
     std::unique_ptr<Expr> initializer_;
     bool isExported_{false};
+    diag::SourceSpan nameSpan_{};
 };
 
 /// Represents a compile-time constant: `define BUFFER_SIZE: int = 1024;`
@@ -92,6 +100,8 @@ struct Param {
     std::unique_ptr<TypeAnnotation> type;
     bool isMut{false};
     std::unique_ptr<Expr> defaultValue{nullptr};
+    diag::SourceSpan nameSpan{};
+    diag::SourceSpan mutSpan{};
 };
 
 /// Represents a function declaration: `fn add(a: int, b: int): int { return a + b; }`

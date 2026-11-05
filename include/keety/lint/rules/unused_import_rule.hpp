@@ -38,18 +38,30 @@ public:
 
             if (importDecl->isSelective()) {
                 // from "..." import sym1, sym2;
+                bool allUnused = true;
+                for (const auto& sym : importDecl->getSymbols()) {
+                    if (referencedIdentifiers.contains(sym.getEffectiveName())) {
+                        allUnused = false;
+                        break;
+                    }
+                }
+
                 for (const auto& sym : importDecl->getSymbols()) {
                     const std::string& name = sym.getEffectiveName();
                     if (!referencedIdentifiers.contains(name)) {
                         std::string msg = "Imported symbol '" + name + "' is never used";
                         diag::SourceSpan span = sym.span.isValid() ? sym.span : importDecl->getSpan();
+                        std::optional<FixEdit> fix = std::nullopt;
+                        if (allUnused) {
+                            fix = FixEdit{importDecl->getSpan(), ""};
+                        }
                         diagnostics.emplace_back(
                             std::string(getCode()),
                             std::string(getName()),
                             getDefaultSeverity(),
                             std::move(msg),
                             span,
-                            FixEdit{span, ""}
+                            std::move(fix)
                         );
                     }
                 }

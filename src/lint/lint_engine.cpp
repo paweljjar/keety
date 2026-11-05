@@ -32,7 +32,8 @@ void LintEngine::registerDefaultRules() {
     registerRule(std::make_unique<VariableShadowingRule>());
 
     // Category C: Redundancy & Idiomatic Style
-    registerRule(std::make_unique<RedundantTypeAnnotationRule>());
+    // Note: RedundantTypeAnnotationRule is excluded from default rules because KeetScript
+    // strictly mandates explicit type annotations on all variable and constant declarations.
     registerRule(std::make_unique<EmptyBlockRule>());
 }
 

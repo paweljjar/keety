@@ -26,12 +26,13 @@ flowchart TD
         A7["Testing Framework (keety test)"]
         A8["Source Line Mapping (#line)"]
         A9["HTTP Server & WebSockets (std::net::http)"]
+        A10["Code Formatter (keety fmt)"]
+        A11["Static Linter (keety lint)"]
     end
 
     subgraph B["Category B: To Do"]
         subgraph B1["B1: Near-Term"]
-            B1_1["Code Formatter (keety fmt)"]
-            B1_2["Static Linter (keety lint)"]
+            B1_1["Near-Term Horizon (Completed)"]
         end
         subgraph B2["B2: Mid-Term"]
             B2_1["Advanced LSP Refactoring"]
@@ -164,13 +165,21 @@ High-priority deliverables focusing on developer tooling, formatting, and static
 - **Verification Mode:**
   - `keety fmt --check` non-zero exit code flag for CI linting gates.
 
-#### 2. Static Linter (`keety lint`)
-- **Hygiene & Dead Code Analysis:**
-  - Detect unused imports, unused local variables/parameters (suggesting `_`), and unreachable branches.
-  - Flag redundant type annotations where the type is trivially evident.
-  - Detect unmutated `mut` parameters or `let` variables and recommend `const`.
-- **Configurable Rules:**
-  - Project-level `.keetlint.json` configuration for team rule sets and warning suppressions.
+#### 2. Static Linter (`keety lint`) [Completed]
+- **Hygiene, Dead Code & Style Analysis:**
+  - Detect unused imports (`L001`), unused local variables (`L002`), unused parameters (`L003`), and unreachable statements (`L004`).
+  - Flag unmutated `mut` declarations (`L010`) and lexical variable shadowing (`L011`).
+  - Detect empty statement blocks (`L022`).
+- **Configurable Rules & In-Code Suppressions:**
+  - Hierarchical `.keetlint.json` and `pedigree.json` configuration for rule severities and path exclusion patterns.
+  - Granular in-code comment suppressions (`// keetlint:disable`, `// keetlint:disable-next-line`, `// keetlint:enable`).
+- **CLI Subcommand & Automated Fix Engine:**
+  - `keety lint [paths...]` supporting single files, recursive directories, and stdin mode (`-`).
+  - `--check` flag for CI exit code enforcement and `--strict` flag for zero-warning policies.
+  - `--fix` automated quick fix application in reverse byte offset order for safe file updates.
+- **Language Server Protocol (`keet-lsp`):**
+  - Live diagnostics (`textDocument/publishDiagnostics`) with rule codes, source tags, and severity levels.
+  - Interactive Quick Fix code actions (`textDocument/codeAction`) for 1-click editor fixes.
 
 ---
 

@@ -57,13 +57,14 @@ private:
 
             if (!referenced.contains(p.name)) {
                 std::string msg = "Parameter '" + p.name + "' is never used in the function body. Rename to '_' or prefix with '_' if intentional.";
+                diag::SourceSpan targetSpan = p.nameSpan.isValid() ? p.nameSpan : p.span;
                 diags.emplace_back(
                     std::string(getCode()),
                     std::string(getName()),
                     getDefaultSeverity(),
                     std::move(msg),
-                    p.span,
-                    FixEdit{p.span, "_" + p.name}
+                    targetSpan,
+                    FixEdit{targetSpan, "_" + p.name}
                 );
             }
         }

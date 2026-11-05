@@ -381,11 +381,12 @@ bool apply_lint_fixes(std::string& source, const std::vector<keety::lint::LintDi
     struct EditWithSpan {
         keety::diag::SourceSpan span;
         std::string replacement;
+        std::string ruleCode;
     };
     std::vector<EditWithSpan> edits;
     for (const auto& d : diagnostics) {
         if (d.quickFix && d.quickFix->span.isValid()) {
-            edits.push_back({d.quickFix->span, d.quickFix->replacement});
+            edits.push_back({d.quickFix->span, d.quickFix->replacement, d.ruleCode});
         }
     }
     if (edits.empty()) {
@@ -407,7 +408,7 @@ bool apply_lint_fixes(std::string& source, const std::vector<keety::lint::LintDi
         if (end <= source.size() && start <= end) {
             if (lastStart == std::string::npos || end <= lastStart) {
                 size_t len = end - start;
-                if (edit.replacement.empty()) {
+                if (edit.ruleCode == "L001" && edit.replacement.empty()) {
                     size_t lineStart = start;
                     while (lineStart > 0 && source[lineStart - 1] != '\n' && (source[lineStart - 1] == ' ' || source[lineStart - 1] == '\t')) {
                         --lineStart;

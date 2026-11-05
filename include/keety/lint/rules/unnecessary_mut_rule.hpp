@@ -52,13 +52,17 @@ private:
         for (const auto& p : params) {
             if (p.isMut && !mutated.contains(p.name)) {
                 std::string msg = "Parameter '" + p.name + "' is marked 'mut' but is never reassigned or mutably borrowed";
+                diag::SourceSpan diagSpan = p.mutSpan.isValid() ? p.mutSpan : p.span;
+                diag::SourceSpan removeSpan = (p.mutSpan.isValid() && p.nameSpan.isValid())
+                    ? diag::SourceSpan{p.mutSpan.start, p.nameSpan.start}
+                    : (p.mutSpan.isValid() ? p.mutSpan : p.span);
                 diags.emplace_back(
                     std::string(getCode()),
                     std::string(getName()),
                     getDefaultSeverity(),
                     std::move(msg),
-                    p.span,
-                    FixEdit{p.span, p.name}
+                    diagSpan,
+                    FixEdit{removeSpan, ""}
                 );
             }
         }

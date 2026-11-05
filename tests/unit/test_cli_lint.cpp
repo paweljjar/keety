@@ -357,6 +357,35 @@ TEST_CASE("CLI driver execute_lint file and directory mode", "[driver][cli][lint
         CHECK(cleanErr.str().empty());
     }
 
+    SECTION("File mode with --fix preserves variable types, initializers, and parameter types") {
+        auto file = tempDir.createFile("fix_types.keet",
+            "fn compute(mut prefix: string, unusedTag: int): string {\n"
+            "    let secretKey: int = 9999;\n"
+            "    return prefix;\n"
+            "}\n"
+        );
+
+        CliOptions opts;
+        opts.command = CliCommand::Lint;
+        opts.lint_paths.push_back(file);
+        opts.lint_fix = true;
+
+        std::ostringstream out;
+        std::ostringstream err;
+
+        int res = CliDriver::run(opts, out, err);
+        CHECK(res == 0);
+
+        std::string updated = tempDir.readFile(file);
+        // mut should be removed, leaving 'prefix: string'
+        CHECK(updated.find("prefix: string") != std::string::npos);
+        CHECK(updated.find("mut prefix") == std::string::npos);
+        // parameter 'unusedTag' renamed to '_unusedTag: int', preserving ': int'
+        CHECK(updated.find("_unusedTag: int") != std::string::npos);
+        // variable 'secretKey' renamed to '_secretKey', preserving 'let', ': int', and '= 9999;'
+        CHECK(updated.find("let _secretKey: int = 9999;") != std::string::npos);
+    }
+
     SECTION("Directory recursion discovers .keet files and ignores .hidden") {
         auto sub1 = tempDir.createFile("sub/file1.keet", "import math;\nfn f(): void {}\n");
         auto sub2 = tempDir.createFile("sub/nested/file2.keet", "import io;\nfn g(): void { io.println(\"g\"); }\n");

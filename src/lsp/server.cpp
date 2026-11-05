@@ -96,6 +96,9 @@ std::optional<std::string> Server::handleRawMessage(const std::string& rawJson) 
             } else if (method == "textDocument/formatting") {
                 auto res = handleFormatting(params);
                 return JsonRpcResponse::makeResult(id, res).serialize();
+            } else if (method == "textDocument/codeAction") {
+                auto res = handleCodeAction(params);
+                return JsonRpcResponse::makeResult(id, res).serialize();
             } else if (method == "shutdown") {
                 auto res = handleShutdown();
                 return JsonRpcResponse::makeResult(id, res).serialize();
@@ -207,6 +210,12 @@ void Server::handleRequest(const RequestId& id, const std::string& method, const
         return;
     }
 
+    if (method == "textDocument/codeAction") {
+        auto res = handleCodeAction(params);
+        transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
+        return;
+    }
+
     auto resp = JsonRpcResponse::makeError(id, JsonRpcErrorCode::MethodNotFound, "method not found: " + method);
     transport_.writeMessage(resp.serialize());
 }
@@ -261,6 +270,7 @@ JsonValue Server::handleInitialize(const JsonValue& /*params*/) {
 
     caps["documentSymbolProvider"] = JsonValue(true);
     caps["documentFormattingProvider"] = JsonValue(true);
+    caps["codeActionProvider"] = JsonValue(true);
 
     JsonValue::Object serverInfo;
     serverInfo["name"] = JsonValue(std::string("keet-lsp"));
@@ -396,6 +406,22 @@ JsonValue Server::handleFormatting(const JsonValue& params) {
     JsonValue::Array arr;
     for (const auto& edit : edits) {
         arr.push_back(edit.toJson());
+    }
+    return JsonValue(std::move(arr));
+}
+
+JsonValue Server::handleCodeAction(const JsonValue& params) {
+    auto p = CodeActionParams::fromJson(params);
+    auto docOpt = docManager_.getDocument(p.textDocument.uri);
+    if (!docOpt.has_value()) {
+        JsonValue::Array emptyArr;
+        return JsonValue(std::move(emptyArr));
+    }
+    auto actions = analyzer_.getCodeActions(*docOpt, p.range, p.context.diagnostics);
+    JsonValue::Array arr;
+    arr.reserve(actions.size());
+    for (const auto& a : actions) {
+        arr.push_back(a.toJson());
     }
     return JsonValue(std::move(arr));
 }
