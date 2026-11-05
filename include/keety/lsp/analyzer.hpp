@@ -27,6 +27,10 @@ public:
 
     /// Extracts the hierarchical document outline and symbols (classes, methods, fields, functions, enums).
     std::vector<DocumentSymbol> getDocumentSymbols(const Document& doc);
+
+    /// Formats the document according to canonical formatting rules.
+    /// Returns a list of TextEdits (empty if already formatted or on syntax errors).
+    std::vector<TextEdit> format(const Document& doc, const FormattingOptions& options = {});
 };
 
 } // namespace keety::lsp

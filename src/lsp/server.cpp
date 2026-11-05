@@ -93,6 +93,9 @@ std::optional<std::string> Server::handleRawMessage(const std::string& rawJson) 
             } else if (method == "textDocument/documentSymbol") {
                 auto res = handleDocumentSymbol(params);
                 return JsonRpcResponse::makeResult(id, res).serialize();
+            } else if (method == "textDocument/formatting") {
+                auto res = handleFormatting(params);
+                return JsonRpcResponse::makeResult(id, res).serialize();
             } else if (method == "shutdown") {
                 auto res = handleShutdown();
                 return JsonRpcResponse::makeResult(id, res).serialize();
@@ -198,6 +201,12 @@ void Server::handleRequest(const RequestId& id, const std::string& method, const
         return;
     }
 
+    if (method == "textDocument/formatting") {
+        auto res = handleFormatting(params);
+        transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
+        return;
+    }
+
     auto resp = JsonRpcResponse::makeError(id, JsonRpcErrorCode::MethodNotFound, "method not found: " + method);
     transport_.writeMessage(resp.serialize());
 }
@@ -251,6 +260,7 @@ JsonValue Server::handleInitialize(const JsonValue& /*params*/) {
     caps["completionProvider"] = JsonValue(std::move(compProvider));
 
     caps["documentSymbolProvider"] = JsonValue(true);
+    caps["documentFormattingProvider"] = JsonValue(true);
 
     JsonValue::Object serverInfo;
     serverInfo["name"] = JsonValue(std::string("keet-lsp"));
@@ -371,6 +381,21 @@ JsonValue Server::handleDocumentSymbol(const JsonValue& params) {
     JsonValue::Array arr;
     for (const auto& sym : symbols) {
         arr.push_back(sym.toJson());
+    }
+    return JsonValue(std::move(arr));
+}
+
+JsonValue Server::handleFormatting(const JsonValue& params) {
+    auto p = DocumentFormattingParams::fromJson(params);
+    auto docOpt = docManager_.getDocument(p.textDocument.uri);
+    if (!docOpt.has_value()) {
+        JsonValue::Array emptyArr;
+        return JsonValue(std::move(emptyArr));
+    }
+    auto edits = analyzer_.format(*docOpt, p.options);
+    JsonValue::Array arr;
+    for (const auto& edit : edits) {
+        arr.push_back(edit.toJson());
     }
     return JsonValue(std::move(arr));
 }

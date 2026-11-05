@@ -13,6 +13,8 @@
 #include <keety/resolver/module_path_resolver.hpp>
 #include <keety/sema/scope.hpp>
 #include <keety/sema/universe.hpp>
+#include <keety/fmt/formatter.hpp>
+#include <keety/fmt/formatter_options.hpp>
 #include <keety/typechecker/type_checker.hpp>
 
 #include <algorithm>
@@ -1809,6 +1811,34 @@ std::vector<DocumentSymbol> Analyzer::getDocumentSymbols(const Document& doc) {
     }
 
     return symbols;
+}
+
+std::vector<TextEdit> Analyzer::format(const Document& doc, const FormattingOptions& options) {
+    keety::fmt::FormatterOptions fmtOpts;
+    if (options.tabSize > 0) {
+        fmtOpts.indentWidth = options.tabSize;
+    }
+
+    keety::fmt::Formatter formatter(fmtOpts);
+    diag::SourceManager sm;
+    diag::DiagnosticEmitter emitter(sm);
+
+    std::string formatted = formatter.format(doc.text(), doc.uri(), &emitter);
+    if (emitter.hasErrors()) {
+        // Do not return destructive edits if file has syntax errors
+        return {};
+    }
+
+    if (formatted == doc.text()) {
+        return {};
+    }
+
+    TextEdit edit;
+    edit.range.start = Position{0, 0};
+    edit.range.end = doc.offsetToPosition(doc.text().size());
+    edit.newText = std::move(formatted);
+
+    return {std::move(edit)};
 }
 
 } // namespace keety::lsp

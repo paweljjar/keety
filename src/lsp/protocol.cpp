@@ -337,6 +337,61 @@ JsonValue PublishDiagnosticsParams::toJson() const {
     return JsonValue(std::move(obj));
 }
 
+FormattingOptions FormattingOptions::fromJson(const JsonValue& j) {
+    FormattingOptions opt;
+    if (auto* obj = asObject(j)) {
+        if (auto* t = findField(*obj, "tabSize"); t && t->is_int()) {
+            opt.tabSize = static_cast<uint32_t>(std::get<int64_t>(t->value));
+        }
+        if (auto* s = findField(*obj, "insertSpaces"); s && s->is_bool()) {
+            opt.insertSpaces = std::get<bool>(s->value);
+        }
+        if (auto* w = findField(*obj, "trimTrailingWhitespace"); w && w->is_bool()) {
+            opt.trimTrailingWhitespace = std::get<bool>(w->value);
+        }
+        if (auto* n = findField(*obj, "insertFinalNewline"); n && n->is_bool()) {
+            opt.insertFinalNewline = std::get<bool>(n->value);
+        }
+        if (auto* tn = findField(*obj, "trimFinalNewlines"); tn && tn->is_bool()) {
+            opt.trimFinalNewlines = std::get<bool>(tn->value);
+        }
+    }
+    return opt;
+}
+
+DocumentFormattingParams DocumentFormattingParams::fromJson(const JsonValue& j) {
+    DocumentFormattingParams p;
+    if (auto* obj = asObject(j)) {
+        if (auto* td = findField(*obj, "textDocument")) {
+            p.textDocument = TextDocumentIdentifier::fromJson(*td);
+        }
+        if (auto* o = findField(*obj, "options")) {
+            p.options = FormattingOptions::fromJson(*o);
+        }
+    }
+    return p;
+}
+
+JsonValue TextEdit::toJson() const {
+    JsonValue::Object obj;
+    obj["range"] = range.toJson();
+    obj["newText"] = JsonValue(newText);
+    return JsonValue(std::move(obj));
+}
+
+TextEdit TextEdit::fromJson(const JsonValue& j) {
+    TextEdit edit;
+    if (auto* obj = asObject(j)) {
+        if (auto* r = findField(*obj, "range")) {
+            edit.range = Range::fromJson(*r);
+        }
+        if (auto* t = findField(*obj, "newText"); t && t->is_string()) {
+            edit.newText = std::get<std::string>(t->value);
+        }
+    }
+    return edit;
+}
+
 std::string JsonRpcResponse::serialize() const {
     JsonValue::Object obj;
     obj["jsonrpc"] = JsonValue(std::string("2.0"));

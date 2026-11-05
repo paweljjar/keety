@@ -260,6 +260,31 @@ struct PublishDiagnosticsParams {
     JsonValue toJson() const;
 };
 
+struct FormattingOptions {
+    uint32_t tabSize = 4;
+    bool insertSpaces = true;
+    bool trimTrailingWhitespace = false;
+    bool insertFinalNewline = false;
+    bool trimFinalNewlines = false;
+
+    static FormattingOptions fromJson(const JsonValue& j);
+};
+
+struct DocumentFormattingParams {
+    TextDocumentIdentifier textDocument;
+    FormattingOptions options;
+
+    static DocumentFormattingParams fromJson(const JsonValue& j);
+};
+
+struct TextEdit {
+    Range range;
+    std::string newText;
+
+    JsonValue toJson() const;
+    static TextEdit fromJson(const JsonValue& j);
+};
+
 // Outgoing JSON-RPC message
 struct JsonRpcResponse {
     std::optional<RequestId> id;
