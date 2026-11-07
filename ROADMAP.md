@@ -19,7 +19,7 @@ flowchart TD
     subgraph A["Category A: Shipped"]
         A1["6-Stage AOT Compiler Pipeline"]
         A2["Soundness & Mut Borrow Checker"]
-        A3["Standard Library (io, fs, sys, math, time, json, net)"]
+        A3["Standard Library (io, fs, sys, math, time, json, net, crypto)"]
         A4["Package Manager (kattery)"]
         A5["Language Server Protocol (keet-lsp)"]
         A6["VS Code Extension"]
@@ -32,7 +32,7 @@ flowchart TD
 
     subgraph B["Category B: To Do"]
         subgraph B1["B1: Near-Term"]
-            B1_1["Near-Term Horizon (Completed)"]
+            B1_1["Svelte-Like Reactive UI Engine (std::ui)"]
         end
         subgraph B2["B2: Mid-Term"]
             B2_1["Advanced LSP Refactoring"]
@@ -60,7 +60,7 @@ flowchart TD
 
 ## A. Shipped
 
-Production-ready components fully implemented, tested with 100% test coverage, and merged into `main`:
+Production-ready components fully implemented, verified with comprehensive unit, integration, and language conformance test suites, and merged into `main`:
 
 ### 1. AOT Compilation Pipeline
 - **6-Stage Feed-Forward Architecture:**
@@ -102,6 +102,8 @@ Production-ready components fully implemented, tested with 100% test coverage, a
 - Rich Markdown Hover (`textDocument/hover`) with function signatures, types, and stdlib documentation.
 - Context-Aware Autocompletion (`textDocument/completion`) for keywords, stdlib modules, members, and import paths.
 - Hierarchical Document Outline (`textDocument/documentSymbol`) for VS Code breadcrumbs and Outline view.
+- Document Formatting (`textDocument/formatting`) powered directly by `keety::fmt`.
+- Code Actions & Quick Fixes (`textDocument/codeAction`) delivering 1-click editor fixes for linter diagnostics.
 
 ### 6. Visual Studio Code Extension
 - Native TextMate syntax highlighting for `.keet` files and `pedigree.json` validation schema.
@@ -144,28 +146,18 @@ Production-ready components fully implemented, tested with 100% test coverage, a
 - **Benchmarked Microservice Performance:**
   - Proven routing throughput exceeding 20,000,000 requests/sec under multi-threaded load.
 
----
-
-## B. To Do
-
-Active development backlog organized by implementation priority and time horizon.
-
-### B1: Near-Term
-
-High-priority deliverables focusing on developer tooling, formatting, and static analysis.
-
-#### 1. Code Formatter (`keety fmt`) [Completed]
+### 10. Code Formatter (`keety fmt`)
 - **Deterministic Canonical Style:**
   - Opinionated AST/CST pretty-printer (inspired by `gofmt` and `rustfmt`).
   - Standardized 4-space indentation, operator padding, brace placement, and trailing commas in multi-line literals.
   - Deterministic import sorting (Standard library $\to$ third-party packages $\to$ local relative imports).
 - **LSP Integration:**
-  - Wire `textDocument/formatting` and `textDocument/rangeFormatting` into `keet-lsp`.
-  - Provide instant "Format on Save" in VS Code without external tooling.
+  - Wired into `keet-lsp` via `textDocument/formatting`.
+  - Instant "Format on Save" in VS Code without external tooling.
 - **Verification Mode:**
   - `keety fmt --check` non-zero exit code flag for CI linting gates.
 
-#### 2. Static Linter (`keety lint`) [Completed]
+### 11. Static Linter (`keety lint`)
 - **Hygiene, Dead Code & Style Analysis:**
   - Detect unused imports (`L001`), unused local variables (`L002`), unused parameters (`L003`), and unreachable statements (`L004`).
   - Flag unmutated `mut` declarations (`L010`) and lexical variable shadowing (`L011`).
@@ -183,21 +175,55 @@ High-priority deliverables focusing on developer tooling, formatting, and static
 
 ---
 
+## B. To Do
+
+Active development backlog organized by implementation priority and time horizon.
+
+### B1: Near-Term
+
+High-priority deliverables focusing on declarative user interfaces, compile-time reactivity, and modern terminal/desktop application development.
+
+#### 1. Svelte-Like Compile-Time Reactive UI Engine (`std::ui` / `keet-ui`)
+- **Zero-Virtual-DOM Compile-Time Reactivity:**
+  - Ahead-of-time (AOT) component compilation lowering declarative component templates directly into surgical C++20 imperative update routines, completely eliminating runtime Virtual DOM allocations and diffing overhead.
+  - Static dependency analysis during the `keety::sema` and `keety::ir` phases: compiler constructs a fine-grained reactive dependency graph and maps mutations to deterministic dirty-bit masks.
+  - Targeted surgical patching: state assignments trigger only the precise layout nodes and text cells associated with the modified state (`if (dirty & 0x01) { label.setText(...); }`).
+- **Reactive State Primitives & Runes:**
+  - Ergonomic compile-time reactive declarations inspired by Svelte runes (`$state(initial)`, `$derived(expr)`, `$effect(fn)`).
+  - Natural assignment reactivity: direct mutable variable assignments (`count += 1;`) automatically lower into state updates and dirty-bit dispatch.
+  - Seamless integration with KeetScript's strict `mut` borrow-checker to guarantee memory safety and data-race free reactive state mutations at compile time.
+- **Declarative Component Templates & Direct Data Bindings:**
+  - Two-way reactive data bindings (`bind:value={text}`, `bind:checked={flag}`) lowering to zero-overhead event listeners and direct setters.
+  - Structural control blocks (`#if ... /if`, `#each ... /each`, `#await ... /await`) compiled into lightweight keyed fragment managers with in-place collection updates.
+  - Scoped styling, slots, and component composition with zero runtime wrapper overhead.
+- **Multi-Target Rendering Backends:**
+  - **Terminal User Interface (TUI):** Blazing-fast terminal driver with ANSI/VT100 escape sequences, double-buffered character grid, flexbox-inspired constraint layout engine, box-drawing primitives, and zero-flicker partial cell redraws driven by dirty masks.
+  - **Headless Test Driver:** Deterministic, lightweight headless test environment for asserting reactive UI state transitions and verifying component behavior without physical displays.
+  - **Pluggable Target Abstraction:** Modular backend interface (`std::ui::backend`) enabling future WASM direct DOM manipulation and native desktop canvas (e.g. Skia/SDL) integrations.
+- **Event Handling, Lifecycles & Async Coordination:**
+  - Type-safe synthetic event handling with declarative modifiers (`on:click`, `on:keydown`, `on:resize`).
+  - Deterministic component lifecycle hooks (`onMount`, `onDestroy`, `beforeUpdate`, `afterUpdate`).
+  - Native asynchronous coordination with KeetScript's async runtime for non-blocking I/O and stream-backed live data rendering.
+
+---
+
 ### B2: Mid-Term
 
-Tooling enhancements, developer ergonomics, automated code formatting, and interactive visual debugging.
+Tooling enhancements, developer ergonomics, automated code refactoring, and interactive visual debugging.
 
 #### 1. Advanced LSP Refactoring
 - **Symbol Rename (`textDocument/rename` & `textDocument/prepareRename`):**
   - Safe, project-wide identifier renaming respecting lexical scopes and module boundaries.
 - **Find All References (`textDocument/references`):**
   - Project-wide search for all read/write usages and call sites of a symbol.
-- **Code Actions & Quick Fixes (`textDocument/codeAction`):**
-  - 1-click Quick Fixes: "Import missing module", "Remove unused variable", "Make variable mutable".
+- **Compiler Refactoring Code Actions (`textDocument/codeAction`):**
+  - Expand existing lint-driven code actions to support AST/compiler refactorings: "Import missing module", "Create function/class stub from unresolved symbol", "Extract local variable".
 - **Signature Help (`textDocument/signatureHelp`):**
   - Parameter tooltips and active parameter index highlighting while typing function/method calls.
 - **Semantic Tokens (`textDocument/semanticTokens/full`):**
   - Accurate semantic token categorization for types, functions, variables, constants, and keywords.
+- **Range Formatting (`textDocument/rangeFormatting`):**
+  - Selective formatting for highlighted code ranges.
 
 #### 2. Debug Adapter Protocol (`keet-dap`)
 - **Native DAP Server Binary:**
