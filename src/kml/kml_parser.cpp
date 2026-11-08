@@ -641,36 +641,56 @@ KmlStyleBlock KmlParser::parseStyleBlock(std::string_view rawStyle, diag::Source
     styleBlock.span = span;
     styleBlock.rawCss = std::string(rawStyle);
 
-    // Simple rule and declaration parser
-    std::istringstream stream(styleBlock.rawCss);
-    std::string line;
     std::string currentSelector;
-    std::vector<KmlStyleDeclaration> currentDecls;
-
+    std::string currentBody;
     bool inRule = false;
+
     for (char c : styleBlock.rawCss) {
         if (c == '{') {
             inRule = true;
+            currentBody.clear();
         } else if (c == '}') {
-            if (!currentSelector.empty() && !currentDecls.empty()) {
+            if (inRule) {
                 KmlStyleRule rule;
-                // Trim selector
                 size_t sFirst = currentSelector.find_first_not_of(" \t\r\n");
                 size_t sLast = currentSelector.find_last_not_of(" \t\r\n");
                 if (sFirst != std::string::npos) {
                     rule.selector = currentSelector.substr(sFirst, sLast - sFirst + 1);
                 }
-                rule.declarations = std::move(currentDecls);
+
+                // Parse declarations inside currentBody
+                std::istringstream bStream(currentBody);
+                std::string declStr;
+                while (std::getline(bStream, declStr, ';')) {
+                    size_t colon = declStr.find(':');
+                    if (colon != std::string::npos) {
+                        std::string prop = declStr.substr(0, colon);
+                        std::string val = declStr.substr(colon + 1);
+                        size_t pF = prop.find_first_not_of(" \t\r\n");
+                        size_t pL = prop.find_last_not_of(" \t\r\n");
+                        size_t vF = val.find_first_not_of(" \t\r\n");
+                        size_t vL = val.find_last_not_of(" \t\r\n");
+                        if (pF != std::string::npos && vF != std::string::npos) {
+                            KmlStyleDeclaration decl;
+                            decl.property = prop.substr(pF, pL - pF + 1);
+                            decl.value = val.substr(vF, vL - vF + 1);
+                            decl.span = span;
+                            rule.declarations.push_back(std::move(decl));
+                        }
+                    }
+                }
+
                 rule.span = span;
                 styleBlock.rules.push_back(std::move(rule));
             }
             currentSelector.clear();
-            currentDecls.clear();
+            currentBody.clear();
             inRule = false;
         } else if (!inRule) {
             currentSelector += c;
+        } else {
+            currentBody += c;
         }
-        // In-rule declarations can be processed in detail or during lowering
     }
 
     return styleBlock;
