@@ -1,19 +1,19 @@
-import io;
-import time;
-import std.ui;
-import std.http;
+import ui;
+import "time";
+from http import app, cors, recover;
+from "io" import println;
 
 fn main(): void {
-    io.println("=======================================================");
-    io.println("       KeetScript Reactive UI Engine Web Server        ");
-    io.println("=======================================================");
-    io.println("");
+    println("=======================================================");
+    println("       KeetScript Reactive UI Engine Web Server        ");
+    println("=======================================================");
+    println("");
 
-    let server: HttpServer = http.app();
+    let server: HttpServer = app();
 
     // Register standard middlewares
-    server.use(http.cors());
-    server.use(http.recover());
+    server.use(cors());
+    server.use(recover());
 
     // Serve reactive Counter UI on root and /counter
     server.serveUi("/", fn(): ReactiveCounter {
@@ -27,15 +27,15 @@ fn main(): void {
     let port: int = 3000;
     server.listen(port);
 
-    io.println("[+] HTTP & WebSocket server is running!");
-    io.println("    --> Local website:  http://localhost:3000");
-    io.println("    --> Counter route:  http://localhost:3000/counter");
-    io.println("    --> VDOM Client JS: http://localhost:3000/_keet/vdom.js");
-    io.println("    --> Live WS Bridge: ws://localhost:3000/_keet_ws");
-    io.println("");
-    io.println("Interactive real-time updates are active over WebSocket.");
-    io.println("Press Ctrl+C to terminate the server.");
-    io.println("");
+    println("[+] HTTP & WebSocket server is running!");
+    println("    --> Local website:  http://localhost:3000");
+    println("    --> Counter route:  http://localhost:3000/counter");
+    println("    --> VDOM Client JS: http://localhost:3000/_keet/vdom.js");
+    println("    --> Live WS Bridge: ws://localhost:3000/_keet_ws");
+    println("");
+    println("Interactive real-time updates are active over WebSocket.");
+    println("Press Ctrl+C to terminate the server.");
+    println("");
 
     while (server.isRunning()) {
         time.sleepMs(500);

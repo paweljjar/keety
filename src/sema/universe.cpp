@@ -99,17 +99,18 @@ void registerUniverseSymbols(Scope& universe) {
 }
 
 bool isStdlibModule(std::string_view name) noexcept {
-    return name == "io" || name == "std.io" || name == "keet.io" ||
-           name == "fs" || name == "std.fs" || name == "keet.fs" ||
-           name == "sys" || name == "std.sys" || name == "keet.sys" ||
-           name == "math" || name == "std.math" || name == "keet.math" ||
-           name == "time" || name == "std.time" || name == "keet.time" ||
-           name == "json" || name == "std.json" || name == "keet.json" ||
-           name == "net" || name == "std.net" || name == "keet.net" ||
-           name == "net.http" || name == "std.net.http" || name == "keet.net.http" ||
-           name == "http" || name == "std.http" || name == "keet.http" ||
-           name == "crypto" || name == "std.crypto" || name == "keet.crypto" || name == "crypto.hash" ||
-           name == "test" || name == "std.test" || name == "keet.test";
+    return name == "io" ||
+           name == "fs" ||
+           name == "sys" ||
+           name == "math" ||
+           name == "time" ||
+           name == "json" ||
+           name == "net" ||
+           name == "net.http" ||
+           name == "http" ||
+           name == "crypto" || name == "crypto.hash" ||
+           name == "test" ||
+           name == "ui";
 }
 
 void populateIoModuleScope(Scope& ioScope) {
@@ -660,28 +661,27 @@ void populateUiModuleScope(Scope& uiScope) {
 
 std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, const std::shared_ptr<Scope>& universe) {
     auto scope = std::make_shared<Scope>(ScopeKind::Module, universe);
-    if (moduleName == "io" || moduleName == "std.io" || moduleName == "keet.io") {
+    if (moduleName == "io") {
         populateIoModuleScope(*scope);
-    } else if (moduleName == "fs" || moduleName == "std.fs" || moduleName == "keet.fs") {
+    } else if (moduleName == "fs") {
         populateFsModuleScope(*scope);
-    } else if (moduleName == "sys" || moduleName == "std.sys" || moduleName == "keet.sys") {
+    } else if (moduleName == "sys") {
         populateSysModuleScope(*scope);
-    } else if (moduleName == "math" || moduleName == "std.math" || moduleName == "keet.math") {
+    } else if (moduleName == "math") {
         populateMathModuleScope(*scope);
-    } else if (moduleName == "time" || moduleName == "std.time" || moduleName == "keet.time") {
+    } else if (moduleName == "time") {
         populateTimeModuleScope(*scope);
-    } else if (moduleName == "json" || moduleName == "std.json" || moduleName == "keet.json") {
+    } else if (moduleName == "json") {
         populateJsonModuleScope(*scope);
-    } else if (moduleName == "net" || moduleName == "std.net" || moduleName == "keet.net") {
+    } else if (moduleName == "net") {
         populateNetModuleScope(*scope);
-    } else if (moduleName == "net.http" || moduleName == "std.net.http" || moduleName == "keet.net.http" ||
-               moduleName == "http" || moduleName == "std.http" || moduleName == "keet.http") {
+    } else if (moduleName == "net.http" || moduleName == "http") {
         populateNetHttpModuleScope(*scope);
-    } else if (moduleName == "crypto" || moduleName == "std.crypto" || moduleName == "keet.crypto" || moduleName == "crypto.hash") {
+    } else if (moduleName == "crypto" || moduleName == "crypto.hash") {
         populateCryptoModuleScope(*scope);
-    } else if (moduleName == "test" || moduleName == "std.test" || moduleName == "keet.test") {
+    } else if (moduleName == "test") {
         populateTestModuleScope(*scope);
-    } else if (moduleName == "ui" || moduleName == "std.ui" || moduleName == "keet.ui") {
+    } else if (moduleName == "ui") {
         populateUiModuleScope(*scope);
     }
     return scope;

@@ -25,7 +25,7 @@ struct LoweredComponentResult {
     std::string scopeClass;
     std::string scopedCss;
 
-    // Generated KeetScript source code extending std.ui.Component
+    // Generated KeetScript source code extending ui.Component
     std::string generatedKeetScript;
 
     // Generated C++ code embedding lifecycle methods and surgical updates

@@ -29,11 +29,11 @@ std::string KmlLowerer::desugarEventModifiers(const std::string& rawHandler, con
             if (pOpen != std::string::npos && pClose != std::string::npos && pClose > pOpen + 1) {
                 ms = mod.substr(pOpen + 1, pClose - pOpen - 1);
             }
-            wrapped = "std.ui.debounce(" + wrapped + ", " + ms + ")";
+            wrapped = "ui.debounce(" + wrapped + ", " + ms + ")";
         } else if (mod == "prevent") {
-            wrapped = "std.ui.withPreventDefault(" + wrapped + ")";
+            wrapped = "ui.withPreventDefault(" + wrapped + ")";
         } else if (mod == "enter") {
-            wrapped = "std.ui.withKeyFilter(" + wrapped + ", Key.Enter)";
+            wrapped = "ui.withKeyFilter(" + wrapped + ", Key.Enter)";
         }
     }
 
@@ -94,7 +94,7 @@ void KmlLowerer::generateNodeMountCode(const KmlTemplateNode* node, std::strings
             else if (tag == "scroll") nodeType = "ScrollNode";
             else if (elem->isComponent()) nodeType = tag;
 
-            ss << "        let node_" << currentIndex << " = new std.ui." << nodeType << "();\n";
+            ss << "        let node_" << currentIndex << " = new ui." << nodeType << "();\n";
             ss << "        node_" << currentIndex << ".id = " << currentIndex << ";\n";
 
             // Static or dynamic attributes
@@ -129,7 +129,7 @@ void KmlLowerer::generateNodeMountCode(const KmlTemplateNode* node, std::strings
 
         case KmlNodeKind::Text: {
             auto* text = static_cast<const KmlTextNode*>(node);
-            ss << "        let node_" << currentIndex << " = new std.ui.TextNode();\n";
+            ss << "        let node_" << currentIndex << " = new ui.TextNode();\n";
             ss << "        node_" << currentIndex << ".id = " << currentIndex << ";\n";
             if (text->isInterpolated()) {
                 ss << "        node_" << currentIndex << ".content = String(this." << text->getText() << ");\n";
@@ -172,7 +172,7 @@ void KmlLowerer::generateNodeMountCode(const KmlTemplateNode* node, std::strings
 
 std::string KmlLowerer::synthesizeMount([[maybe_unused]] const ReactiveAnalysisResult& analysis) {
     std::stringstream ss;
-    ss << "    pub fn mount(): std.ui.UINode {\n";
+    ss << "    pub fn mount(): ui.UINode {\n";
     int nodeIndex = 0;
     for (const auto& rootNode : doc_.templateNodes) {
         generateNodeMountCode(rootNode.get(), ss, nodeIndex, -1);
@@ -213,8 +213,8 @@ std::string KmlLowerer::synthesizeUpdate(const ReactiveAnalysisResult& analysis)
 
 std::string KmlLowerer::synthesizeRenderVdom([[maybe_unused]] const ReactiveAnalysisResult& analysis) {
     std::stringstream ss;
-    ss << "    pub fn renderVdom(): std.ui.VNode {\n";
-    ss << "        let root = new std.ui.VNode(\"div\");\n";
+    ss << "    pub fn renderVdom(): ui.VNode {\n";
+    ss << "        let root = new ui.VNode(\"div\");\n";
     ss << "        root.addClass(\"" << doc_.componentName << "\");\n";
     ss << "        return root;\n";
     ss << "    }\n";
@@ -254,7 +254,7 @@ LoweredComponentResult KmlLowerer::lower() {
     ss << "const DIRTY_ALL: int = 0xFFFFFFFF;\n\n";
 
     // Class header
-    ss << "export class " << doc_.componentName << " inherits std.ui.Component {\n";
+    ss << "export class " << doc_.componentName << " inherits ui.Component {\n";
 
     // Props and state fields
     if (doc_.script) {

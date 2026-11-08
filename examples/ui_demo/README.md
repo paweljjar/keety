@@ -1,6 +1,6 @@
 # KeetScript Reactive UI Engine Demo (`ui_demo`)
 
-This example demonstrates the ahead-of-time (AOT) compiled, compile-time reactive UI engine of KeetScript (`std.ui`) and Keet Markup Language (`.kml`).
+This example demonstrates the ahead-of-time (AOT) compiled, compile-time reactive UI engine of KeetScript (`ui`) and Keet Markup Language (`.kml`).
 
 ## Project Structure
 

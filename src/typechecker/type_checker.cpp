@@ -4792,7 +4792,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
         if (!decl) continue;
         if (const auto* importDecl = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
             const std::string& modPath = importDecl->getModulePath();
-            if (modPath == "io" || modPath == "std.io" || modPath == "keet.io") {
+            if (modPath == "io") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "io";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -4829,7 +4829,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
-            } else if (modPath == "fs" || modPath == "std.fs" || modPath == "keet.fs") {
+            } else if (modPath == "fs") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "fs";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -4866,7 +4866,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
-            } else if (modPath == "sys" || modPath == "std.sys" || modPath == "keet.sys") {
+            } else if (modPath == "sys") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "sys";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -4903,7 +4903,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
-            } else if (modPath == "math" || modPath == "std.math" || modPath == "keet.math") {
+            } else if (modPath == "math") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "math";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -4943,7 +4943,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
-            } else if (modPath == "time" || modPath == "std.time" || modPath == "keet.time") {
+            } else if (modPath == "time") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "time";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -4983,7 +4983,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
-            } else if (modPath == "json" || modPath == "std.json" || modPath == "keet.json") {
+            } else if (modPath == "json") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "json";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -5023,7 +5023,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
-            } else if (modPath == "net" || modPath == "std.net" || modPath == "keet.net") {
+            } else if (modPath == "net") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "net";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -5063,7 +5063,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
-            } else if (modPath == "test" || modPath == "std.test" || modPath == "keet.test") {
+            } else if (modPath == "test") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "test";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -5103,7 +5103,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
-            } else if (modPath == "crypto" || modPath == "std.crypto" || modPath == "keet.crypto" || modPath == "crypto.hash") {
+            } else if (modPath == "crypto" || modPath == "crypto.hash") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "crypto";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -5143,8 +5143,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
-            } else if (modPath == "net.http" || modPath == "std.net.http" || modPath == "keet.net.http" ||
-                       modPath == "http" || modPath == "std.http" || modPath == "keet.http") {
+            } else if (modPath == "net.http" || modPath == "http") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "http";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -5184,9 +5183,9 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
-            } else if (modPath == "ui" || modPath == "std.ui" || modPath == "keet.ui") {
+            } else if (modPath == "ui") {
                 if (importDecl->getSymbols().empty()) {
-                    std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : (modPath == "std.ui" ? "ui" : modPath);
+                    std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "ui";
                     if (!targetScope->lookupCurrent(boundName)) {
                         auto modSym = std::make_shared<sema::Symbol>(boundName, sema::SymbolKind::Module, importDecl->getSpan());
                         modSym->setExported(importDecl->isReExported());
@@ -6335,12 +6334,6 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 if (const auto* baseIdent = dynamic_cast<const ast::IdentExpr*>(nestedMember->getObject())) {
                     if (baseIdent->getName() == "net" && nestedMember->getMemberName() == "http") {
                         return checkHttpMemberCall(member, call, scope);
-                    }
-                    if (baseIdent->getName() == "std" && nestedMember->getMemberName() == "ui") {
-                        for (const auto& arg : call->getArgs()) {
-                            if (arg.value) inferType(*arg.value, scope);
-                        }
-                        return Type::unknownType();
                     }
                 }
             }

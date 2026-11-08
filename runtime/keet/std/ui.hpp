@@ -12,10 +12,6 @@
 #include <keet/ui/component.hpp>
 #include <keet/ui/headless_backend.hpp>
 
-namespace keet_module_std_ui {
-    using namespace ::keet::ui;
-}
-
 namespace keet_module_ui {
     using namespace ::keet::ui;
 }

@@ -29,14 +29,11 @@ bool ModulePathResolver::isStandardLibraryModule(std::string_view importPath) no
         "encoding.json",
         "encoding.csv",
         "test",
+        "ui",
         "os"
     };
 
     if (stdlibModules.find(importPath) != stdlibModules.end()) {
-        return true;
-    }
-
-    if (importPath.rfind("std.", 0) == 0 || importPath.rfind("keet.", 0) == 0) {
         return true;
     }
 

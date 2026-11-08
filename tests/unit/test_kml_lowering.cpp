@@ -104,7 +104,7 @@ TEST_CASE("KML Lowerer - Two-Way Binding & Modifiers Desugaring", "[kml][lowerer
     // Test desugarEventModifiers
     std::vector<std::string> mods = {"debounce(200)", "prevent"};
     std::string wrapped = KmlLowerer::desugarEventModifiers("submitForm", mods);
-    CHECK(wrapped == "std.ui.withPreventDefault(std.ui.debounce(submitForm, 200))");
+    CHECK(wrapped == "ui.withPreventDefault(ui.debounce(submitForm, 200))");
 }
 
 TEST_CASE("KML Lowerer - Full Component Synthesis", "[kml][lowerer]") {
@@ -134,13 +134,13 @@ TEST_CASE("KML Lowerer - Full Component Synthesis", "[kml][lowerer]") {
 
     // Check generated KeetScript contents
     const std::string& code = res.generatedKeetScript;
-    CHECK(code.find("export class CounterApp inherits std.ui.Component") != std::string::npos);
+    CHECK(code.find("export class CounterApp inherits ui.Component") != std::string::npos);
     CHECK(code.find("const DIRTY_STATE_count: int = 0x") != std::string::npos);
     CHECK(code.find("const DIRTY_ALL: int = 0xFFFFFFFF;") != std::string::npos);
     CHECK(code.find("pub fn constructor(): void") != std::string::npos);
-    CHECK(code.find("pub fn mount(): std.ui.UINode") != std::string::npos);
+    CHECK(code.find("pub fn mount(): ui.UINode") != std::string::npos);
     CHECK(code.find("pub fn update(dirtyMask: int): void") != std::string::npos);
-    CHECK(code.find("pub fn renderVdom(): std.ui.VNode") != std::string::npos);
+    CHECK(code.find("pub fn renderVdom(): ui.VNode") != std::string::npos);
     CHECK(code.find("pub fn destroy(): void") != std::string::npos);
 }
 
