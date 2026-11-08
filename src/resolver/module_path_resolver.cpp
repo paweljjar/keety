@@ -99,24 +99,35 @@ std::optional<ResolvedModule> ModulePathResolver::resolveLocalImport(
         }
     }
 
-    // 2. Check for .keet module candidates
+    // 2. Check for .keet or .kml module candidates
     std::filesystem::path candidate;
 
-    if (ext == ".keet") {
+    if (ext == ".keet" || ext == ".kml") {
         if (std::filesystem::exists(rawTarget, ec) && std::filesystem::is_regular_file(rawTarget, ec)) {
             candidate = rawTarget;
         }
     } else {
-        // Try appending .keet
+        // Try appending .keet, then .kml
         std::filesystem::path withExt = rawTarget;
         withExt += ".keet";
         if (std::filesystem::exists(withExt, ec) && std::filesystem::is_regular_file(withExt, ec)) {
             candidate = withExt;
         } else {
-            // Try directory with index.keet
-            std::filesystem::path withIndex = rawTarget / "index.keet";
-            if (std::filesystem::exists(withIndex, ec) && std::filesystem::is_regular_file(withIndex, ec)) {
-                candidate = withIndex;
+            std::filesystem::path withKml = rawTarget;
+            withKml += ".kml";
+            if (std::filesystem::exists(withKml, ec) && std::filesystem::is_regular_file(withKml, ec)) {
+                candidate = withKml;
+            } else {
+                // Try directory with index.keet or index.kml
+                std::filesystem::path withIndex = rawTarget / "index.keet";
+                if (std::filesystem::exists(withIndex, ec) && std::filesystem::is_regular_file(withIndex, ec)) {
+                    candidate = withIndex;
+                } else {
+                    std::filesystem::path withIndexKml = rawTarget / "index.kml";
+                    if (std::filesystem::exists(withIndexKml, ec) && std::filesystem::is_regular_file(withIndexKml, ec)) {
+                        candidate = withIndexKml;
+                    }
+                }
             }
         }
     }
@@ -148,7 +159,7 @@ std::optional<ResolvedModule> ModulePathResolver::resolveLocalImport(
         canonical = std::filesystem::weakly_canonical(candidate);
     }
 
-    std::string modName = (canonical.filename() == "index.keet" && canonical.parent_path() != baseDir)
+    std::string modName = ((canonical.filename() == "index.keet" || canonical.filename() == "index.kml") && canonical.parent_path() != baseDir)
                               ? canonical.parent_path().filename().string()
                               : canonical.stem().string();
 
@@ -192,11 +203,17 @@ std::optional<ResolvedModule> ModulePathResolver::resolveQualifiedImport(
 
     std::vector<std::filesystem::path> candidates = {
         keetModulesDir_ / (slashPath + ".keet"),
+        keetModulesDir_ / (slashPath + ".kml"),
         keetModulesDir_ / slashPath / "index.keet",
+        keetModulesDir_ / slashPath / "index.kml",
         keetModulesDir_ / (importPath + ".keet"),
+        keetModulesDir_ / (importPath + ".kml"),
         keetModulesDir_ / importPath / "index.keet",
+        keetModulesDir_ / importPath / "index.kml",
         keetModulesDir_ / (hyphenPath + ".keet"),
-        keetModulesDir_ / hyphenPath / "index.keet"
+        keetModulesDir_ / (hyphenPath + ".kml"),
+        keetModulesDir_ / hyphenPath / "index.keet",
+        keetModulesDir_ / hyphenPath / "index.kml"
     };
 
     for (const auto& cand : candidates) {
@@ -220,7 +237,7 @@ std::optional<ResolvedModule> ModulePathResolver::resolveQualifiedImport(
 
             std::string dirName = cand.parent_path().filename().string();
             std::string modName;
-            if (cand.filename() == "index.keet") {
+            if (cand.filename() == "index.keet" || cand.filename() == "index.kml") {
                 if (dirName == hyphenPath) {
                     modName = importPath;
                 } else {

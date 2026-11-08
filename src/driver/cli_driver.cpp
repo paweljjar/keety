@@ -1607,13 +1607,14 @@ std::vector<std::filesystem::path> CliDriver::discover_test_files(const std::fil
             continue;
         }
 
-        if (entry.is_regular_file(ec) && entry.path().extension() == ".keet") {
+        if (entry.is_regular_file(ec) && (entry.path().extension() == ".keet" || entry.path().extension() == ".kml")) {
             bool matches = false;
-            // 1. *.test.keet
-            if (filename.size() > 10 && filename.rfind(".test.keet") == filename.size() - 10) {
+            // 1. *.test.keet or *.test.kml
+            if ((filename.size() > 10 && filename.rfind(".test.keet") == filename.size() - 10) ||
+                (filename.size() > 9 && filename.rfind(".test.kml") == filename.size() - 9)) {
                 matches = true;
             }
-            // 2. test_*.keet
+            // 2. test_*.keet or test_*.kml
             else if (filename.rfind("test_", 0) == 0) {
                 matches = true;
             }
@@ -2160,7 +2161,7 @@ std::vector<std::filesystem::path> CliDriver::discover_keet_files(const std::fil
             continue;
         }
 
-        if (entry.is_regular_file(ec) && entry.path().extension() == ".keet") {
+        if (entry.is_regular_file(ec) && (entry.path().extension() == ".keet" || entry.path().extension() == ".kml")) {
             results.push_back(entry.path());
         }
     }

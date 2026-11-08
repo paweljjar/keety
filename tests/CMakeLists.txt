@@ -14,6 +14,7 @@ add_executable(keety_unit_tests
     unit/test_version.cpp
     unit/test_kml_frontend.cpp
     unit/test_kml_lowering.cpp
+    unit/test_kml_toolchain.cpp
     unit/test_source_location.cpp
     unit/test_source_manager.cpp
     unit/test_diagnostic_emitter.cpp
