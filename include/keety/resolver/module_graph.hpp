@@ -30,6 +30,9 @@ struct ModuleNode {
     std::shared_ptr<parser::ModuleAST> ast{nullptr}; // Cached parsed AST (single-instantiation deduplication)
     ModuleKind kind{ModuleKind::Local};
     bool isNativeHeader{false};
+    bool isKmlComponent{false};
+    std::string kmlGeneratedHpp;
+    std::string kmlGeneratedCpp;
 
     std::vector<DependencyEdge> outgoingEdges;       // Modules this module depends upon (u -> v)
 };

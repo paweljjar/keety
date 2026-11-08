@@ -2,6 +2,7 @@ import ui;
 import "time";
 from http import app, cors, recover;
 from "io" import println;
+import "./Counter.kml";
 
 fn main(): void {
     println("=======================================================");
@@ -16,12 +17,12 @@ fn main(): void {
     server.use(recover());
 
     // Serve reactive Counter UI on root and /counter
-    server.serveUi("/", fn(): ReactiveCounter {
-        return ReactiveCounter();
+    server.serveUi("/", fn(): Counter {
+        return Counter();
     }, "KeetScript Reactive UI Demo");
 
-    server.serveUi("/counter", fn(): ReactiveCounter {
-        return ReactiveCounter();
+    server.serveUi("/counter", fn(): Counter {
+        return Counter();
     }, "KeetScript Reactive UI Demo");
 
     let port: int = 3000;

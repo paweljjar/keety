@@ -130,10 +130,16 @@ bool ModuleGraph::buildGraph(const std::filesystem::path& entryFilePath,
         auto doc = kmlParser.parseDocument(modName);
         kml::KmlLowerer lowerer(doc, &sourceManager);
         auto lowered = lowerer.lower();
+        node.isKmlComponent = true;
+        node.kmlGeneratedHpp = lowered.generatedHppCode;
+        node.kmlGeneratedCpp = lowered.generatedCppCode;
 
-        // Feed generated KeetScript code into standard KeetScript parser
-        diag::FileId generatedFileId = sourceManager.addBuffer(canonicalStr + ".lowered.keet", lowered.generatedKeetScript);
-        lexer::Lexer lexer(generatedFileId, lowered.generatedKeetScript);
+        // Feed generated KeetScript interface code into standard KeetScript parser
+        const std::string& keetInterface = lowered.generatedInterfaceKeet.empty()
+            ? lowered.generatedKeetScript
+            : lowered.generatedInterfaceKeet;
+        diag::FileId generatedFileId = sourceManager.addBuffer(canonicalStr + ".lowered.keet", keetInterface);
+        lexer::Lexer lexer(generatedFileId, keetInterface);
         parser::Parser parser(lexer, emitter);
         auto parsedModule = parser.parseModule(modName);
         node.ast = std::make_shared<parser::ModuleAST>(std::move(parsedModule));

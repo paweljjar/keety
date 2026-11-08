@@ -130,6 +130,11 @@ std::string HeaderEmitter::resolve_header_include_path(std::string_view import_p
         return "\"" + path_str + "\"";
     }
 
+    if (path_str.ends_with(".kml")) {
+        path_str = path_str.substr(0, path_str.size() - 4) + ".hpp";
+        return "\"" + path_str + "\"";
+    }
+
     path_str += ".hpp";
     return "\"" + path_str + "\"";
 }
@@ -342,12 +347,12 @@ std::string HeaderEmitter::to_cpp_type(const ast::TypeAnnotation* type, const st
             return "::keet::net::http::" + cust->getName();
         }
         if ((cust->isQualified() && cust->getModuleQualifier() == "ui" &&
-             (cust->getName() == "Component" || cust->getName() == "ReactiveCounter" || cust->getName() == "Node" || cust->getName() == "BoxNode" ||
+             (cust->getName() == "Component" || cust->getName() == "Node" || cust->getName() == "BoxNode" ||
               cust->getName() == "TextNode" || cust->getName() == "ButtonNode" || cust->getName() == "InputNode" ||
               cust->getName() == "ScrollNode" || cust->getName() == "VNode" || cust->getName() == "HeadlessBackend" ||
               cust->getName() == "TuiBackend" || cust->getName() == "WebVdomBackend")) ||
             (!cust->isQualified() &&
-             (cust->getName() == "Component" || cust->getName() == "ReactiveCounter" || cust->getName() == "Node" || cust->getName() == "BoxNode" ||
+             (cust->getName() == "Component" || cust->getName() == "Node" || cust->getName() == "BoxNode" ||
               cust->getName() == "TextNode" || cust->getName() == "ButtonNode" || cust->getName() == "InputNode" ||
               cust->getName() == "ScrollNode" || cust->getName() == "VNode" || cust->getName() == "HeadlessBackend" ||
               cust->getName() == "TuiBackend" || cust->getName() == "WebVdomBackend"))) {

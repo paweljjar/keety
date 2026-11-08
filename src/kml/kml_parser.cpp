@@ -97,8 +97,8 @@ KmlScriptBlock KmlParser::parseScriptBlock(std::string_view rawScript, diag::Sou
 
     // Delegate KeetScript AST parsing to keety::parser::Parser
     try {
-        keety::lexer::Lexer scriptLexer(fileId_, rawScript, emitter_);
-        keety::parser::Parser scriptParser(scriptLexer, emitter_);
+        keety::lexer::Lexer scriptLexer(fileId_, rawScript, nullptr);
+        keety::parser::Parser scriptParser(scriptLexer, nullptr);
         auto mod = scriptParser.parseModule("component_script");
         block.declarations = std::move(mod.declarations);
     } catch (...) {

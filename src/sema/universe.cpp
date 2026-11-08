@@ -648,7 +648,6 @@ void populateUiModuleScope(Scope& uiScope) {
     makeType("TuiBackend");
     makeType("WebVdomBackend");
     makeType("MicrotaskScheduler");
-    makeType("ReactiveCounter");
 
     // Functions
     makeFn("debounce");

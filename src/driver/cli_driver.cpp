@@ -1111,6 +1111,10 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
         break;
     }
     case EmitTarget::Hpp: {
+        if (target_node->isKmlComponent && !target_node->kmlGeneratedHpp.empty()) {
+            content = target_node->kmlGeneratedHpp;
+            break;
+        }
         ir::AstLowerer lowerer(&emitter);
         auto ir_mod = lowerer.lower_module(*target_node->ast);
         if (emitter.hasErrors() || !ir_mod) {
@@ -1126,6 +1130,10 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
         break;
     }
     case EmitTarget::Cpp: {
+        if (target_node->isKmlComponent && !target_node->kmlGeneratedCpp.empty()) {
+            content = target_node->kmlGeneratedCpp;
+            break;
+        }
         ir::AstLowerer lowerer(&emitter);
         auto ir_mod = lowerer.lower_module(*target_node->ast);
         if (emitter.hasErrors() || !ir_mod) {
@@ -1389,35 +1397,45 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
             continue;
         }
 
-        ir::AstLowerer lowerer(&emitter);
-        auto ir_mod = lowerer.lower_module(*node->ast);
-        if (emitter.hasErrors() || !ir_mod) {
-            for (const auto& d : emitter.getDiagnostics()) {
-                err << emitter.format(d);
+        std::string hpp_content;
+        std::string cpp_content;
+
+        if (node->isKmlComponent && !node->kmlGeneratedHpp.empty()) {
+            hpp_content = node->kmlGeneratedHpp;
+            cpp_content = node->kmlGeneratedCpp;
+        } else {
+            ir::AstLowerer lowerer(&emitter);
+            auto ir_mod = lowerer.lower_module(*node->ast);
+            if (emitter.hasErrors() || !ir_mod) {
+                for (const auto& d : emitter.getDiagnostics()) {
+                    err << emitter.format(d);
+                }
+                return std::nullopt;
             }
-            return std::nullopt;
+
+            // Header emission
+            emitter::HeaderEmitterOptions h_opts;
+            h_opts.emit_line_directives = options.emit_line_directives;
+            emitter::HeaderEmitter header_emitter(*node->ast, *ir_mod, h_opts);
+            hpp_content = header_emitter.emit();
+
+            // C++ source emission
+            emitter::CppEmitterOptions cpp_opts;
+            cpp_opts.header_include = "\"" + node->moduleName + ".hpp\"";
+            cpp_opts.emit_line_directives = options.emit_line_directives;
+            cpp_opts.source_manager = &sm;
+            cpp_opts.source_file_path = node->canonicalPath;
+            if (node->canonicalPath == canonical_entry.string()) {
+                cpp_opts.is_root_module = true;
+            }
+            emitter::CppEmitter cpp_emitter(*node->ast, *ir_mod, cpp_opts);
+            cpp_content = cpp_emitter.emit();
         }
 
-        // Header emission
-        emitter::HeaderEmitterOptions h_opts;
-        h_opts.emit_line_directives = options.emit_line_directives;
-        emitter::HeaderEmitter header_emitter(*node->ast, *ir_mod, h_opts);
-        std::string hpp_content = header_emitter.emit();
         std::filesystem::path hpp_path = build_dir / (node->moduleName + ".hpp");
         std::ofstream hpp_file(hpp_path);
         hpp_file << hpp_content;
 
-        // C++ source emission
-        emitter::CppEmitterOptions cpp_opts;
-        cpp_opts.header_include = "\"" + node->moduleName + ".hpp\"";
-        cpp_opts.emit_line_directives = options.emit_line_directives;
-        cpp_opts.source_manager = &sm;
-        cpp_opts.source_file_path = node->canonicalPath;
-        if (node->canonicalPath == canonical_entry.string()) {
-            cpp_opts.is_root_module = true;
-        }
-        emitter::CppEmitter cpp_emitter(*node->ast, *ir_mod, cpp_opts);
-        std::string cpp_content = cpp_emitter.emit();
         std::filesystem::path cpp_path = build_dir / (node->moduleName + ".cpp");
         std::ofstream cpp_file(cpp_path);
         cpp_file << cpp_content;

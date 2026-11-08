@@ -28,7 +28,11 @@ struct LoweredComponentResult {
     // Generated KeetScript source code extending ui.Component
     std::string generatedKeetScript;
 
-    // Generated C++ code embedding lifecycle methods and surgical updates
+    // Valid KeetScript interface declaration for module graph & typechecker
+    std::string generatedInterfaceKeet;
+
+    // Generated C++ header and implementation embedding lifecycle methods and surgical updates
+    std::string generatedHppCode;
     std::string generatedCppCode;
 
     // Desugared callbacks
