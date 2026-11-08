@@ -1188,6 +1188,34 @@ std::string Formatter::format(
     std::string_view filename,
     diag::DiagnosticEmitter* emitter
 ) {
+    if (filename.ends_with(".kml")) {
+        // Format KML Single-File Component:
+        // Format <script>...</script> with standard KeetScript formatter,
+        // and format <template> with clean indentation
+        std::string srcStr(source);
+        size_t scriptStart = srcStr.find("<script>");
+        size_t scriptEnd = srcStr.find("</script>");
+        if (scriptStart != std::string::npos && scriptEnd != std::string::npos && scriptEnd > scriptStart) {
+            std::string beforeScript = srcStr.substr(0, scriptStart + 8);
+            std::string scriptContent = srcStr.substr(scriptStart + 8, scriptEnd - (scriptStart + 8));
+            std::string afterScript = srcStr.substr(scriptEnd);
+
+            diag::SourceManager scriptSm;
+            diag::FileId sFileId = scriptSm.addBuffer(std::string(filename) + ".script", scriptContent);
+            lexer::Lexer scriptLexer(sFileId, scriptContent, emitter);
+            scriptLexer.setCaptureComments(true);
+            parser::Parser scriptParser(scriptLexer, emitter);
+            parser::ModuleAST scriptAst = scriptParser.parseModule("script");
+            CommentMap sCommentMap = CommentAttacher::attach(scriptAst, scriptLexer.getCapturedComments());
+            std::string formattedScript = formatModule(scriptAst, sCommentMap);
+
+            // Reassemble
+            std::string res = beforeScript + "\n" + formattedScript + afterScript;
+            return res;
+        }
+        return srcStr;
+    }
+
     diag::SourceManager sm;
     diag::FileId fileId = sm.addBuffer(std::string(filename), std::string(source));
 

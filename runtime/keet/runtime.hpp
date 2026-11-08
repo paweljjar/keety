@@ -18,3 +18,4 @@
 #include <keet/net.hpp>
 #include <keet/crypto.hpp>
 #include <keet/http.hpp>
+#include <keet/ui.hpp>

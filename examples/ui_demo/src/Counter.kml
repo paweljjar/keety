@@ -1,0 +1,78 @@
+<script>
+    let mut count = $state(0);
+    let doubleCount = $derived(count * 2);
+
+    fn increment(): void {
+        count = count + 1;
+    }
+
+    fn decrement(): void {
+        count = count - 1;
+    }
+
+    fn reset(): void {
+        count = 0;
+    }
+</script>
+
+<template>
+    <box class="counter-card">
+        <text class="title">KeetScript Reactive UI Demo</text>
+        <text class="count-display">Current Count: {count} (Doubled: {doubleCount})</text>
+
+        <hstack class="button-row">
+            <button @click={decrement} class="btn btn-secondary">
+                <text>- Decrement</text>
+            </button>
+            <button @click={increment} class="btn btn-primary">
+                <text>+ Increment</text>
+            </button>
+            <button @click={reset} class="btn btn-outline">
+                <text>Reset</text>
+            </button>
+        </hstack>
+
+        {#if count > 10}
+            <box class="badge badge-success">
+                <text>High Score achieved! (Count > 10)</text>
+            </box>
+        {:else if count < 0}
+            <box class="badge badge-warning">
+                <text>Negative count detected.</text>
+            </box>
+        {:else}
+            <box class="badge badge-info">
+                <text>Keep counting...</text>
+            </box>
+        {/if}
+    </box>
+</template>
+
+<style>
+    .counter-card {
+        padding: 2;
+        border-color: blue;
+        border-style: rounded;
+    }
+
+    .title {
+        font-weight: bold;
+        color: cyan;
+    }
+
+    .count-display {
+        margin: 1;
+        color: white;
+    }
+
+    .btn {
+        padding: 1;
+        margin: 1;
+    }
+
+    .badge {
+        padding: 1;
+        margin-top: 1;
+    }
+</style>
+

@@ -58,10 +58,18 @@ public:
         // Simple lightweight extraction from JSON
         size_t idPos = rawJson.find("\"id\":");
         if (idPos != std::string::npos) {
-            size_t q1 = rawJson.find('"', idPos + 5);
-            size_t q2 = rawJson.find('"', q1 + 1);
-            if (q1 != std::string::npos && q2 != std::string::npos) {
-                targetId = rawJson.substr(q1 + 1, q2 - q1 - 1);
+            size_t valStart = idPos + 5;
+            while (valStart < rawJson.size() && (rawJson[valStart] == ' ' || rawJson[valStart] == '\t')) valStart++;
+            if (valStart < rawJson.size() && rawJson[valStart] == '"') {
+                size_t q2 = rawJson.find('"', valStart + 1);
+                if (q2 != std::string::npos) {
+                    targetId = rawJson.substr(valStart + 1, q2 - valStart - 1);
+                }
+            } else {
+                size_t valEnd = rawJson.find_first_of(",} \t\r\n", valStart);
+                if (valEnd != std::string::npos) {
+                    targetId = rawJson.substr(valStart, valEnd - valStart);
+                }
             }
         }
 

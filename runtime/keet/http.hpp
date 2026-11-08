@@ -4250,6 +4250,24 @@ public:
         });
     }
 
+    /// Serves a reactive KML / std.ui component tree at specified route with auto WebSocket bridging
+    HttpServer& serveUi(std::string_view route, std::function<std::shared_ptr<void>()> factory, std::string title = "Keet App", std::string scopedCss = "");
+
+    template <typename Factory, typename = std::enable_if_t<!std::is_convertible_v<Factory, std::function<std::shared_ptr<void>()>>>>
+    HttpServer& serveUi(std::string_view route, Factory&& factory, std::string title = "Keet App", std::string scopedCss = "") {
+        auto sharedFactory = [f = std::forward<Factory>(factory)]() -> std::shared_ptr<void> {
+            using Ret = std::decay_t<decltype(f())>;
+            if constexpr (std::is_pointer_v<Ret>) {
+                return std::shared_ptr<void>(f());
+            } else if constexpr (std::is_constructible_v<std::shared_ptr<void>, Ret>) {
+                return f();
+            } else {
+                return std::make_shared<Ret>(f());
+            }
+        };
+        return serveUi(route, std::function<std::shared_ptr<void>()>(std::move(sharedFactory)), std::move(title), std::move(scopedCss));
+    }
+
     void use_router(const HttpRouter& r) {
         std::lock_guard<std::mutex> lock(router_mutex_);
         router_ = r;

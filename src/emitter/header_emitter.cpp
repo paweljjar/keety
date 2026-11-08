@@ -116,7 +116,13 @@ std::string HeaderEmitter::resolve_header_include_path(std::string_view import_p
     }
 
     if (resolver::ModulePathResolver::isStandardLibraryModule(import_path)) {
-        return "<keet/std/" + std::string(import_path) + ".hpp>";
+        std::string mod = std::string(import_path);
+        if (mod.rfind("std.", 0) == 0) {
+            mod = mod.substr(4);
+        } else if (mod.rfind("keet.", 0) == 0) {
+            mod = mod.substr(5);
+        }
+        return "<keet/std/" + mod + ".hpp>";
     }
 
     std::string path_str(import_path);
@@ -340,6 +346,18 @@ std::string HeaderEmitter::to_cpp_type(const ast::TypeAnnotation* type, const st
               cust->getName() == "HttpServer" || cust->getName() == "App" || cust->getName() == "Server" ||
               cust->getName() == "Schema" || cust->getName() == "SchemaValidator"))) {
             return "::keet::net::http::" + cust->getName();
+        }
+        if ((cust->isQualified() && (cust->getModuleQualifier() == "ui" || cust->getModuleQualifier() == "std.ui" || cust->getModuleQualifier() == "keet.ui") &&
+             (cust->getName() == "Component" || cust->getName() == "ReactiveCounter" || cust->getName() == "Node" || cust->getName() == "BoxNode" ||
+              cust->getName() == "TextNode" || cust->getName() == "ButtonNode" || cust->getName() == "InputNode" ||
+              cust->getName() == "ScrollNode" || cust->getName() == "VNode" || cust->getName() == "HeadlessBackend" ||
+              cust->getName() == "TuiBackend" || cust->getName() == "WebVdomBackend")) ||
+            (!cust->isQualified() &&
+             (cust->getName() == "Component" || cust->getName() == "ReactiveCounter" || cust->getName() == "Node" || cust->getName() == "BoxNode" ||
+              cust->getName() == "TextNode" || cust->getName() == "ButtonNode" || cust->getName() == "InputNode" ||
+              cust->getName() == "ScrollNode" || cust->getName() == "VNode" || cust->getName() == "HeadlessBackend" ||
+              cust->getName() == "TuiBackend" || cust->getName() == "WebVdomBackend"))) {
+            return "::keet::ui::" + cust->getName();
         }
         std::string prefix;
         if (cust->isQualified()) {
@@ -599,7 +617,12 @@ std::string HeaderEmitter::generate_class_def(const ast::ClassDecl& cls) {
     std::ostringstream ss;
     std::string base;
     if (cls.hasBaseClass()) {
-        base = " : public " + cls.getBaseClass();
+        std::string bc = cls.getBaseClass();
+        if (bc == "std.ui.Component" || bc == "ui.Component" || bc == "Component") {
+            base = " : public ::keet::ui::Component";
+        } else {
+            base = " : public " + bc;
+        }
     }
     ss << "    struct " << cls.getName() << base << " {\n";
 

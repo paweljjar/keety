@@ -44,6 +44,17 @@
         "configuration": "./language-configuration.json"
       },
       {
+        "id": "kml",
+        "aliases": [
+          "Keet Markup Language",
+          "kml"
+        ],
+        "extensions": [
+          ".kml"
+        ],
+        "configuration": "./language-configuration.json"
+      },
+      {
         "id": "json",
         "filenames": [
           "pedigree.lock"
@@ -61,6 +72,11 @@
         "language": "keetscript",
         "scopeName": "source.keet",
         "path": "./syntaxes/keet.tmLanguage.json"
+      },
+      {
+        "language": "kml",
+        "scopeName": "source.kml",
+        "path": "./syntaxes/kml.tmLanguage.json"
       }
     ],
     "snippets": [

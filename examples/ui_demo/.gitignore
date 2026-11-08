@@ -1,0 +1,4 @@
+# KeetScript package and build artifacts
+build/
+keet_modules/
+.keety_build/

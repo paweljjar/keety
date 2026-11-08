@@ -1,0 +1,43 @@
+import io;
+import time;
+import std.ui;
+import std.http;
+
+fn main(): void {
+    io.println("=======================================================");
+    io.println("       KeetScript Reactive UI Engine Web Server        ");
+    io.println("=======================================================");
+    io.println("");
+
+    let server: HttpServer = http.app();
+
+    // Register standard middlewares
+    server.use(http.cors());
+    server.use(http.recover());
+
+    // Serve reactive Counter UI on root and /counter
+    server.serveUi("/", fn(): ReactiveCounter {
+        return ReactiveCounter();
+    }, "KeetScript Reactive UI Demo");
+
+    server.serveUi("/counter", fn(): ReactiveCounter {
+        return ReactiveCounter();
+    }, "KeetScript Reactive UI Demo");
+
+    let port: int = 3000;
+    server.listen(port);
+
+    io.println("[+] HTTP & WebSocket server is running!");
+    io.println("    --> Local website:  http://localhost:3000");
+    io.println("    --> Counter route:  http://localhost:3000/counter");
+    io.println("    --> VDOM Client JS: http://localhost:3000/_keet/vdom.js");
+    io.println("    --> Live WS Bridge: ws://localhost:3000/_keet_ws");
+    io.println("");
+    io.println("Interactive real-time updates are active over WebSocket.");
+    io.println("Press Ctrl+C to terminate the server.");
+    io.println("");
+
+    while (server.isRunning()) {
+        time.sleepMs(500);
+    }
+}

@@ -7,6 +7,7 @@
 #include <keety/lint/rules/unused_parameter_rule.hpp>
 #include <keety/lint/rules/unused_variable_rule.hpp>
 #include <keety/lint/rules/variable_shadowing_rule.hpp>
+#include <keety/lint/rules/kml_hygiene_rule.hpp>
 
 #include <algorithm>
 
@@ -35,6 +36,9 @@ void LintEngine::registerDefaultRules() {
     // Note: RedundantTypeAnnotationRule is excluded from default rules because KeetScript
     // strictly mandates explicit type annotations on all variable and constant declarations.
     registerRule(std::make_unique<EmptyBlockRule>());
+
+    // Category D: UI & KML Hygiene
+    registerRule(std::make_unique<KmlHygieneRule>());
 }
 
 std::vector<std::string_view> LintEngine::getRegisteredRuleNames() const {

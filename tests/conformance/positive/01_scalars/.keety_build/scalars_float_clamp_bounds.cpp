@@ -3,30 +3,30 @@
 #include <iostream>
 
 namespace keet_module_scalars_float_clamp_bounds {
-#line 1 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
+#line 1 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
     int64_t _keet_main() {
-#line 2 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
+#line 2 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
         int64_t overflowInt = ([&]() -> std::decay_t<decltype(keet::to_int(1e25))> { try { return keet::to_int(1e25); } catch (...) { return -999; } })();
-#line 3 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
+#line 3 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
         int64_t nanInt = ([&]() -> std::decay_t<decltype(keet::to_int(keet::div_safe(0.0, 0.0)))> { try { return keet::to_int(keet::div_safe(0.0, 0.0)); } catch (...) { return -111; } })();
-#line 4 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
+#line 4 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
         double clamped = keet::clamp(15.5, 0.0, 10.0);
-#line 6 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
+#line 6 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
         if (overflowInt != -999) {
-#line 7 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
+#line 7 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
             return 1;
         }
-#line 9 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
+#line 9 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
         if (nanInt != -111) {
-#line 10 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
+#line 10 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
             return 2;
         }
-#line 12 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
+#line 12 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
         if (clamped != 10.0) {
-#line 13 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
+#line 13 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
             return 3;
         }
-#line 15 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
+#line 15 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/01_scalars/scalars_float_clamp_bounds.keet"
         return 0;
     }
 } // namespace keet_module_scalars_float_clamp_bounds

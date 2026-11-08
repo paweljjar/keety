@@ -36,7 +36,7 @@ enum class BinaryKind {
 struct CompileOptions {
     OptimizationLevel opt_level{OptimizationLevel::O3};
     bool wrapv{true};                          ///< Enforce two's-complement overflow semantics (-fwrapv)
-    std::string cpp_standard{"c++17"};         ///< Target C++ standard (default: c++17)
+    std::string cpp_standard{"c++20"};         ///< Target C++ standard (default: c++20)
     bool compile_only{true};                   ///< Compile to object file without linking (-c / /c)
     bool position_independent_code{false};     ///< Position-independent code (-fPIC)
     bool debug_symbols{false};                 ///< Generate debug symbols (-g / /Z7)

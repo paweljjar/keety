@@ -830,6 +830,12 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
     module_scopes["<stdlib>/json"] = sema::createStdlibModuleScope("json", universe);
     module_scopes["<stdlib>/net"] = sema::createStdlibModuleScope("net", universe);
     module_scopes["<stdlib>/test"] = sema::createStdlibModuleScope("test", universe);
+    module_scopes["<stdlib>/crypto"] = sema::createStdlibModuleScope("crypto", universe);
+    module_scopes["<stdlib>/http"] = sema::createStdlibModuleScope("http", universe);
+    module_scopes["<stdlib>/net.http"] = sema::createStdlibModuleScope("net.http", universe);
+    module_scopes["<stdlib>/std.http"] = sema::createStdlibModuleScope("std.http", universe);
+    module_scopes["<stdlib>/ui"] = sema::createStdlibModuleScope("ui", universe);
+    module_scopes["<stdlib>/std.ui"] = sema::createStdlibModuleScope("std.ui", universe);
 
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
@@ -1005,6 +1011,12 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
     module_scopes["<stdlib>/json"] = sema::createStdlibModuleScope("json", universe);
     module_scopes["<stdlib>/net"] = sema::createStdlibModuleScope("net", universe);
     module_scopes["<stdlib>/test"] = sema::createStdlibModuleScope("test", universe);
+    module_scopes["<stdlib>/crypto"] = sema::createStdlibModuleScope("crypto", universe);
+    module_scopes["<stdlib>/http"] = sema::createStdlibModuleScope("http", universe);
+    module_scopes["<stdlib>/net.http"] = sema::createStdlibModuleScope("net.http", universe);
+    module_scopes["<stdlib>/std.http"] = sema::createStdlibModuleScope("std.http", universe);
+    module_scopes["<stdlib>/ui"] = sema::createStdlibModuleScope("ui", universe);
+    module_scopes["<stdlib>/std.ui"] = sema::createStdlibModuleScope("std.ui", universe);
 
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
@@ -1251,6 +1263,12 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     module_scopes["<stdlib>/json"] = sema::createStdlibModuleScope("json", universe);
     module_scopes["<stdlib>/net"] = sema::createStdlibModuleScope("net", universe);
     module_scopes["<stdlib>/test"] = sema::createStdlibModuleScope("test", universe);
+    module_scopes["<stdlib>/crypto"] = sema::createStdlibModuleScope("crypto", universe);
+    module_scopes["<stdlib>/http"] = sema::createStdlibModuleScope("http", universe);
+    module_scopes["<stdlib>/net.http"] = sema::createStdlibModuleScope("net.http", universe);
+    module_scopes["<stdlib>/std.http"] = sema::createStdlibModuleScope("std.http", universe);
+    module_scopes["<stdlib>/ui"] = sema::createStdlibModuleScope("ui", universe);
+    module_scopes["<stdlib>/std.ui"] = sema::createStdlibModuleScope("std.ui", universe);
 
     // 1. Semantic and type checking across all modules
     for (const auto* node : ordered_nodes) {
@@ -1447,7 +1465,7 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     CompileOptions comp_opts;
     comp_opts.opt_level = options.opt_level;
     comp_opts.wrapv = options.wrapv;
-    comp_opts.cpp_standard = "c++17";
+    comp_opts.cpp_standard = "c++20";
     comp_opts.compile_only = true;
     comp_opts.debug_symbols = options.debug_info || (options.opt_level == OptimizationLevel::O0);
     comp_opts.include_directories.push_back(build_dir);

@@ -617,6 +617,47 @@ void populateNetHttpModuleScope(Scope& httpScope) {
     makeFn("validate");
 }
 
+void populateUiModuleScope(Scope& uiScope) {
+    diag::SourceSpan span{};
+
+    auto makeFn = [&](const char* name) {
+        auto sym = std::make_shared<Symbol>(name, SymbolKind::Function, span);
+        sym->setExported(true);
+        sym->setConst(true);
+        uiScope.define(sym, false);
+    };
+
+    auto makeType = [&](const char* name) {
+        auto sym = std::make_shared<Symbol>(name, SymbolKind::Class, span);
+        sym->setExported(true);
+        sym->setIsType(true);
+        uiScope.define(sym, false);
+    };
+
+    // Types
+    makeType("Component");
+    makeType("UINode");
+    makeType("BoxNode");
+    makeType("TextNode");
+    makeType("ButtonNode");
+    makeType("InputNode");
+    makeType("ScrollNode");
+    makeType("VNode");
+    makeType("HeadlessBackend");
+    makeType("TuiBackend");
+    makeType("WebVdomBackend");
+    makeType("MicrotaskScheduler");
+    makeType("ReactiveCounter");
+
+    // Functions
+    makeFn("debounce");
+    makeFn("withPreventDefault");
+    makeFn("withKeyFilter");
+    makeFn("mountHeadless");
+    makeFn("renderTui");
+    makeFn("serveUi");
+}
+
 std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, const std::shared_ptr<Scope>& universe) {
     auto scope = std::make_shared<Scope>(ScopeKind::Module, universe);
     if (moduleName == "io" || moduleName == "std.io" || moduleName == "keet.io") {
@@ -640,6 +681,8 @@ std::shared_ptr<Scope> createStdlibModuleScope(std::string_view moduleName, cons
         populateCryptoModuleScope(*scope);
     } else if (moduleName == "test" || moduleName == "std.test" || moduleName == "keet.test") {
         populateTestModuleScope(*scope);
+    } else if (moduleName == "ui" || moduleName == "std.ui" || moduleName == "keet.ui") {
+        populateUiModuleScope(*scope);
     }
     return scope;
 }

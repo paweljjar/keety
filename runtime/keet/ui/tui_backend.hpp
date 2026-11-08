@@ -33,6 +33,7 @@ struct TerminalCell {
     FontStyle fontStyle{FontStyle::Normal};
 
     bool operator==(const TerminalCell&) const noexcept = default;
+    bool operator!=(const TerminalCell& o) const noexcept { return !(*this == o); }
 };
 
 /// Structured events decoded from terminal stream

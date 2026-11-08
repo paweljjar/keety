@@ -1528,7 +1528,8 @@ CompletionList Analyzer::getCompletions(
         {"json", "Standard Library Module: `json` (JSON serialization and parsing)"},
         {"net", "Standard Library Module: `net` (Networking, HTTP and sockets)"},
         {"test", "Standard Library Module: `test` (Unit testing and assertions)"},
-        {"crypto", "Standard Library Module: `crypto` (Hashing, HMAC, AEAD ciphers, CSPRNG, and QR/barcodes)"}
+        {"crypto", "Standard Library Module: `crypto` (Hashing, HMAC, AEAD ciphers, CSPRNG, and QR/barcodes)"},
+        {"ui", "Standard Library Module: `ui` (Universal Reactive UI, TUI, Flexbox, and Web VDOM)"}
     };
     for (const auto& [mod, desc] : stdModules) {
         if (seen.insert(mod).second) {
@@ -1537,6 +1538,38 @@ CompletionList Analyzer::getCompletions(
             item.kind = CompletionItemKind::Module;
             item.detail = "Standard library module";
             item.documentation = desc;
+            list.items.push_back(std::move(item));
+        }
+    }
+
+    // 3f. KML Runes, Primitives and Directives
+    static const std::vector<std::pair<std::string, std::string>> kmlRunes = {
+        {"$state", "KML State Rune: `$state(initialValue)` creates reactive local state"},
+        {"$derived", "KML Derived Rune: `$derived(expression)` creates computed reactive state"},
+        {"$effect", "KML Effect Rune: `$effect(() => { ... })` creates reactive side effect"},
+        {"$props", "KML Props Rune: `$props()` retrieves component props"},
+        {"$bind", "KML Two-Way Binding: `$bind.value={state}` binds property bidirectionally"}
+    };
+    for (const auto& [rune, kmlDoc] : kmlRunes) {
+        if (seen.insert(rune).second) {
+            CompletionItem item;
+            item.label = rune;
+            item.kind = CompletionItemKind::Keyword;
+            item.detail = "KML Rune";
+            item.documentation = kmlDoc;
+            list.items.push_back(std::move(item));
+        }
+    }
+
+    static const std::vector<std::string> kmlTags = {
+        "box", "vstack", "hstack", "text", "button", "input", "scroll", "slot"
+    };
+    for (const auto& tag : kmlTags) {
+        if (seen.insert(tag).second) {
+            CompletionItem item;
+            item.label = tag;
+            item.kind = CompletionItemKind::Class;
+            item.detail = "KML Layout Primitive";
             list.items.push_back(std::move(item));
         }
     }

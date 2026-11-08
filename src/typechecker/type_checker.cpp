@@ -5184,6 +5184,45 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
+            } else if (modPath == "ui" || modPath == "std.ui" || modPath == "keet.ui") {
+                if (importDecl->getSymbols().empty()) {
+                    std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : (modPath == "std.ui" ? "ui" : modPath);
+                    if (!targetScope->lookupCurrent(boundName)) {
+                        auto modSym = std::make_shared<sema::Symbol>(boundName, sema::SymbolKind::Module, importDecl->getSpan());
+                        modSym->setExported(importDecl->isReExported());
+                        auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, modSym, emitter_);
+                        if (!res.success) hasErrors_ = true;
+                    }
+                } else {
+                    auto uiScope = sema::createStdlibModuleScope("ui");
+                    for (const auto& symItem : importDecl->getSymbols()) {
+                        auto exportedSym = uiScope->lookupCurrent(symItem.originalName);
+                        if (exportedSym) {
+                            std::string importAsName = symItem.getEffectiveName();
+                            if (!targetScope->lookupCurrent(importAsName)) {
+                                auto importedSym = std::make_shared<sema::Symbol>(
+                                    importAsName, exportedSym->getKind(), symItem.span
+                                );
+                                importedSym->setExported(importDecl->isReExported());
+                                importedSym->setIsType(exportedSym->isType());
+                                if (exportedSym->isConstant()) {
+                                    importedSym->setConst(true);
+                                }
+                                auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, importedSym, emitter_);
+                                if (!res.success) hasErrors_ = true;
+                            }
+                        } else {
+                            if (emitter_) {
+                                auto d = diag::Diagnostic::makeError(
+                                    diag::ErrorCode::SymbolNotExported,
+                                    "symbol '" + symItem.originalName + "' is not exported by module 'ui'",
+                                    symItem.span.start).withLabel(symItem.span, "symbol not exported");
+                                emitter_->report(d);
+                            }
+                            hasErrors_ = true;
+                        }
+                    }
+                }
             }
         }
  else if (const auto* varDecl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
@@ -6284,12 +6323,24 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     }
                     return checkHttpMemberCall(member, call, scope);
                 }
+                if (objIdent->getName() == "ui" || (sym && sym->isModule() && sym->getName() == "ui")) {
+                    for (const auto& arg : call->getArgs()) {
+                        if (arg.value) inferType(*arg.value, scope);
+                    }
+                    return Type::unknownType();
+                }
             }
 
             if (const auto* nestedMember = dynamic_cast<const ast::MemberExpr*>(member->getObject())) {
                 if (const auto* baseIdent = dynamic_cast<const ast::IdentExpr*>(nestedMember->getObject())) {
                     if (baseIdent->getName() == "net" && nestedMember->getMemberName() == "http") {
                         return checkHttpMemberCall(member, call, scope);
+                    }
+                    if (baseIdent->getName() == "std" && nestedMember->getMemberName() == "ui") {
+                        for (const auto& arg : call->getArgs()) {
+                            if (arg.value) inferType(*arg.value, scope);
+                        }
+                        return Type::unknownType();
                     }
                 }
             }
@@ -6407,6 +6458,7 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     if (m == "use" || m == "get" || m == "post" || m == "put" ||
                         m == "delete" || m == "del" || m == "patch" || m == "head" ||
                         m == "options" || m == "ws" || m == "mount" || m == "route" ||
+                        m == "serveUi" ||
                         m == "reusePort" || m == "setReusePort") {
                         return objType;
                     }

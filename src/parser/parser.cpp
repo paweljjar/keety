@@ -434,6 +434,12 @@ std::unique_ptr<ast::ClassDecl> Parser::parseClassDecl(bool isExported) {
     if (match(lexer::TokenKind::KwInherits)) {
         const auto& baseTok = expect(lexer::TokenKind::Identifier, diag::ErrorCode::ExpectedIdentifier, "expected base class name");
         baseClass = std::string(baseTok.lexeme);
+        while (match(lexer::TokenKind::Dot)) {
+            baseClass += ".";
+            if (check(lexer::TokenKind::Identifier)) {
+                baseClass += std::string(advance().lexeme);
+            }
+        }
     }
 
     expect(lexer::TokenKind::LBrace, diag::ErrorCode::UnexpectedToken, "expected '{' before class body");
