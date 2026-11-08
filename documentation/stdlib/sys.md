@@ -8,31 +8,29 @@ All fallible system operations throw `keet::error` instances named `"SystemError
 
 ## 1. Importing the Module
 
-The `sys` module can be imported using qualified module imports, module aliases, or selective member imports:
+The `sys` module can be imported using any of the four standard import forms (as well as module aliases):
 
 ```keet
-// Qualified import
+// 1. Unquoted module import
 import sys;
 
-fn main(): void {
-    let p: int = sys.pid();
-}
+// 2. Quoted module import
+import "sys";
+
+// 3. Unquoted selective import
+from sys import args, getEnv, getEnvOr, platform, cpuCount;
+
+// 4. Quoted selective import
+from "sys" import args, getEnv, getEnvOr, platform, cpuCount;
 ```
 
 ```keet
-// Module alias
+// Module alias import
 import sys as system;
 
 fn main(): void {
+    let p: int = sys.pid();
     let os: string = system.platform();
-}
-```
-
-```keet
-// Selective import
-from "sys" import args, getEnv, getEnvOr, platform, cpuCount;
-
-fn main(): void {
     let home: string = getEnvOr("HOME", "/tmp");
     let cpus: int = cpuCount();
 }

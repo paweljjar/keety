@@ -8,40 +8,32 @@ Zero external third-party C++ libraries are required; the runtime is entirely se
 
 ## 1. Importing the Module
 
-The `crypto` module can be imported using qualified module syntax, aliased imports, or selective symbol imports:
+The `crypto` module can be imported using any of the four standard import forms (as well as module aliases):
 
 ```keet
-// Qualified import
+// 1. Unquoted module import
 import crypto;
 
-fn main(): void {
-    let hash: string = crypto.sha256("Hello, world!");
-}
+// 2. Quoted module import
+import "crypto";
+
+// 3. Unquoted selective import
+from crypto import sha256, createHash, randomUuid;
+
+// 4. Quoted selective import
+from "crypto" import sha256, createHash, randomUuid, encryptAesGcm, decryptAesGcm;
 ```
 
 ```keet
-// Aliased import
+// Module alias import
 import crypto as c;
 
 fn main(): void {
+    let hash: string = crypto.sha256("Hello, world!");
     let token: string = c.randomHex(16);
-}
-```
-
-```keet
-// Selective import
-from "crypto" import sha256, createHash, randomUuid, encryptAesGcm, decryptAesGcm;
-
-fn main(): void {
     let uuid: string = randomUuid();
 }
 ```
-
-Canonical standard library aliases recognized by the compiler:
-- `import crypto;`
-- `import std.crypto;`
-- `import keet.crypto;`
-- `import crypto.hash;`
 
 ---
 

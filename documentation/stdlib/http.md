@@ -1,6 +1,6 @@
-# KeetScript Standard Library: `net.http` / `http` Module
+# KeetScript Standard Library: `http` Module
 
-The `net.http` (aliased as `http`) module provides a high-performance, non-blocking HTTP/1.1 and RFC 6455 WebSocket server engine for KeetScript. Built directly into the standard runtime (`<keet/http.hpp>`), it features zero external dependencies, thread pool connection management, an ultra-fast radix tree router, an Express-style asynchronous middleware pipeline, declarative schema validation, and full-duplex WebSockets.
+The `http` module provides a high-performance, non-blocking HTTP/1.1, RFC 6455 WebSocket, and Reactive UI LiveView server engine for KeetScript. Built directly into the standard runtime (`<keet/http.hpp>` and `<keet/ui/http_serve_ui.hpp>`), it features zero external dependencies, thread pool connection management, an ultra-fast radix tree router, an Express-style asynchronous middleware pipeline, declarative schema validation, full-duplex WebSockets, and Server-Side Rendered (SSR) + WebSocket VDOM diffing for `.kml` UI components.
 
 All operations adhere to KeetScript's **Strict Zero-Coercion Policy (`E3002`)** and integrate seamlessly with KeetScript's error handling and `zonk` recovery primitives.
 
@@ -8,45 +8,32 @@ All operations adhere to KeetScript's **Strict Zero-Coercion Policy (`E3002`)** 
 
 ## 1. Importing the Module
 
-The HTTP subsystem can be imported via canonical path (`net.http`) or convenience submodule (`http`), supporting qualified, aliased, and selective member imports:
+The `http` module can be imported using any of the four standard import forms (as well as module aliases):
 
 ```keet
-// Qualified import
-import net.http;
-
-fn main(): void {
-    let server: HttpServer = http.app();
-    server.listen(8080);
-}
-```
-
-```keet
-// Short import
+// 1. Unquoted module import
 import http;
 
-fn main(): void {
-    let server: HttpServer = http.createServer();
-}
+// 2. Quoted module import
+import "http";
+
+// 3. Unquoted selective import
+from http import app, createServer;
+
+// 4. Quoted selective import
+from "http" import app, createServer, cors, jsonParser, logger, recover;
 ```
 
 ```keet
-// Aliased import
-import net.http as h;
+// Module alias import
+import http as h;
 
 fn main(): void {
-    let server: HttpServer = h.app();
-}
-```
-
-```keet
-// Selective import
-from "net.http" import app, createServer, cors, jsonParser, logger, recover;
-
-fn main(): void {
-    let server: HttpServer = app();
+    let mut server: http.Server = h.app();
     server.use(cors());
     server.use(logger());
     server.use(recover());
+    server.listen(8080);
 }
 ```
 
@@ -87,7 +74,7 @@ Routes are matched using a high-throughput Radix Tree with deterministic precede
 **Exact Path > Parameterized Token (`:param`) > Wildcard (`*path`)**.
 
 ```keet
-import net.http;
+import http;
 
 fn registerRoutes(mut app: HttpServer): void {
     // Exact route
@@ -163,7 +150,7 @@ fn registerRoutes(mut app: HttpServer): void {
 Middlewares execute in registration order. Middlewares receive `(mut req: Request, mut res: Response, next: NextFunction)` and call `next()` to yield to downstream handlers:
 
 ```keet
-import net.http;
+import http;
 import io;
 
 fn main(): void {
@@ -187,7 +174,7 @@ fn main(): void {
 
 ## 6. Standard Middleware Ecosystem
 
-The `net.http` module includes built-in middlewares for common web services:
+The `http` module includes built-in middlewares for common web services:
 
 | Middleware | Signature | Description |
 |---|---|---|
@@ -199,7 +186,7 @@ The `net.http` module includes built-in middlewares for common web services:
 | **Panic Recovery** | `http.recover()` | Catches unhandled panics and exceptions, safely emitting `500 Internal Server Error` |
 
 ```keet
-import net.http;
+import http;
 
 fn configure(mut app: HttpServer): void {
     app.use(http.cors());
@@ -217,7 +204,7 @@ fn configure(mut app: HttpServer): void {
 Validate request bodies, headers, query parameters, and path variables against strict schemas:
 
 ```keet
-import net.http;
+import http;
 
 fn main(): void {
     let app: HttpServer = http.app();
@@ -239,7 +226,7 @@ fn main(): void {
 Define real-time bidirectional WebSocket endpoints using `app.ws(path, handler)`. The server automatically performs the RFC 6455 handshake (`101 Switching Protocols`), manages frame masking/unmasking, and dispatches events:
 
 ```keet
-import net.http;
+import http;
 import io;
 
 fn main(): void {
@@ -276,7 +263,47 @@ fn main(): void {
 
 ---
 
-## 9. Performance & Microservice Benchmarks
+## 9. Reactive UI Application Serving (`server.serveUi`)
+
+The `http` server natively integrates with KeetScript's `ui` module and `.kml` Single-File Components via `server.serveUi(...)`:
+
+```keet
+server.serveUi(route: string, factory: fn(): Component, title?: string, scopedCss?: string): Server
+```
+
+When `server.serveUi` is registered on a route (e.g., `"/"` or `"/counter"`):
+1. **`GET <route>`**: Instantiates a fresh component via `factory()`, mounts it, renders the initial Virtual DOM tree (`renderVdom()`), and serves a complete HTML5 document containing the Server-Side Rendered (SSR) markup, scoped CSS, and a lightweight (~50-line) WebSocket VDOM client runtime.
+2. **`WS <route>/ws`**: Automatically provisions a dedicated per-session WebSocket endpoint. Each browser tab holds its own isolated `Component` instance. Incoming browser events (`click`, `input`, `keydown`) invoke the component's handlers, compute minimal VDOM patches (`WebVdomBackend::diff`), and stream JSON patch arrays back over the WebSocket.
+
+```keet
+import http;
+import io;
+import "./Counter.kml";
+
+fn main(): int {
+    let mut server: http.Server = http.createServer();
+
+    // Serve reactive Counter.kml component on "/"
+    server.serveUi("/", fn(): Counter {
+        return Counter();
+    }, "KeetScript Reactive UI Demo");
+
+    // Coexists seamlessly with standard REST API endpoints
+    server.get("/api/health", fn(req: http.Request, mut res: http.Response): void {
+        res.status(200).json("{\"status\":\"ok\",\"engine\":\"keet-ui\"}");
+    });
+
+    io.println("Listening on http://127.0.0.1:3000");
+    server.listen(3000);
+    return 0;
+}
+```
+
+For full details on `.kml` Single-File Components and reactive runes (`$state`, `$derived`, `$effect`), see the [`ui` Module Documentation](ui.md).
+
+---
+
+## 10. Performance & Microservice Benchmarks
 
 Measured on release builds (`-O3 -march=native`) on ARM64 Apple Silicon:
 

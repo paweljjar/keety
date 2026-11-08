@@ -1,16 +1,16 @@
-# Implementation Plan: B1_1 Svelte-Like Reactive UI Engine (`std.ui` & `*.kml`)
+# Implementation Plan: B1_1 Svelte-Like Reactive UI Engine (`ui` & `*.kml`)
 
 ## 1. Goal Description
 
 Implement milestone **B1_1** from `ROADMAP.md`: an ahead-of-time (AOT) compiled, compile-time reactive UI engine inspired by Svelte runes, authored in dedicated Single-File Components (`*.kml`, Keet Markup Language).
 
-The system lowers declarative templates into surgical C++20 imperative updates with compile-time reactivity, integrates seamlessly with KeetScript's strict `mut` borrow-checker, provides both a blazing-fast Terminal User Interface (TUI) runtime and a remote Web Virtual DOM (VDOM) engine served over WebSockets via `std.http` (or `net.http`), supplies a dual-layer headless test driver, and equips the Keet developer ecosystem (LSP, linter, formatter, VS Code) with first-class `.kml` support.
+The system lowers declarative templates into surgical C++20 imperative updates with compile-time reactivity, integrates seamlessly with KeetScript's strict `mut` borrow-checker, provides both a blazing-fast Terminal User Interface (TUI) runtime and a remote Web Virtual DOM (VDOM) engine served over WebSockets via `http`, supplies a dual-layer headless test driver, and equips the Keet developer ecosystem (LSP, linter, formatter, VS Code) with first-class `.kml` support.
 
 > [!IMPORTANT]
 > **KeetScript Syntax Convention**:
-> KeetScript strictly avoids C++-style double-colon (`::`) syntax. All module paths, namespaces, nested types, and enum members use standard dot (`.`) syntax (e.g., `import std.ui;`, `std.http.serveUi(...)`, `Color.Blue`, `BorderStyle.Rounded`). C++20 double colons (`::`) are strictly reserved for internal compiler implementation files (`keety::kml`) and the underlying generated native runtime headers.
+> KeetScript strictly avoids C++-style double-colon (`::`) syntax and `std.` module prefixes. Standard library modules (`crypto`, `fs`, `http`, `io`, `json`, `math`, `net`, `sys`, `test`, `time`, `ui`) are imported directly (e.g., `import ui;`, `import "http";`, `from http import app;`, `from "io" import print;`), and `.kml` components are imported via relative paths (`import "./Counter.kml";`). C++20 double colons (`::`) are strictly reserved for internal compiler implementation files (`keety::kml`) and the underlying generated native runtime headers.
 
-For web targets, components render into a lightweight Virtual DOM (VDOM) serialized as JSON. A minimal, zero-dependency client-side JavaScript script (`keet-vdom.js`) receives the VDOM JSON, mounts it to the browser DOM, intercepts user interactions (such as button clicks and input changes), and streams them back to the server over a WebSocket. The server dispatches events to component handlers, executes reactive `$state` updates, and pushes updated VDOM JSON to the client. A built-in `std.http.serveUi` / `app.serveUi()` function handles HTML shell generation, client script delivery, and WebSocket session lifecycles out of the box.
+For web targets, components render into a lightweight Virtual DOM (VDOM) serialized as JSON. A minimal, zero-dependency client-side JavaScript script (`keet-vdom.js`) receives the VDOM JSON, mounts it to the browser DOM, intercepts user interactions (such as button clicks and input changes), and streams them back to the server over a WebSocket. The server dispatches events to component handlers, executes reactive `$state` updates, and pushes updated VDOM JSON to the client. A built-in `http` `server.serveUi()` method handles HTML shell generation, client script delivery, and WebSocket session lifecycles out of the box.
 
 ---
 
@@ -277,22 +277,22 @@ To guarantee write-once, run-anywhere execution across both the TUI terminal dri
 
 ---
 
-### Phase 7: `std.http` UI Application Serving
+### Phase 7: `http` UI Application Serving
 *Focus: Seamless one-line hosting of full-stack reactive applications using Keet's HTTP server.*
 
-* **Subtask 7.1: `HttpServer.serveUi` Extension** (`runtime/keet/http.hpp`, `runtime/keet/std/http.hpp`):
+* **Subtask 7.1: `HttpServer.serveUi` Extension** (`runtime/keet/http.hpp`, `runtime/keet/ui/http_serve_ui.hpp`):
   * Add high-level UI serving methods to `HttpServer`:
     ```cpp
     void serveUi(std::string_view route, ComponentFactory factory, UiServeOptions options = {});
     ```
   * In KeetScript, accessible via:
     ```keet
-    import std.http;
-    import App from "./App.kml";
+    import http;
+    import "./App.kml";
 
     fn main(): void {
-        let server = http.createServer();
-        server.serveUi("/", App);
+        let mut server: http.Server = http.createServer();
+        server.serveUi("/", fn(): App { return App(); });
         server.listen(8080);
     }
     ```
@@ -306,10 +306,10 @@ To guarantee write-once, run-anywhere execution across both the TUI terminal dri
     * Serves embedded `keet-vdom.js` with `Content-Type: application/javascript` and HTTP caching headers.
   * **WebSocket Bridge Endpoint (`WS <route>/_ws` or upgraded `<route>`)**:
     * Upgrades HTTP connection using existing RFC 6455 routing.
-    * Connects WebSocket channel directly to `std.ui.WebVdomBackend`.
+    * Connects WebSocket channel directly to `ui.WebVdomBackend`.
 
 * **Subtask 7.3: Public Standard Library Headers** (`runtime/keet/ui.hpp`, `runtime/keet/std/ui.hpp`):
-  * Export `std.ui`, `std.ui.test`, and `std.ui.vdom` public interfaces.
+  * Export `ui` public interfaces.
 
 ---
 

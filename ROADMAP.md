@@ -19,15 +19,16 @@ flowchart TD
     subgraph A["Category A: Shipped"]
         A1["6-Stage AOT Compiler Pipeline"]
         A2["Soundness & Mut Borrow Checker"]
-        A3["Standard Library (io, fs, sys, math, time, json, net, crypto)"]
+        A3["Standard Library (crypto, fs, http, io, json, math, net, sys, test, time, ui)"]
         A4["Package Manager (kattery)"]
         A5["Language Server Protocol (keet-lsp)"]
         A6["VS Code Extension"]
         A7["Testing Framework (keety test)"]
         A8["Source Line Mapping (#line)"]
-        A9["HTTP Server & WebSockets (std::net::http)"]
+        A9["HTTP Server & WebSockets (http)"]
         A10["Code Formatter (keety fmt)"]
         A11["Static Linter (keety lint)"]
+        A12["Reactive UI Engine (ui & .kml)"]
     end
 
     subgraph B["Category B: To Do"]
@@ -85,8 +86,10 @@ Production-ready components fully implemented, verified with comprehensive unit,
 - **`time`**: High-resolution monotonic timers (`nowNs`, `nowMs`), sleep (`sleepMs`), and wall-clock timestamps.
 - **`json`**: RFC 8259 parser, dot-path queries, immutable builders, and polymorphic stringification.
 - **`net`**: RFC 3986 URL parser, DNS lookups, TCP/UDP sockets, and HTTP/1.1 client (`get`, `postJson`, `download`).
-- **`net.http` / `http`**: Non-blocking HTTP/1.1 and RFC 6455 WebSocket server (`app()`, `createServer()`), radix tree routing with `:param` and `*wildcard`, middleware pipeline (`use`, `next`), standard middlewares (`cors`, `jsonParser`, `urlencoded`, `logger`, `staticDir`, `recover`), declarative schema validation (`schema`, `validate`), and bidirectional WebSockets (`WebSocket`).
+- **`http`**: Non-blocking HTTP/1.1 and RFC 6455 WebSocket server (`app()`, `createServer()`), radix tree routing with `:param` and `*wildcard`, middleware pipeline (`use`, `next`), standard middlewares (`cors`, `jsonParser`, `urlencoded`, `logger`, `staticDir`, `recover`), declarative schema validation (`schema`, `validate`), bidirectional WebSockets (`WebSocket`), and Reactive UI serving (`serveUi`).
 - **`crypto`**: Hashing (SHA-256, SHA-512, SHA3-256, SHA3-512, BLAKE3, streaming `Hasher`), message authentication (HMAC-SHA256, HMAC-SHA512, streaming `Hmac`), authenticated symmetric encryption (AES-256-GCM, ChaCha20-Poly1305), CSPRNG (`randomBytes`, `randomHex`, `randomInt`, `randomUuid`, `timingSafeEqual`), encodings (Hex, RFC 4648 Base64, URL-safe Base64), and symbology (Code 128 1D barcode and ISO/IEC 18004 2D QR Code encoders, decoders, SVG & ASCII block renderers).
+- **`test`**: Built-in test runner, suites (`suite`), test cases (`case`), deep equality assertions (`assertEq`), and exception assertions (`assertZonks`).
+- **`ui`**: Compile-time reactive UI engine for `.kml` Single-File Components (`$state`, `$derived`, `$effect`), scene graph nodes, Flexbox layout solver, TUI backend, Web VDOM & WebSocket LiveView backend, and Headless test harness.
 
 ### 4. Package Manager (`kattery`)
 - Project manifest (`pedigree.json`) and reproducible lockfile (`pedigree.lock`).
@@ -110,7 +113,7 @@ Production-ready components fully implemented, verified with comprehensive unit,
 - Native LSP client integration (`vscode-languageclient`) with automatic `keet-lsp` discovery.
 - Graceful automatic fallback to CLI check-on-save mode when `keet-lsp` is unavailable.
 
-### 7. Native Testing Framework (`keety test` & `std::test`)
+### 7. Native Testing Framework (`keety test` & `test`)
 - **First-Class Test Execution Engine:**
   - Built-in `keety test` CLI sub-command supporting discovery, filter matching (`--filter`), parallel execution, and test suite isolation.
   - Standard library `test` module (`import test;`) providing suites (`suite`), individual cases (`case`), and execution primitives.
@@ -133,7 +136,7 @@ Production-ready components fully implemented, verified with comprehensive unit,
   - Automatic native debug symbol emission (`-g` / `/Z7`) on debug builds.
   - `--no-line-directives` CLI flag for clean C++ emission and debugging compiler internals.
 
-### 9. HTTP Server & Full-Duplex WebSockets (`std::net::http`)
+### 9. HTTP Server & Full-Duplex WebSockets (`http`)
 - **Event-Driven Server Engine:**
   - Non-blocking HTTP/1.1 server built on top of work-stealing thread pools and socket descriptors.
   - Express-style fluent routing with radix tree matching (`:id` parameter extraction and `*wildcard` routing).
@@ -183,7 +186,7 @@ Active development backlog organized by implementation priority and time horizon
 
 High-priority deliverables focusing on declarative user interfaces, compile-time reactivity, and modern terminal/desktop application development.
 
-#### 1. Svelte-Like Compile-Time Reactive UI Engine (`std::ui` / `keet-ui`)
+#### 1. Svelte-Like Compile-Time Reactive UI Engine (`ui` & `.kml`)
 - **Zero-Virtual-DOM Compile-Time Reactivity:**
   - Ahead-of-time (AOT) component compilation lowering declarative component templates directly into surgical C++20 imperative update routines, completely eliminating runtime Virtual DOM allocations and diffing overhead.
   - Static dependency analysis during the `keety::sema` and `keety::ir` phases: compiler constructs a fine-grained reactive dependency graph and maps mutations to deterministic dirty-bit masks.

@@ -10,35 +10,31 @@ Fallible domain operations (such as `clamp` where `minVal > maxVal` or `randomIn
 
 ## 1. Importing the Module
 
-The `math` module can be imported using qualified module imports, module aliases, or selective member imports:
+The `math` module can be imported using any of the four standard import forms (as well as module aliases):
 
 ```keet
-// Qualified import
+// 1. Unquoted module import
 import math;
+
+// 2. Quoted module import
+import "math";
+
+// 3. Unquoted selective import
+from math import PI, sin, cos, sqrt, clamp, absInt, randomInt;
+
+// 4. Quoted selective import
+from "math" import PI, sin, cos, sqrt, clamp, absInt, randomInt;
+```
+
+```keet
+// Module alias import
+import math as m;
 
 fn main(): void {
     let radius: float = 5.0;
     let circumference: float = 2.0 * math.PI * radius;
-}
-```
-
-```keet
-// Module alias
-import math as m;
-
-fn main(): void {
     let s: float = m.sin(m.PI / 2.0);
-}
-```
-
-```keet
-// Selective import
-from "math" import PI, sin, cos, sqrt, clamp, absInt, randomInt;
-
-fn main(): void {
-    let val: float = sqrt(16.0);
-    let clamped: float = clamp(val, 0.0, 10.0);
-    let roll: int = randomInt(1, 6);
+    let clamped: float = clamp(sqrt(16.0), 0.0, 10.0);
 }
 ```
 
