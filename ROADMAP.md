@@ -33,25 +33,35 @@ flowchart TD
 
     subgraph B["Category B: To Do"]
         subgraph B1["B1: Near-Term"]
-            B1_1["Svelte-Like Reactive UI Engine (std::ui)"]
+            B1_1["Native Desktop GUI Backend for std::ui / .kml"]
+            B1_2["Advanced LSP Refactoring (keet-lsp)"]
+            B1_3["Universal Hot Reloading / Live Watcher"]
+            B1_4["Incremental Compilation & Build Cache"]
+            B1_5["Standard Documentation Tooling (keety doc)"]
+            B1_6["SQLite Database Module (std::db)"]
+            B1_7["Multi-User Server-Push & Shared Store (std::ui)"]
+            B1_8["Input & Scrollable Containers (.kml)"]
         end
         subgraph B2["B2: Mid-Term"]
-            B2_1["Advanced LSP Refactoring"]
-            B2_2["Debug Adapter Protocol (keet-dap)"]
+            B2_1["Debug Adapter Protocol (keet-dap)"]
+            B2_2["Foreign Function Interface (FFI)"]
+            B2_3["Memory Alloc Tracing & Profiler"]
+            B2_4["Pattern Matching (match)"]
+            B2_5["Protocols / Interfaces (trait)"]
         end
         subgraph B3["B3: Long-Term"]
             B3_1["CSP Concurrency (chan & select)"]
-            B3_2["Memory Alloc Tracing"]
-            B3_3["Foreign Function Interface (FFI)"]
-            B3_4["Centralized Package Registry"]
+            B3_2["Centralized Package Registry (kattery)"]
+            B3_3["SIMD Primitives (std::simd)"]
+            B3_4["Cross-Compilation Toolchain Drivers"]
         end
     end
 
     subgraph C["Category C: Under Consideration"]
         C1["Host Embedding API (libkeety)"]
         C2["Direct LLVM IR Backend"]
-        C3["Spec Freeze & LTS Policy"]
-        C4["WASM In-Browser Playground"]
+        C3["WebAssembly In-Browser Playground"]
+        C4["Self-Hosting Compiler"]
     end
 
     A --> B1 --> B2 --> B3 -.-> C
@@ -184,118 +194,101 @@ Active development backlog organized by implementation priority and time horizon
 
 ### B1: Near-Term
 
-High-priority deliverables focusing on declarative user interfaces, compile-time reactivity, and modern terminal/desktop application development.
+- **Native Desktop GUI Backend for `std::ui` / `.kml`**
+  - Native cross-platform desktop windowing and scene graph rendering (macOS, Linux, Windows) without browser or Electron runtime overhead.
+  - Direct integration of the existing Flexbox layout solver and reactive dirty-mask updates with a native 2D canvas driver (e.g. Skia / Metal / DirectX).
+  - First-class synthetic and native window, pointer, and keyboard event dispatching (`on:click`, `on:keydown`, resize, window state).
 
-#### 1. Svelte-Like Compile-Time Reactive UI Engine (`ui` & `.kml`)
-- **Zero-Virtual-DOM Compile-Time Reactivity:**
-  - Ahead-of-time (AOT) component compilation lowering declarative component templates directly into surgical C++20 imperative update routines, completely eliminating runtime Virtual DOM allocations and diffing overhead.
-  - Static dependency analysis during the `keety::sema` and `keety::ir` phases: compiler constructs a fine-grained reactive dependency graph and maps mutations to deterministic dirty-bit masks.
-  - Targeted surgical patching: state assignments trigger only the precise layout nodes and text cells associated with the modified state (`if (dirty & 0x01) { label.setText(...); }`).
-- **Reactive State Primitives & Runes:**
-  - Ergonomic compile-time reactive declarations inspired by Svelte runes (`$state(initial)`, `$derived(expr)`, `$effect(fn)`).
-  - Natural assignment reactivity: direct mutable variable assignments (`count += 1;`) automatically lower into state updates and dirty-bit dispatch.
-  - Seamless integration with KeetScript's strict `mut` borrow-checker to guarantee memory safety and data-race free reactive state mutations at compile time.
-- **Declarative Component Templates & Direct Data Bindings:**
-  - Two-way reactive data bindings (`bind:value={text}`, `bind:checked={flag}`) lowering to zero-overhead event listeners and direct setters.
-  - Structural control blocks (`#if ... /if`, `#each ... /each`, `#await ... /await`) compiled into lightweight keyed fragment managers with in-place collection updates.
-  - Scoped styling, slots, and component composition with zero runtime wrapper overhead.
-- **Multi-Target Rendering Backends:**
-  - **Terminal User Interface (TUI):** Blazing-fast terminal driver with ANSI/VT100 escape sequences, double-buffered character grid, flexbox-inspired constraint layout engine, box-drawing primitives, and zero-flicker partial cell redraws driven by dirty masks.
-  - **Headless Test Driver:** Deterministic, lightweight headless test environment for asserting reactive UI state transitions and verifying component behavior without physical displays.
-  - **Pluggable Target Abstraction:** Modular backend interface (`std::ui::backend`) enabling future WASM direct DOM manipulation and native desktop canvas (e.g. Skia/SDL) integrations.
-- **Event Handling, Lifecycles & Async Coordination:**
-  - Type-safe synthetic event handling with declarative modifiers (`on:click`, `on:keydown`, `on:resize`).
-  - Deterministic component lifecycle hooks (`onMount`, `onDestroy`, `beforeUpdate`, `afterUpdate`).
-  - Native asynchronous coordination with KeetScript's async runtime for non-blocking I/O and stream-backed live data rendering.
+- **Advanced LSP Refactoring (`keet-lsp`)**
+  - Find All References (`textDocument/references`) and project-wide Symbol Rename (`textDocument/rename` & `textDocument/prepareRename`) with lexical scope awareness.
+  - Signature Help (`textDocument/signatureHelp`) displaying parameter signatures and active parameter index during call invocation.
+  - Semantic Tokens (`textDocument/semanticTokens/full`) providing compiler-backed token categorization and semantic highlighting.
+  - Range Formatting (`textDocument/rangeFormatting`) for selective code formatting.
+
+- **Universal KeetScript Hot Reloading / Live Watcher**
+  - General-purpose development watch mode (`keety watch` / `keety run --watch`) for continuous compilation and live code reloading across any KeetScript program (CLI tools, HTTP servers, and UI applications).
+  - State preservation across reloads using module-level state persistence and hot module replacement (HMR) triggers without restarting the host process.
+
+- **Incremental Compilation & Build Cache (`keety build`)**
+  - Dependency-aware hashing of AST, IR, and emitted C++ artifacts to bypass recompilation of unchanged `.keet` modules.
+  - Drastic reduction of compilation cycle latency in medium to large workspaces and monorepos.
+
+- **Standard Documentation Tooling (`keety doc`)**
+  - CLI documentation generator extracting doc-comments (`///`) into searchable Markdown and static HTML sites (similar to `cargo doc` / `godoc`).
+  - Cross-module symbol linking, dead reference verification, and seamless integration with `keet-lsp` hover tooltips.
+
+- **SQLite Database Module (`std::db`)**
+  - Standard library SQLite C-runtime wrapper (`runtime/keet/db.hpp` / `import db;`) providing database handle lifecycle (`db.open`), transactions, and command execution (`conn.exec`).
+  - Prepared statements with typed parameter binding (`stmt.bind`) and step iteration (`stmt.step`).
+  - Foundational storage layer for standalone stateful web/desktop applications (e.g. Discord-like chat apps, user session auth, persistence), paving the way for future pure-KeetScript embedded storage engines (`std::store`).
+
+- **Multi-User Server-Push & Shared Reactive Store (`std::ui`)**
+  - Multi-session WebSocket broadcast engine (`backend.broadcastPatch()`) pushing incremental VDOM patches to all connected clients without client-initiated poll/click triggers.
+  - Reactive shared event bus and application stores (`chatStore.onMessage(...)`) for real-time collaboration and multi-user synchronization.
+
+- **Interactive Form Inputs & Scroll Containers (`.kml`)**
+  - Native `<input>` and `<textarea>` components with two-way text binding (`$bind.value={...}`) and key shortcut handling (`@keydown.enter={...}`).
+  - Scrollable container layouts (`overflow-y: auto`) with programmatic auto-scroll anchors for live message streams and dynamic feeds.
+  - Dynamic collection rendering loops (`{#for item in items; key=item.id}`) optimized for append-heavy stream updates and surgical DOM diffing.
 
 ---
 
 ### B2: Mid-Term
 
-Tooling enhancements, developer ergonomics, automated code refactoring, and interactive visual debugging.
+- **Debug Adapter Protocol (`keet-dap`)**
+  - Dedicated DAP server binary bridging VS Code and editor debuggers to underlying LLDB/GDB debug engines.
+  - Interactive debugging with line breakpoints, step-in/step-out, watch expressions, and variable inspection mapped back to `.keet` types and union variants.
 
-#### 1. Advanced LSP Refactoring
-- **Symbol Rename (`textDocument/rename` & `textDocument/prepareRename`):**
-  - Safe, project-wide identifier renaming respecting lexical scopes and module boundaries.
-- **Find All References (`textDocument/references`):**
-  - Project-wide search for all read/write usages and call sites of a symbol.
-- **Compiler Refactoring Code Actions (`textDocument/codeAction`):**
-  - Expand existing lint-driven code actions to support AST/compiler refactorings: "Import missing module", "Create function/class stub from unresolved symbol", "Extract local variable".
-- **Signature Help (`textDocument/signatureHelp`):**
-  - Parameter tooltips and active parameter index highlighting while typing function/method calls.
-- **Semantic Tokens (`textDocument/semanticTokens/full`):**
-  - Accurate semantic token categorization for types, functions, variables, constants, and keywords.
-- **Range Formatting (`textDocument/rangeFormatting`):**
-  - Selective formatting for highlighted code ranges.
+- **Foreign Function Interface (FFI)**
+  - Direct C ABI declarations (`extern "C" fn ...`), `rawptr` type support, and zero-copy string/buffer type marshaling.
+  - Dynamic shared library loading at runtime (`sys.loadLibrary("libfoo.so")`) with dynamic symbol resolution.
 
-#### 2. Debug Adapter Protocol (`keet-dap`)
-- **Native DAP Server Binary:**
-  - Implement a Debug Adapter Protocol server connecting VS Code Debug UI to LLDB/GDB.
-- **Interactive Visual Debugging:**
-  - Line breakpoints, conditional breakpoints, and exception hit breakpoints in `.keet` files.
-  - Step Over, Step Into, Step Out, and Continue controls.
-  - Variable inspector: inspect KeetScript scalar values, unfold union variants, explore maps/arrays, and evaluate watch expressions.
+- **Memory Allocation Tracing & Profiler (`--trace-alloc`)**
+  - Runtime and compile-time allocation instrumentation to track heap allocations, vector capacity resizes, and inadvertent deep value copies.
+  - Summary reports on program termination and flamegraph trace exports for memory optimization.
+
+- **Pattern Matching with Exhaustiveness Checking (`match`)**
+  - Exhaustive `match` construct supporting scalar constants, union variants, tuple and struct destructuring, and conditional `when` guards.
+  - Strict compile-time validation ensuring all possible variant branches are accounted for without silent unhandled cases.
+
+- **Protocols / Interfaces (`protocol` / `trait`)**
+  - Lightweight behavioral contracts defining method requirements without requiring class inheritance hierarchies.
+  - Support for compile-time generic constraints and static polymorphism.
 
 ---
 
 ### B3: Long-Term
 
-Advanced language systems, memory profiling, foreign interoperability, and package ecosystem scaling.
+- **CSP Concurrency Primitives (`chan<T>`, `select`, `spawn`)**
+  - Value-semantic, typed communication channels (buffered and unbuffered) with `send`, `recv`, and `close`.
+  - Channel multiplexing via `select` statements with configurable timeout and default fallback branches.
+  - Thread-pool work-stealing scheduler for `spawn fn(...)`, statically verified by the borrow-checker to prevent data races.
 
-#### 1. CSP Concurrency Primitives
-- **Typed Channels (`chan<T>`):**
-  - Value-semantic, thread-safe message passing channels (unbuffered and buffered).
-  - Channel operations: `ch.send(val)`, `val = ch.recv()`, `ch.close()`.
-  - Non-blocking variants: `ch.trySend(val)`, `ch.tryRecv()`.
-- **Channel Multiplexing (`select`):**
-  - `select` statement for coordinating multiple channel operations with optional `default` timeout branches.
-- **Task Spawning:**
-  - `spawn fn(...)` construct scheduling lightweight tasks onto a thread-pool work-stealing scheduler.
+- **Centralized Package Registry (`kattery registry`)**
+  - Centralized index for publishing, indexing, and distributing versioned KeetScript packages.
+  - `kattery publish` CLI workflow with package signing, cryptographic checksum verification, SemVer constraint resolution, and dependency security vulnerability scanning.
 
-#### 2. Memory Allocation Tracing
-- **Allocation Profiler (`--trace-alloc`):**
-  - Compiler flag emitting lightweight instrumentation for tracking dynamic allocations.
-  - Detects accidental deep copies, vector geometric resizes, and string reallocations.
-  - Emits heap allocation summaries at program exit or outputs trace data for flamegraph analysis.
+- **SIMD Primitives & Vectorization (`std::simd`)**
+  - Portable hardware vector types (`f32x4`, `i32x8`, etc.) lowering to native SSE, AVX, or ARM NEON vector instructions for high-throughput math, audio, and graphics pipelines.
 
-#### 3. Foreign Function Interface (FFI)
-- **`extern "C"` Bindings:**
-  - Direct foreign function declarations in KeetScript:
-    ```keet
-    extern "C" fn sqlite3_open(filename: string, mut db: rawptr): int;
-    ```
-- **Type Marshaling:**
-  - Zero-overhead marshaling between KeetScript strings/arrays and C-compatible raw buffers and null-terminated strings.
-- **Dynamic Library Loading:**
-  - Runtime dynamic library loader (`sys.loadLibrary("libfoo.so")`) for invoking dynamic symbols without compile-time linkage.
-
-#### 4. Centralized Package Registry
-- **Hosted Package Registry for `kattery`:**
-  - Centralized index for discovering, versioning, and distributing KeetScript packages.
-  - `kattery publish`: CLI command to authenticate, package, and upload packages with cryptographic integrity checks.
-  - SemVer resolution and dependency security audit scans.
+- **Cross-Compilation Toolchain Drivers**
+  - Turnkey cross-compilation support via `keety build --target=<triple>` (e.g., targeting Linux or Windows from macOS) without manual toolchain configuration.
 
 ---
 
-## C. Under Consideration
+### C: Under Consideration
 
-Exploratory architectural proposals and long-range research topics under evaluation:
+- **Host Embedding API (`libkeety`)**
+  - C/C++ embedding API distributing `keety` as a static or dynamic library for integration into native hosts (game engines, runtime plugin hosts, or application frameworks).
 
-#### 1. Host Embedding API (`libkeety`)
-- Packaging the compiler and runtime as an embeddable static/shared library (`libkeety`).
-- C/C++ host API allowing host applications (e.g. game engines, web servers) to instantiate KeetScript runtimes, bind native functions, and execute `.keet` scripts.
+- **Direct LLVM IR Backend**
+  - Native LLVM IR code generator bypassing C++ code emission to achieve sub-millisecond incremental debug compilation speeds.
 
-#### 2. Direct LLVM IR Backend
-- An optional, direct-to-LLVM IR code generation backend (`keety build --backend=llvm`) bypassing C++ code emission and host toolchain invocation.
-- Goal: Sub-millisecond incremental debug compilation speeds while retaining optimal release performance.
+- **WebAssembly In-Browser Playground**
+  - Compiling the compiler and standard library to WebAssembly / WASI to provide a zero-install interactive browser playground.
 
-#### 3. Specification Freeze & LTS Policy
-- Formal language specification freeze for KeetScript 1.0.
-- Strict backward compatibility guarantees, semantic versioning policies, and Long Term Support (LTS) release cadence.
-
-#### 4. WebAssembly (WASM) Playground
-- Compiling `keety` and the standard library to WebAssembly / WASI.
-- Interactive, zero-installation in-browser KeetScript playground with live syntax highlighting, compilation, and execution.
+- **Self-Hosting Compiler**
+  - Re-implementing the Keety compiler frontend, parser, and semantic analyzer natively in KeetScript.
 
 ---
 
