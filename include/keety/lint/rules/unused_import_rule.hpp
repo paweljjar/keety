@@ -69,13 +69,18 @@ public:
                 // import module; or import module as alias;
                 std::string boundName = importDecl->getModuleAlias();
                 if (boundName.empty()) {
-                    // Extract basename from module path (e.g. "io", "./foo/bar" -> "bar")
+                    // Extract basename from module path (e.g. "io", "./foo/bar" -> "bar", "./Counter.kml" -> "Counter")
                     std::string path = importDecl->getModulePath();
                     size_t slash = path.find_last_of("/\\");
                     if (slash != std::string::npos) {
                         boundName = path.substr(slash + 1);
                     } else {
                         boundName = path;
+                    }
+                    if (boundName.size() > 5 && boundName.ends_with(".keet")) {
+                        boundName = boundName.substr(0, boundName.size() - 5);
+                    } else if (boundName.size() > 4 && boundName.ends_with(".kml")) {
+                        boundName = boundName.substr(0, boundName.size() - 4);
                     }
                 }
 

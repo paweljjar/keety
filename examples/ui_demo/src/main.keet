@@ -1,7 +1,7 @@
-import ui;
-import "time";
 from http import app, cors, recover;
-from "io" import println;
+from io import println;
+import time;
+
 import "./Counter.kml";
 
 fn main(): void {

@@ -23,7 +23,8 @@
   ],
   "main": "./out/extension.js",
   "activationEvents": [
-    "onLanguage:keetscript"
+    "onLanguage:keetscript",
+    "onLanguage:kml"
   ],
   "contributes": {
     "breakpoints": [

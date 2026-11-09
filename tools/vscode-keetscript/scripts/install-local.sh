@@ -24,21 +24,21 @@ npm install
 echo "[2/3] Compiling TypeScript extension..."
 npm run compile
 
-echo "[3/3] Linking into VS Code extensions directory..."
-VSCODE_EXT_DIR="${HOME}/.vscode/extensions"
-mkdir -p "${VSCODE_EXT_DIR}"
-
-TARGET_LINK="${VSCODE_EXT_DIR}/keet-lang.keetscript-0.1.0"
-rm -rf "${TARGET_LINK}"
-ln -s "${EXT_DIR}" "${TARGET_LINK}"
+echo "[3/3] Linking into Antigravity IDE & VS Code extensions directories..."
+for EXT_ROOT in "${HOME}/.antigravity-ide/extensions" "${HOME}/.vscode/extensions"; do
+    mkdir -p "${EXT_ROOT}"
+    TARGET_LINK="${EXT_ROOT}/keet-lang.keetscript-0.1.0"
+    rm -rf "${TARGET_LINK}"
+    ln -s "${EXT_DIR}" "${TARGET_LINK}"
+    echo "  -> Linked: ${TARGET_LINK} -> ${EXT_DIR}"
+done
 
 echo ""
 echo "=========================================================="
 echo "✅ KeetScript extension installed successfully!"
-echo "Target: ${TARGET_LINK} -> ${EXT_DIR}"
 echo ""
-echo "To activate:"
-echo "  1. Open Visual Studio Code."
-echo "  2. Press Cmd+Shift+P (or Ctrl+Shift+P) and run: 'Developer: Reload Window'"
-echo "  3. Open any '.keet' file and enjoy!"
+echo "To activate in Antigravity IDE / VS Code:"
+echo "  1. Press Cmd+Shift+P (or Ctrl+Shift+P)"
+echo "  2. Run: 'Developer: Reload Window'"
+echo "  3. Open any '.keet' or '.kml' file and enjoy!"
 echo "=========================================================="

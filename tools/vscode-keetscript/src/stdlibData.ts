@@ -1263,6 +1263,177 @@ export const STDLIB_MODULES: Record<string, StdlibModule> = {
         snippet: 'udpClose(${1:handle})'
       }
     }
+  },
+  http: {
+    name: 'http',
+    doc: 'High-performance HTTP/1.1, WebSocket, and Reactive UI (.kml) LiveView server.',
+    members: {
+      app: {
+        name: 'app',
+        kind: 'function',
+        signature: 'fn app(reusePort?: bool): Server',
+        doc: 'Creates a new Express-style HTTP server application.',
+        snippet: 'app()'
+      },
+      createServer: {
+        name: 'createServer',
+        kind: 'function',
+        signature: 'fn createServer(reusePort?: bool): Server',
+        doc: 'Creates a new HTTP server instance.',
+        snippet: 'createServer()'
+      },
+      cors: {
+        name: 'cors',
+        kind: 'function',
+        signature: 'fn cors(): Middleware',
+        doc: 'Enables Cross-Origin Resource Sharing (CORS) headers.',
+        snippet: 'cors()'
+      },
+      logger: {
+        name: 'logger',
+        kind: 'function',
+        signature: 'fn logger(): Middleware',
+        doc: 'Logs incoming HTTP requests, status codes, and response latency.',
+        snippet: 'logger()'
+      },
+      jsonParser: {
+        name: 'jsonParser',
+        kind: 'function',
+        signature: 'fn jsonParser(): Middleware',
+        doc: 'Parses incoming JSON request bodies.',
+        snippet: 'jsonParser()'
+      },
+      staticDir: {
+        name: 'staticDir',
+        kind: 'function',
+        signature: 'fn staticDir(dir: string): Middleware',
+        doc: 'Serves static files from disk with ETag and MIME support.',
+        snippet: 'staticDir("${1:./public}")'
+      },
+      recover: {
+        name: 'recover',
+        kind: 'function',
+        signature: 'fn recover(): Middleware',
+        doc: 'Recovers from unhandled errors and responds with HTTP 500.',
+        snippet: 'recover()'
+      }
+    }
+  },
+  crypto: {
+    name: 'crypto',
+    doc: 'Cryptographic hashes, HMAC, AEAD ciphers, CSPRNG, Base64/Hex, and QR/Code128 symbology.',
+    members: {
+      sha256: {
+        name: 'sha256',
+        kind: 'function',
+        signature: 'fn sha256(data: string): string',
+        doc: 'Computes the lowercase hex SHA-256 digest of data.',
+        snippet: 'sha256(${1:data})'
+      },
+      sha512: {
+        name: 'sha512',
+        kind: 'function',
+        signature: 'fn sha512(data: string): string',
+        doc: 'Computes the lowercase hex SHA-512 digest of data.',
+        snippet: 'sha512(${1:data})'
+      },
+      blake3: {
+        name: 'blake3',
+        kind: 'function',
+        signature: 'fn blake3(data: string): string',
+        doc: 'Computes the 256-bit BLAKE3 hex digest of data.',
+        snippet: 'blake3(${1:data})'
+      },
+      randomUuid: {
+        name: 'randomUuid',
+        kind: 'function',
+        signature: 'fn randomUuid(): string',
+        doc: 'Generates a cryptographically random RFC 4122 UUID v4 string.',
+        snippet: 'randomUuid()'
+      },
+      randomHex: {
+        name: 'randomHex',
+        kind: 'function',
+        signature: 'fn randomHex(byteCount: int): string',
+        doc: 'Generates random bytes encoded as lowercase hex.',
+        snippet: 'randomHex(${1:16})'
+      },
+      toBase64: {
+        name: 'toBase64',
+        kind: 'function',
+        signature: 'fn toBase64(data: string): string',
+        doc: 'Encodes data into standard RFC 4648 Base64.',
+        snippet: 'toBase64(${1:data})'
+      },
+      fromBase64: {
+        name: 'fromBase64',
+        kind: 'function',
+        signature: 'fn fromBase64(b64: string): string',
+        doc: 'Decodes an RFC 4648 Base64 string.',
+        snippet: 'fromBase64(${1:b64})'
+      }
+    }
+  },
+  test: {
+    name: 'test',
+    doc: 'Unit testing framework, suites, test cases, and assertion primitives.',
+    members: {
+      suite: {
+        name: 'suite',
+        kind: 'function',
+        signature: 'fn suite(name: string, body: fn(): void): void',
+        doc: 'Defines a test suite grouping related test cases.',
+        snippet: 'suite("${1:Suite Name}", fn(): void {\n\t$0\n})'
+      },
+      case: {
+        name: 'case',
+        kind: 'function',
+        signature: 'fn case(name: string, body: fn(): void): void',
+        doc: 'Registers an individual unit test case.',
+        snippet: 'case("${1:test description}", fn(): void {\n\t$0\n})'
+      },
+      assertEq: {
+        name: 'assertEq',
+        kind: 'function',
+        signature: 'fn assertEq(actual: any, expected: any, msg?: string): void',
+        doc: 'Asserts that actual and expected values are deeply equal.',
+        snippet: 'assertEq(${1:actual}, ${2:expected})'
+      },
+      assertTrue: {
+        name: 'assertTrue',
+        kind: 'function',
+        signature: 'fn assertTrue(cond: bool, msg?: string): void',
+        doc: 'Asserts that condition evaluates to true.',
+        snippet: 'assertTrue(${1:cond})'
+      }
+    }
+  },
+  ui: {
+    name: 'ui',
+    doc: 'Compile-time Reactive UI engine, scene graph nodes, event modifiers, and TUI/Web/Headless backends.',
+    members: {
+      debounce: {
+        name: 'debounce',
+        kind: 'function',
+        signature: 'fn debounce(delayMs: int, handler: fn(UIEvent): void): EventCallback',
+        doc: 'Debounces an event listener by delayMs milliseconds.',
+        snippet: 'debounce(${1:200}, ${2:handler})'
+      },
+      withPreventDefault: {
+        name: 'withPreventDefault',
+        kind: 'function',
+        signature: 'fn withPreventDefault(handler: fn(UIEvent): void): EventCallback',
+        doc: 'Calls preventDefault() on the event before invoking handler.',
+        snippet: 'withPreventDefault(${1:handler})'
+      },
+      withKeyFilter: {
+        name: 'withKeyFilter',
+        kind: 'function',
+        signature: 'fn withKeyFilter(key: string, handler: fn(UIEvent): void): EventCallback',
+        doc: 'Invokes handler only when the pressed key matches key.',
+        snippet: 'withKeyFilter("${1:Enter}", ${2:handler})'
+      }
+    }
   }
 };
 

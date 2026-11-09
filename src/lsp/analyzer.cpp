@@ -656,10 +656,20 @@ std::vector<Diagnostic> Analyzer::analyze(const Document& doc) {
                     effName = std::filesystem::path(resolved->canonicalPath).stem().string();
                 }
                 if (!effName.empty()) {
-                    moduleScope->define(
-                        std::make_shared<sema::Symbol>(effName, sema::SymbolKind::Module, imp->getSpan()),
-                        false
-                    );
+                    if (!resolved->isStandardLibrary() &&
+                        resolved->canonicalPath.extension() == ".kml" &&
+                        imp->getModuleAlias().empty()) {
+                        auto compSym = std::make_shared<sema::Symbol>(
+                            effName, sema::SymbolKind::Class, imp->getSpan());
+                        compSym->setIsType(true);
+                        compSym->setExported(true);
+                        moduleScope->define(compSym, false);
+                    } else {
+                        moduleScope->define(
+                            std::make_shared<sema::Symbol>(effName, sema::SymbolKind::Module, imp->getSpan()),
+                            false
+                        );
+                    }
                 }
             }
         }
@@ -798,7 +808,8 @@ std::optional<Location> Analyzer::findDefinition(
             // Check namespace or bare import
             std::string modAlias = imp->getModuleAlias();
             std::string modPath = imp->getModulePath();
-            if (modAlias == ident || modPath == ident) {
+            std::string modStem = std::filesystem::path(modPath).stem().string();
+            if (modAlias == ident || modPath == ident || (modAlias.empty() && modStem == ident)) {
                 std::filesystem::path projectRoot = driver::findProjectRoot(fsPath);
                 resolver::ModulePathResolver pathResolver(projectRoot);
                 auto resolved = pathResolver.resolve(fsPath, modPath, imp->getSpan());
