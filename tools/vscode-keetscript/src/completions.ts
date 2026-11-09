@@ -10,6 +10,17 @@ export class KeetCompletionItemProvider implements vscode.CompletionItemProvider
   ): vscode.CompletionItem[] | vscode.CompletionList {
     const linePrefix = document.lineAt(position).text.substring(0, position.character);
 
+    // 1a. Sub-enum dot completions: e.g. "io.Color."
+    if (linePrefix.match(/\bio\.Color\.$/)) {
+      const colors = ['Default', 'Red', 'Green', 'Yellow', 'Blue', 'Magenta', 'Cyan', 'White', 'Gray'];
+      return colors.map((c) => {
+        const item = new vscode.CompletionItem(c, vscode.CompletionItemKind.EnumMember);
+        item.detail = `io.Color.${c}`;
+        item.documentation = new vscode.MarkdownString(`Terminal color enum member \`io.Color.${c}\`.`);
+        return item;
+      });
+    }
+
     // 1. Dot completions: e.g. "io.", "fs.", "math.", or "str."
     const dotMatch = linePrefix.match(/([a-zA-Z_][a-zA-Z0-9_]*)\.$/);
     if (dotMatch) {

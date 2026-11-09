@@ -118,11 +118,14 @@ TEST_CASE("Analyzer getCompletions produces context-aware suggestions", "[lsp][c
         REQUIRE(containsLabel(listIo, "print"));
         REQUIRE(containsLabel(listIo, "eprintln"));
         REQUIRE(containsLabel(listIo, "Color"));
+        REQUIRE_FALSE(containsLabel(listIo, "Gray"));
+        REQUIRE_FALSE(containsLabel(listIo, "Red"));
 
         auto itemPrintln = findItem(listIo, "println");
         REQUIRE(itemPrintln != nullptr);
         REQUIRE(itemPrintln->kind == CompletionItemKind::Function);
         REQUIRE(itemPrintln->detail.find("println") != std::string::npos);
+        REQUIRE(itemPrintln->detail.find("string | int | float | bool | char | null") != std::string::npos);
         REQUIRE(itemPrintln->documentation.find("standard output") != std::string::npos);
 
         // 2. math.

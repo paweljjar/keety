@@ -20,28 +20,28 @@ export const STDLIB_MODULES: Record<string, StdlibModule> = {
       print: {
         name: 'print',
         kind: 'function',
-        signature: 'fn print(...args: any): void',
+        signature: 'fn print(...args: string | int | float | bool | char | null, color?: io.Color): void',
         doc: 'Prints arguments to standard output without a trailing newline.',
         snippet: 'print(${1:args})'
       },
       println: {
         name: 'println',
         kind: 'function',
-        signature: 'fn println(...args: any): void',
+        signature: 'fn println(...args: string | int | float | bool | char | null, color?: io.Color): void',
         doc: 'Prints arguments to standard output followed by a newline.',
         snippet: 'println(${1:args})'
       },
       eprint: {
         name: 'eprint',
         kind: 'function',
-        signature: 'fn eprint(...args: any): void',
+        signature: 'fn eprint(...args: string | int | float | bool | char | null, color?: io.Color): void',
         doc: 'Prints arguments to standard error without a trailing newline.',
         snippet: 'eprint(${1:args})'
       },
       eprintln: {
         name: 'eprintln',
         kind: 'function',
-        signature: 'fn eprintln(...args: any): void',
+        signature: 'fn eprintln(...args: string | int | float | bool | char | null, color?: io.Color): void',
         doc: 'Prints arguments to standard error followed by a newline.',
         snippet: 'eprintln(${1:args})'
       },
@@ -55,16 +55,29 @@ export const STDLIB_MODULES: Record<string, StdlibModule> = {
       readLine: {
         name: 'readLine',
         kind: 'function',
-        signature: 'fn readLine(): string',
-        doc: 'Reads a line of text from standard input (without newline).',
+        signature: 'fn readLine(prompt?: string): string',
+        doc: 'Reads a line of text from standard input (without newline), with an optional prompt.',
         snippet: 'readLine()'
       },
       input: {
         name: 'input',
         kind: 'function',
-        signature: 'fn input(prompt: string): string',
-        doc: 'Displays a prompt and reads a line of user input.',
+        signature: 'fn input(prompt?: string): string',
+        doc: 'Displays an optional prompt and reads a line of user input.',
         snippet: 'input("${1:prompt: }")'
+      },
+      eof: {
+        name: 'eof',
+        kind: 'function',
+        signature: 'fn eof(): bool',
+        doc: 'Returns true if standard input has reached end-of-file.',
+        snippet: 'eof()'
+      },
+      Color: {
+        name: 'Color',
+        kind: 'enum',
+        signature: 'enum Color { Default, Red, Green, Yellow, Blue, Magenta, Cyan, White, Gray }',
+        doc: 'Terminal text color enum for io.print, io.println, io.eprint, and io.eprintln.'
       },
       flush: {
         name: 'flush',

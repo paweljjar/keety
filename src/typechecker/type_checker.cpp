@@ -1597,6 +1597,14 @@ TypePtr TypeChecker::checkIoMemberCall(const ast::MemberExpr* member, const ast:
     const std::string& mName = member->getMemberName();
 
     if (mName == "print" || mName == "println" || mName == "eprint" || mName == "eprintln") {
+        auto printableType = Type::unionOf({
+            Type::stringType(),
+            Type::intType(),
+            Type::floatType(),
+            Type::boolType(),
+            Type::charType(),
+            Type::nullType()
+        });
         for (size_t i = 0; i < call->getArgs().size(); ++i) {
             const auto& arg = call->getArgs()[i];
             if (arg.value) {
@@ -1609,15 +1617,18 @@ TypePtr TypeChecker::checkIoMemberCall(const ast::MemberExpr* member, const ast:
                             arg.value->getSpan().start).withLabel(arg.value->getSpan(), "void argument"));
                     }
                     hasErrors_ = true;
-                }
-                if (isIoColorType(aType) && i != call->getArgs().size() - 1) {
-                    if (emitter_) {
-                        emitter_->report(diag::Diagnostic::makeError(
-                            diag::ErrorCode::TypeMismatch,
-                            "io.Color may only appear as the trailing argument of io." + mName,
-                            arg.value->getSpan().start).withLabel(arg.value->getSpan(), "color not in trailing position"));
+                } else if (isIoColorType(aType)) {
+                    if (i != call->getArgs().size() - 1) {
+                        if (emitter_) {
+                            emitter_->report(diag::Diagnostic::makeError(
+                                diag::ErrorCode::TypeMismatch,
+                                "io.Color may only appear as the trailing argument of io." + mName,
+                                arg.value->getSpan().start).withLabel(arg.value->getSpan(), "color not in trailing position"));
+                        }
+                        hasErrors_ = true;
                     }
-                    hasErrors_ = true;
+                } else if (aType && !aType->isUnknown() && !aType->isAssignableTo(*printableType)) {
+                    reportTypeMismatch(printableType, aType, arg.value->getSpan(), "io." + mName + " argument");
                 }
             }
         }
@@ -1738,6 +1749,14 @@ TypePtr TypeChecker::checkIoDirectCall(const ast::IdentExpr* callee, const ast::
     const std::string& name = callee->getName();
 
     if (name == "print" || name == "println" || name == "eprint" || name == "eprintln") {
+        auto printableType = Type::unionOf({
+            Type::stringType(),
+            Type::intType(),
+            Type::floatType(),
+            Type::boolType(),
+            Type::charType(),
+            Type::nullType()
+        });
         for (size_t i = 0; i < call->getArgs().size(); ++i) {
             const auto& arg = call->getArgs()[i];
             if (arg.value) {
@@ -1750,15 +1769,18 @@ TypePtr TypeChecker::checkIoDirectCall(const ast::IdentExpr* callee, const ast::
                             arg.value->getSpan().start).withLabel(arg.value->getSpan(), "void argument"));
                     }
                     hasErrors_ = true;
-                }
-                if (isIoColorType(aType) && i != call->getArgs().size() - 1) {
-                    if (emitter_) {
-                        emitter_->report(diag::Diagnostic::makeError(
-                            diag::ErrorCode::TypeMismatch,
-                            "io.Color may only appear as the trailing argument of " + name,
-                            arg.value->getSpan().start).withLabel(arg.value->getSpan(), "color not in trailing position"));
+                } else if (isIoColorType(aType)) {
+                    if (i != call->getArgs().size() - 1) {
+                        if (emitter_) {
+                            emitter_->report(diag::Diagnostic::makeError(
+                                diag::ErrorCode::TypeMismatch,
+                                "io.Color may only appear as the trailing argument of " + name,
+                                arg.value->getSpan().start).withLabel(arg.value->getSpan(), "color not in trailing position"));
+                        }
+                        hasErrors_ = true;
                     }
-                    hasErrors_ = true;
+                } else if (aType && !aType->isUnknown() && !aType->isAssignableTo(*printableType)) {
+                    reportTypeMismatch(printableType, aType, arg.value->getSpan(), name + " argument");
                 }
             }
         }
@@ -7004,8 +7026,23 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 if (member->getMemberName() == "input") {
                     return Type::function({Type::stringType()}, Type::stringType(), false);
                 }
-                if (member->getMemberName() == "print" || member->getMemberName() == "println" || member->getMemberName() == "flush") {
+                if (member->getMemberName() == "print" || member->getMemberName() == "println" ||
+                    member->getMemberName() == "eprint" || member->getMemberName() == "eprintln") {
+                    auto printableType = Type::unionOf({
+                        Type::stringType(),
+                        Type::intType(),
+                        Type::floatType(),
+                        Type::boolType(),
+                        Type::charType(),
+                        Type::nullType()
+                    });
+                    return Type::function({printableType}, Type::voidType(), false);
+                }
+                if (member->getMemberName() == "flush") {
                     return Type::function({}, Type::voidType(), false);
+                }
+                if (member->getMemberName() == "eof") {
+                    return Type::function({}, Type::boolType(), false);
                 }
                 if (emitter_) {
                     auto d = diag::Diagnostic::makeError(

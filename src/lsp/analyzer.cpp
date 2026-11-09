@@ -222,14 +222,25 @@ struct StdlibDoc {
 
 std::optional<StdlibDoc> getStdlibMemberDoc(const std::string& name) {
     static const std::unordered_map<std::string, StdlibDoc> docs = {
-        {"println", {"fn println(...args: any): void", "Prints arguments to standard output followed by a newline."}},
-        {"print", {"fn print(...args: any): void", "Prints arguments to standard output without a trailing newline."}},
-        {"eprintln", {"fn eprintln(...args: any): void", "Prints arguments to standard error followed by a newline."}},
-        {"eprint", {"fn eprint(...args: any): void", "Prints arguments to standard error without a trailing newline."}},
+        {"println", {"fn println(...args: string | int | float | bool | char | null, color?: io.Color): void", "Prints arguments to standard output followed by a newline."}},
+        {"print", {"fn print(...args: string | int | float | bool | char | null, color?: io.Color): void", "Prints arguments to standard output without a trailing newline."}},
+        {"eprintln", {"fn eprintln(...args: string | int | float | bool | char | null, color?: io.Color): void", "Prints arguments to standard error followed by a newline."}},
+        {"eprint", {"fn eprint(...args: string | int | float | bool | char | null, color?: io.Color): void", "Prints arguments to standard error without a trailing newline."}},
         {"readln", {"fn readln(): string", "Reads a line of text from standard input (without newline)."}},
-        {"readLine", {"fn readLine(): string", "Reads a line of text from standard input (without newline)."}},
-        {"input", {"fn input(prompt: string): string", "Displays a prompt and reads a line of user input."}},
+        {"readLine", {"fn readLine(): string | null", "Reads a line of text from standard input (without newline), or null on EOF."}},
+        {"input", {"fn input(prompt?: string): string", "Displays an optional prompt and reads a line of user input."}},
+        {"eof", {"fn eof(): bool", "Returns true if standard input has reached end-of-file (EOF)."}},
         {"flush", {"fn flush(): void", "Flushes standard output buffer."}},
+        {"red", {"fn red(s: string): string", "Formats string with ANSI red color."}},
+        {"green", {"fn green(s: string): string", "Formats string with ANSI green color."}},
+        {"yellow", {"fn yellow(s: string): string", "Formats string with ANSI yellow color."}},
+        {"blue", {"fn blue(s: string): string", "Formats string with ANSI blue color."}},
+        {"magenta", {"fn magenta(s: string): string", "Formats string with ANSI magenta color."}},
+        {"cyan", {"fn cyan(s: string): string", "Formats string with ANSI cyan color."}},
+        {"white", {"fn white(s: string): string", "Formats string with ANSI white color."}},
+        {"gray", {"fn gray(s: string): string", "Formats string with ANSI gray color."}},
+        {"bold", {"fn bold(s: string): string", "Formats string with ANSI bold style."}},
+        {"Color", {"enum io.Color", "Terminal output color enum (Default, Red, Green, Yellow, Blue, Magenta, Cyan, White, Gray)."}},
         {"readFile", {"fn readFile(path: string): string", "Reads the entire contents of a file as a string."}},
         {"writeFile", {"fn writeFile(path: string, content: string): void", "Writes string content to a file."}},
         {"appendFile", {"fn appendFile(path: string, content: string): void", "Appends string content to a file."}},
@@ -1040,12 +1051,6 @@ std::optional<Hover> Analyzer::getHover(
         return Hover{MarkupContent{"markdown", "```keet\nimport crypto;\n```\n**Standard Library Module: `crypto`**\n\nCryptographic hashing, HMAC, symmetric encryption (AEAD), CSPRNG, encodings, and symbology (QR & barcodes)."}, tokRange};
     }
 
-    // 3b. Standard Library Built-in Functions/Constants
-    if (auto stdDoc = getStdlibMemberDoc(ident); stdDoc.has_value()) {
-        std::string content = "```keet\n" + stdDoc->signature + "\n```\n" + stdDoc->doc;
-        return Hover{MarkupContent{"markdown", std::move(content)}, tokRange};
-    }
-
     // Parse AST to query user declarations
     diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
     lexer::Lexer pLexer(fileId, doc.text());
@@ -1199,6 +1204,12 @@ std::optional<Hover> Analyzer::getHover(
                 }
             }
         }
+    }
+
+    // 3e. Standard Library Built-in Functions/Constants
+    if (auto stdDoc = getStdlibMemberDoc(ident); stdDoc.has_value()) {
+        std::string content = "```keet\n" + stdDoc->signature + "\n```\n" + stdDoc->doc;
+        return Hover{MarkupContent{"markdown", std::move(content)}, tokRange};
     }
 
     return std::nullopt;

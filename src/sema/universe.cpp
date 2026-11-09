@@ -142,22 +142,12 @@ void populateIoModuleScope(Scope& ioScope) {
     makeFn("bold");
     makeFn("flush");
 
-    // io.Color enum
+    // io.Color enum (variants accessed strictly via io.Color.*)
     auto colorEnum = std::make_shared<Symbol>("Color", SymbolKind::Enum, span);
     colorEnum->setExported(true);
     colorEnum->setIsType(true);
     colorEnum->setConst(true);
     ioScope.define(colorEnum, false);
-
-    const std::vector<const char*> colorMembers = {
-        "Default", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White", "Gray"
-    };
-    for (const char* memberName : colorMembers) {
-        auto valSym = std::make_shared<Symbol>(memberName, SymbolKind::EnumValue, span);
-        valSym->setExported(true);
-        valSym->setConst(true);
-        ioScope.define(valSym, false);
-    }
 }
 
 void populateFsModuleScope(Scope& fsScope) {
