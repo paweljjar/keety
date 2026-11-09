@@ -90,3 +90,26 @@ TEST_CASE("KML Developer Tooling - Linter Hygiene Rules", "[kml][lint]") {
     CHECK(foundColonColon);
     CHECK(foundBadDirective);
 }
+
+TEST_CASE("KML Developer Tooling - LSP Analyzer Diagnostics on Valid KML", "[kml][lsp]") {
+    lsp::Analyzer analyzer;
+    lsp::Document doc("file:///project/Counter.kml", "kml", 1, R"kml(<script>
+    let mut count = $state(0);
+    let doubleCount = $derived(count * 2);
+
+    fn increment(): void {
+        count = count + 1;
+    }
+</script>
+
+<template>
+    <box class="counter-card">
+        <text class="count-display">Current Count: {count} (Doubled: {doubleCount})</text>
+        <button @click={increment}><text>+ Increment</text></button>
+    </box>
+</template>
+)kml");
+
+    auto diags = analyzer.analyze(doc);
+    CHECK(diags.empty());
+}

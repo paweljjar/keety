@@ -8,6 +8,7 @@
 #include <keety/diag/source_manager.hpp>
 #include <keety/driver/project_root.hpp>
 #include <keety/ir/ast_lowerer.hpp>
+#include <keety/kml/kml_parser.hpp>
 #include <keety/lexer/lexer.hpp>
 #include <keety/parser/parser.hpp>
 #include <keety/resolver/module_path_resolver.hpp>
@@ -620,13 +621,50 @@ std::vector<Diagnostic> Analyzer::analyze(const Document& doc) {
     std::string pathStr = uriToPath(doc.uri());
     diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
 
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+
+    if (fsPath.extension() == ".kml" || doc.languageId() == "kml") {
+        kml::KmlParser kmlParser(doc.text(), fileId, &sm, &emitter);
+        (void)kmlParser.parseDocument(moduleName);
+
+        if (emitter.hasErrors()) {
+            collectLspDiagnostics(doc, emitter.getDiagnostics(), lspDiagnostics);
+            return lspDiagnostics;
+        }
+
+        auto universe = std::make_shared<sema::Scope>(sema::ScopeKind::Universe);
+        sema::registerUniverseSymbols(*universe);
+        parser::ModuleAST emptyAst;
+        emptyAst.fileId = fileId;
+        emptyAst.moduleName = moduleName;
+        std::vector<lexer::Comment> comments;
+
+        lint::LintConfig lintConfig = lint::LintConfig::discover(fsPath.parent_path());
+        lint::LintEngine lintEngine(lintConfig);
+        lintEngine.registerDefaultRules();
+
+        auto lintDiags = lintEngine.lintModule(emptyAst, comments, sm, doc.text(), pathStr, universe.get());
+        for (const auto& ld : lintDiags) {
+            Diagnostic lspDiag;
+            lspDiag.severity = convertSeverity(ld.severity);
+            lspDiag.code = ld.ruleCode;
+            lspDiag.source = "keetlint";
+            lspDiag.message = ld.message;
+            lspDiag.range = spanToRange(doc, ld.span);
+            for (const auto& f : ld.footers) {
+                lspDiag.message += "\n" + f.message;
+            }
+            lspDiagnostics.push_back(std::move(lspDiag));
+        }
+        return lspDiagnostics;
+    }
+
     // 1. Lexical & Syntactic Analysis (Parser)
     lexer::Lexer lexer(fileId, doc.text());
     lexer.setCaptureComments(true);
     parser::Parser parser(lexer, &emitter);
 
-    std::filesystem::path fsPath(pathStr);
-    std::string moduleName = fsPath.stem().string();
     auto ast = parser.parseModule(moduleName);
 
     if (emitter.hasErrors()) {

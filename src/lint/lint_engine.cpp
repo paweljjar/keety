@@ -58,6 +58,14 @@ std::vector<LintDiagnostic> LintEngine::lintSource(
     diag::SourceManager sm;
     auto fileId = sm.addBuffer(std::string(filePath), std::string(source));
 
+    if (filePath.ends_with(".kml")) {
+        parser::ModuleAST emptyAst;
+        emptyAst.fileId = fileId;
+        emptyAst.moduleName = std::string(filePath);
+        std::vector<lexer::Comment> comments;
+        return lintModule(emptyAst, comments, sm, source, filePath, globalScope);
+    }
+
     // Lex with comment capture enabled
     lexer::Lexer lexer(fileId, source);
     lexer.setCaptureComments(true);

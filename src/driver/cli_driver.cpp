@@ -4,6 +4,7 @@
 #include <keety/emitter/cpp_emitter.hpp>
 #include <keety/emitter/header_emitter.hpp>
 #include <keety/ir/ast_lowerer.hpp>
+#include <keety/kml/kml_parser.hpp>
 #include <keety/lexer/lexer.hpp>
 #include <keety/parser/parser.hpp>
 #include <keety/resolver/cycle_detector.hpp>
@@ -2528,12 +2529,22 @@ int CliDriver::execute_lint(const CliOptions& options, std::ostream& out, std::o
         }
 
         auto fileId = sm.addBuffer(file_path.string(), source);
-        lexer::Lexer lexer(fileId, source);
-        lexer.setCaptureComments(true);
         diag::DiagnosticEmitter parseEmitter(sm, options.color_mode);
-        parser::Parser parser(lexer, &parseEmitter);
-        auto moduleAst = parser.parseModule(file_path.string());
-        auto comments = lexer.getCapturedComments();
+        parser::ModuleAST moduleAst;
+        std::vector<lexer::Comment> comments;
+
+        if (file_path.extension() == ".kml") {
+            kml::KmlParser kmlParser(source, fileId, &sm, &parseEmitter);
+            (void)kmlParser.parseDocument(file_path.stem().string());
+            moduleAst.fileId = fileId;
+            moduleAst.moduleName = file_path.string();
+        } else {
+            lexer::Lexer lexer(fileId, source);
+            lexer.setCaptureComments(true);
+            parser::Parser parser(lexer, &parseEmitter);
+            moduleAst = parser.parseModule(file_path.string());
+            comments = lexer.getCapturedComments();
+        }
 
         if (parseEmitter.hasErrors()) {
             for (const auto& d : parseEmitter.getDiagnostics()) {

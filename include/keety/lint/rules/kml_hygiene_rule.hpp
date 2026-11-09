@@ -30,6 +30,34 @@ public:
         std::vector<LintDiagnostic> diagnostics;
         std::string_view src = ctx.sourceCode;
         if (src.empty()) return diagnostics;
+        diag::FileId fid = (ctx.moduleAst.fileId != diag::INVALID_FILE_ID) ? ctx.moduleAst.fileId : 1;
+
+        auto fillSpan = [&](diag::SourceSpan& span, size_t startOff, size_t endOff) {
+            span.start.fileId = fid;
+            span.end.fileId = fid;
+            span.start.offset = static_cast<uint32_t>(startOff);
+            span.end.offset = static_cast<uint32_t>(endOff);
+            span.start.line = 1;
+            span.start.column = 1;
+            for (size_t i = 0; i < startOff && i < src.size(); ++i) {
+                if (src[i] == '\n') {
+                    span.start.line++;
+                    span.start.column = 1;
+                } else {
+                    span.start.column++;
+                }
+            }
+            span.end.line = span.start.line;
+            span.end.column = span.start.column;
+            for (size_t i = startOff; i < endOff && i < src.size(); ++i) {
+                if (src[i] == '\n') {
+                    span.end.line++;
+                    span.end.column = 1;
+                } else {
+                    span.end.column++;
+                }
+            }
+        };
 
         // 1. Check for unkeyed {#for} blocks
         size_t forPos = 0;
@@ -44,16 +72,7 @@ public:
                     d.ruleCode = getCode();
                     d.severity = getDefaultSeverity();
                     d.message = "Unkeyed `{#for}` block over dynamic collection; provide a key expression (e.g. `{#for (item in items; key=item.id)}`) to preserve DOM identity";
-                    d.span.start.offset = static_cast<uint32_t>(forPos);
-                    d.span.end.offset = static_cast<uint32_t>(endBlock + 1);
-                    d.span.start.line = 1;
-                    d.span.end.line = 1;
-                    for (size_t i = 0; i < forPos; ++i) {
-                        if (src[i] == '\n') {
-                            d.span.start.line++;
-                            d.span.end.line++;
-                        }
-                    }
+                    fillSpan(d.span, forPos, endBlock + 1);
                     diagnostics.push_back(std::move(d));
                 }
             }
@@ -68,16 +87,7 @@ public:
             d.ruleCode = "L031";
             d.severity = diag::DiagnosticSeverity::Error;
             d.message = "Forbidden C++ `::` syntax used; KeetScript uses canonical dot `.` syntax for module namespaces and enum members";
-            d.span.start.offset = static_cast<uint32_t>(colonColon);
-            d.span.end.offset = static_cast<uint32_t>(colonColon + 2);
-            d.span.start.line = 1;
-            d.span.end.line = 1;
-            for (size_t i = 0; i < colonColon; ++i) {
-                if (src[i] == '\n') {
-                    d.span.start.line++;
-                    d.span.end.line++;
-                }
-            }
+            fillSpan(d.span, colonColon, colonColon + 2);
             diagnostics.push_back(std::move(d));
             colonColon += 2;
         }
@@ -90,16 +100,7 @@ public:
             d.ruleCode = "L032";
             d.severity = diag::DiagnosticSeverity::Error;
             d.message = "Invalid directive syntax ':click='; use '@click=' for event listeners or '$bind=' for two-way bindings";
-            d.span.start.offset = static_cast<uint32_t>(badDir);
-            d.span.end.offset = static_cast<uint32_t>(badDir + 7);
-            d.span.start.line = 1;
-            d.span.end.line = 1;
-            for (size_t i = 0; i < badDir; ++i) {
-                if (src[i] == '\n') {
-                    d.span.start.line++;
-                    d.span.end.line++;
-                }
-            }
+            fillSpan(d.span, badDir, badDir + 7);
             diagnostics.push_back(std::move(d));
             badDir += 7;
         }
