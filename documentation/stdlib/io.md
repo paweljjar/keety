@@ -6,22 +6,25 @@ The `io` module provides type-safe console output, line-oriented standard input 
 
 ## 1. Importing the Module
 
-The `io` module can be imported using either a qualified module import or selective member imports:
+The `io` module can be imported using any of the four standard import forms (as well as module aliases):
 
 ```keet
-// Qualified import
+// 1. Unquoted module import
 import io;
 
-fn main(): void {
-    io.println("Hello, KeetScript!");
-}
+// 2. Quoted module import
+import "io";
+
+// 3. Unquoted selective import
+from io import print, println, green, Color;
+
+// 4. Quoted selective import
+from "io" import print, println, green, Color;
 ```
 
 ```keet
-// Selective import
-from "io" import println, green, Color;
-
 fn main(): void {
+    io.println("Hello, KeetScript!");
     println("Build status:", green("SUCCESS"), Color.Green);
 }
 ```

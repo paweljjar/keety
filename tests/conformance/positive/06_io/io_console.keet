@@ -5,7 +5,8 @@ fn main(): int {
     io.print("Primitives: ", 123, " ", 45.67, " ", true, " ", 'K', "\n");
     io.println("Line with trailing color", io.Color.Green);
     let sample_arr: array<int> = [10, 20, 30];
-    io.println("Array output: ", sample_arr);
+    let sample_union: int | string = "Array element: ";
+    io.println(sample_union, sample_arr[0]);
 
     io.eprint("Diagnostic notice: stderr active\n");
     io.eprintln("Diagnostic warning on stderr", io.Color.Yellow);

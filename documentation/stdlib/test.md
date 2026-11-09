@@ -6,26 +6,30 @@ The `test` module provides a comprehensive, built-in unit testing framework, ass
 
 ## 1. Importing the Module
 
-The `test` module can be imported using qualified module syntax or selective member imports:
+The `test` module can be imported using any of the four standard import forms (as well as module aliases):
 
 ```keet
-// Qualified import
+// 1. Unquoted module import
 import test;
 
+// 2. Quoted module import
+import "test";
+
+// 3. Unquoted selective import
+from test import suite, case, assertEq, assertTrue, assertZonks;
+
+// 4. Quoted selective import
+from "test" import suite, case, assertEq, assertTrue, assertZonks;
+```
+
+```keet
 fn main(): void {
     test.suite("Math Suite", fn(): void {
         test.case("addition", fn(): void {
             test.assertEq(2 + 2, 4);
         });
     });
-}
-```
 
-```keet
-// Selective import
-from "test" import suite, case, assertEq, assertTrue, assertZonks;
-
-fn main(): void {
     suite("Validation", fn(): void {
         case("positive balance", fn(): void {
             assertTrue(100 > 0);

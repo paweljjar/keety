@@ -1597,6 +1597,14 @@ TypePtr TypeChecker::checkIoMemberCall(const ast::MemberExpr* member, const ast:
     const std::string& mName = member->getMemberName();
 
     if (mName == "print" || mName == "println" || mName == "eprint" || mName == "eprintln") {
+        auto printableType = Type::unionOf({
+            Type::stringType(),
+            Type::intType(),
+            Type::floatType(),
+            Type::boolType(),
+            Type::charType(),
+            Type::nullType()
+        });
         for (size_t i = 0; i < call->getArgs().size(); ++i) {
             const auto& arg = call->getArgs()[i];
             if (arg.value) {
@@ -1609,15 +1617,18 @@ TypePtr TypeChecker::checkIoMemberCall(const ast::MemberExpr* member, const ast:
                             arg.value->getSpan().start).withLabel(arg.value->getSpan(), "void argument"));
                     }
                     hasErrors_ = true;
-                }
-                if (isIoColorType(aType) && i != call->getArgs().size() - 1) {
-                    if (emitter_) {
-                        emitter_->report(diag::Diagnostic::makeError(
-                            diag::ErrorCode::TypeMismatch,
-                            "io.Color may only appear as the trailing argument of io." + mName,
-                            arg.value->getSpan().start).withLabel(arg.value->getSpan(), "color not in trailing position"));
+                } else if (isIoColorType(aType)) {
+                    if (i != call->getArgs().size() - 1) {
+                        if (emitter_) {
+                            emitter_->report(diag::Diagnostic::makeError(
+                                diag::ErrorCode::TypeMismatch,
+                                "io.Color may only appear as the trailing argument of io." + mName,
+                                arg.value->getSpan().start).withLabel(arg.value->getSpan(), "color not in trailing position"));
+                        }
+                        hasErrors_ = true;
                     }
-                    hasErrors_ = true;
+                } else if (aType && !aType->isUnknown() && !aType->isAssignableTo(*printableType)) {
+                    reportTypeMismatch(printableType, aType, arg.value->getSpan(), "io." + mName + " argument");
                 }
             }
         }
@@ -1738,6 +1749,14 @@ TypePtr TypeChecker::checkIoDirectCall(const ast::IdentExpr* callee, const ast::
     const std::string& name = callee->getName();
 
     if (name == "print" || name == "println" || name == "eprint" || name == "eprintln") {
+        auto printableType = Type::unionOf({
+            Type::stringType(),
+            Type::intType(),
+            Type::floatType(),
+            Type::boolType(),
+            Type::charType(),
+            Type::nullType()
+        });
         for (size_t i = 0; i < call->getArgs().size(); ++i) {
             const auto& arg = call->getArgs()[i];
             if (arg.value) {
@@ -1750,15 +1769,18 @@ TypePtr TypeChecker::checkIoDirectCall(const ast::IdentExpr* callee, const ast::
                             arg.value->getSpan().start).withLabel(arg.value->getSpan(), "void argument"));
                     }
                     hasErrors_ = true;
-                }
-                if (isIoColorType(aType) && i != call->getArgs().size() - 1) {
-                    if (emitter_) {
-                        emitter_->report(diag::Diagnostic::makeError(
-                            diag::ErrorCode::TypeMismatch,
-                            "io.Color may only appear as the trailing argument of " + name,
-                            arg.value->getSpan().start).withLabel(arg.value->getSpan(), "color not in trailing position"));
+                } else if (isIoColorType(aType)) {
+                    if (i != call->getArgs().size() - 1) {
+                        if (emitter_) {
+                            emitter_->report(diag::Diagnostic::makeError(
+                                diag::ErrorCode::TypeMismatch,
+                                "io.Color may only appear as the trailing argument of " + name,
+                                arg.value->getSpan().start).withLabel(arg.value->getSpan(), "color not in trailing position"));
+                        }
+                        hasErrors_ = true;
                     }
-                    hasErrors_ = true;
+                } else if (aType && !aType->isUnknown() && !aType->isAssignableTo(*printableType)) {
+                    reportTypeMismatch(printableType, aType, arg.value->getSpan(), name + " argument");
                 }
             }
         }
@@ -4792,7 +4814,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
         if (!decl) continue;
         if (const auto* importDecl = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
             const std::string& modPath = importDecl->getModulePath();
-            if (modPath == "io" || modPath == "std.io" || modPath == "keet.io") {
+            if (modPath == "io") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "io";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -4829,7 +4851,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
-            } else if (modPath == "fs" || modPath == "std.fs" || modPath == "keet.fs") {
+            } else if (modPath == "fs") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "fs";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -4866,7 +4888,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
-            } else if (modPath == "sys" || modPath == "std.sys" || modPath == "keet.sys") {
+            } else if (modPath == "sys") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "sys";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -4903,7 +4925,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
-            } else if (modPath == "math" || modPath == "std.math" || modPath == "keet.math") {
+            } else if (modPath == "math") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "math";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -4943,7 +4965,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
-            } else if (modPath == "time" || modPath == "std.time" || modPath == "keet.time") {
+            } else if (modPath == "time") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "time";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -4983,7 +5005,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
-            } else if (modPath == "json" || modPath == "std.json" || modPath == "keet.json") {
+            } else if (modPath == "json") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "json";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -5023,7 +5045,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
-            } else if (modPath == "net" || modPath == "std.net" || modPath == "keet.net") {
+            } else if (modPath == "net") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "net";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -5063,7 +5085,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
-            } else if (modPath == "test" || modPath == "std.test" || modPath == "keet.test") {
+            } else if (modPath == "test") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "test";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -5103,7 +5125,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
-            } else if (modPath == "crypto" || modPath == "std.crypto" || modPath == "keet.crypto" || modPath == "crypto.hash") {
+            } else if (modPath == "crypto" || modPath == "crypto.hash") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "crypto";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -5143,8 +5165,7 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                         }
                     }
                 }
-            } else if (modPath == "net.http" || modPath == "std.net.http" || modPath == "keet.net.http" ||
-                       modPath == "http" || modPath == "std.http" || modPath == "keet.http") {
+            } else if (modPath == "net.http" || modPath == "http") {
                 if (importDecl->getSymbols().empty()) {
                     std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "http";
                     if (!targetScope->lookupCurrent(boundName)) {
@@ -5178,6 +5199,45 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
                                     "symbol '" + symItem.originalName + "' is not exported by module 'http'",
                                     symItem.span.start).withLabel(symItem.span, "symbol not exported");
                                 attachMemberSuggestions(d, symItem.originalName, kHttpCandidates);
+                                emitter_->report(d);
+                            }
+                            hasErrors_ = true;
+                        }
+                    }
+                }
+            } else if (modPath == "ui") {
+                if (importDecl->getSymbols().empty()) {
+                    std::string boundName = !importDecl->getModuleAlias().empty() ? importDecl->getModuleAlias() : "ui";
+                    if (!targetScope->lookupCurrent(boundName)) {
+                        auto modSym = std::make_shared<sema::Symbol>(boundName, sema::SymbolKind::Module, importDecl->getSpan());
+                        modSym->setExported(importDecl->isReExported());
+                        auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, modSym, emitter_);
+                        if (!res.success) hasErrors_ = true;
+                    }
+                } else {
+                    auto uiScope = sema::createStdlibModuleScope("ui");
+                    for (const auto& symItem : importDecl->getSymbols()) {
+                        auto exportedSym = uiScope->lookupCurrent(symItem.originalName);
+                        if (exportedSym) {
+                            std::string importAsName = symItem.getEffectiveName();
+                            if (!targetScope->lookupCurrent(importAsName)) {
+                                auto importedSym = std::make_shared<sema::Symbol>(
+                                    importAsName, exportedSym->getKind(), symItem.span
+                                );
+                                importedSym->setExported(importDecl->isReExported());
+                                importedSym->setIsType(exportedSym->isType());
+                                if (exportedSym->isConstant()) {
+                                    importedSym->setConst(true);
+                                }
+                                auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, importedSym, emitter_);
+                                if (!res.success) hasErrors_ = true;
+                            }
+                        } else {
+                            if (emitter_) {
+                                auto d = diag::Diagnostic::makeError(
+                                    diag::ErrorCode::SymbolNotExported,
+                                    "symbol '" + symItem.originalName + "' is not exported by module 'ui'",
+                                    symItem.span.start).withLabel(symItem.span, "symbol not exported");
                                 emitter_->report(d);
                             }
                             hasErrors_ = true;
@@ -6284,6 +6344,12 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     }
                     return checkHttpMemberCall(member, call, scope);
                 }
+                if (objIdent->getName() == "ui" || (sym && sym->isModule() && sym->getName() == "ui")) {
+                    for (const auto& arg : call->getArgs()) {
+                        if (arg.value) inferType(*arg.value, scope);
+                    }
+                    return Type::unknownType();
+                }
             }
 
             if (const auto* nestedMember = dynamic_cast<const ast::MemberExpr*>(member->getObject())) {
@@ -6407,6 +6473,7 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     if (m == "use" || m == "get" || m == "post" || m == "put" ||
                         m == "delete" || m == "del" || m == "patch" || m == "head" ||
                         m == "options" || m == "ws" || m == "mount" || m == "route" ||
+                        m == "serveUi" ||
                         m == "reusePort" || m == "setReusePort") {
                         return objType;
                     }
@@ -6959,8 +7026,23 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 if (member->getMemberName() == "input") {
                     return Type::function({Type::stringType()}, Type::stringType(), false);
                 }
-                if (member->getMemberName() == "print" || member->getMemberName() == "println" || member->getMemberName() == "flush") {
+                if (member->getMemberName() == "print" || member->getMemberName() == "println" ||
+                    member->getMemberName() == "eprint" || member->getMemberName() == "eprintln") {
+                    auto printableType = Type::unionOf({
+                        Type::stringType(),
+                        Type::intType(),
+                        Type::floatType(),
+                        Type::boolType(),
+                        Type::charType(),
+                        Type::nullType()
+                    });
+                    return Type::function({printableType}, Type::voidType(), false);
+                }
+                if (member->getMemberName() == "flush") {
                     return Type::function({}, Type::voidType(), false);
+                }
+                if (member->getMemberName() == "eof") {
+                    return Type::function({}, Type::boolType(), false);
                 }
                 if (emitter_) {
                     auto d = diag::Diagnostic::makeError(

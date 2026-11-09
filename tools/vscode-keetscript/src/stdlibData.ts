@@ -20,28 +20,28 @@ export const STDLIB_MODULES: Record<string, StdlibModule> = {
       print: {
         name: 'print',
         kind: 'function',
-        signature: 'fn print(...args: any): void',
+        signature: 'fn print(...args: string | int | float | bool | char | null, color?: io.Color): void',
         doc: 'Prints arguments to standard output without a trailing newline.',
         snippet: 'print(${1:args})'
       },
       println: {
         name: 'println',
         kind: 'function',
-        signature: 'fn println(...args: any): void',
+        signature: 'fn println(...args: string | int | float | bool | char | null, color?: io.Color): void',
         doc: 'Prints arguments to standard output followed by a newline.',
         snippet: 'println(${1:args})'
       },
       eprint: {
         name: 'eprint',
         kind: 'function',
-        signature: 'fn eprint(...args: any): void',
+        signature: 'fn eprint(...args: string | int | float | bool | char | null, color?: io.Color): void',
         doc: 'Prints arguments to standard error without a trailing newline.',
         snippet: 'eprint(${1:args})'
       },
       eprintln: {
         name: 'eprintln',
         kind: 'function',
-        signature: 'fn eprintln(...args: any): void',
+        signature: 'fn eprintln(...args: string | int | float | bool | char | null, color?: io.Color): void',
         doc: 'Prints arguments to standard error followed by a newline.',
         snippet: 'eprintln(${1:args})'
       },
@@ -55,16 +55,29 @@ export const STDLIB_MODULES: Record<string, StdlibModule> = {
       readLine: {
         name: 'readLine',
         kind: 'function',
-        signature: 'fn readLine(): string',
-        doc: 'Reads a line of text from standard input (without newline).',
+        signature: 'fn readLine(prompt?: string): string',
+        doc: 'Reads a line of text from standard input (without newline), with an optional prompt.',
         snippet: 'readLine()'
       },
       input: {
         name: 'input',
         kind: 'function',
-        signature: 'fn input(prompt: string): string',
-        doc: 'Displays a prompt and reads a line of user input.',
+        signature: 'fn input(prompt?: string): string',
+        doc: 'Displays an optional prompt and reads a line of user input.',
         snippet: 'input("${1:prompt: }")'
+      },
+      eof: {
+        name: 'eof',
+        kind: 'function',
+        signature: 'fn eof(): bool',
+        doc: 'Returns true if standard input has reached end-of-file.',
+        snippet: 'eof()'
+      },
+      Color: {
+        name: 'Color',
+        kind: 'enum',
+        signature: 'enum Color { Default, Red, Green, Yellow, Blue, Magenta, Cyan, White, Gray }',
+        doc: 'Terminal text color enum for io.print, io.println, io.eprint, and io.eprintln.'
       },
       flush: {
         name: 'flush',
@@ -1263,6 +1276,362 @@ export const STDLIB_MODULES: Record<string, StdlibModule> = {
         snippet: 'udpClose(${1:handle})'
       }
     }
+  },
+  http: {
+    name: 'http',
+    doc: 'High-performance HTTP/1.1, WebSocket, and Reactive UI (.kml) LiveView server.',
+    members: {
+      app: {
+        name: 'app',
+        kind: 'function',
+        signature: 'fn app(reusePort?: bool): Server',
+        doc: 'Creates a new Express-style HTTP server application.',
+        snippet: 'app()'
+      },
+      createServer: {
+        name: 'createServer',
+        kind: 'function',
+        signature: 'fn createServer(reusePort?: bool): Server',
+        doc: 'Creates a new HTTP server instance.',
+        snippet: 'createServer()'
+      },
+      cors: {
+        name: 'cors',
+        kind: 'function',
+        signature: 'fn cors(): Middleware',
+        doc: 'Enables Cross-Origin Resource Sharing (CORS) headers.',
+        snippet: 'cors()'
+      },
+      logger: {
+        name: 'logger',
+        kind: 'function',
+        signature: 'fn logger(): Middleware',
+        doc: 'Logs incoming HTTP requests, status codes, and response latency.',
+        snippet: 'logger()'
+      },
+      jsonParser: {
+        name: 'jsonParser',
+        kind: 'function',
+        signature: 'fn jsonParser(): Middleware',
+        doc: 'Parses incoming JSON request bodies.',
+        snippet: 'jsonParser()'
+      },
+      staticDir: {
+        name: 'staticDir',
+        kind: 'function',
+        signature: 'fn staticDir(dir: string): Middleware',
+        doc: 'Serves static files from disk with ETag and MIME support.',
+        snippet: 'staticDir("${1:./public}")'
+      },
+      recover: {
+        name: 'recover',
+        kind: 'function',
+        signature: 'fn recover(): Middleware',
+        doc: 'Recovers from unhandled errors and responds with HTTP 500.',
+        snippet: 'recover()'
+      }
+    }
+  },
+  crypto: {
+    name: 'crypto',
+    doc: 'Cryptographic hashes, HMAC, AEAD ciphers, CSPRNG, Base64/Hex, and QR/Code128 symbology.',
+    members: {
+      toHex: {
+        name: 'toHex',
+        kind: 'function',
+        signature: 'fn toHex(data: string): string',
+        doc: 'Encodes binary data or text into lowercase hexadecimal characters.',
+        snippet: 'toHex(${1:data})'
+      },
+      fromHex: {
+        name: 'fromHex',
+        kind: 'function',
+        signature: 'fn fromHex(hexStr: string): string',
+        doc: 'Decodes a hexadecimal string into raw binary or ASCII string.',
+        snippet: 'fromHex(${1:hexStr})'
+      },
+      toBase64: {
+        name: 'toBase64',
+        kind: 'function',
+        signature: 'fn toBase64(data: string): string',
+        doc: 'Encodes data into standard RFC 4648 Base64.',
+        snippet: 'toBase64(${1:data})'
+      },
+      fromBase64: {
+        name: 'fromBase64',
+        kind: 'function',
+        signature: 'fn fromBase64(b64: string): string',
+        doc: 'Decodes an RFC 4648 Base64 string.',
+        snippet: 'fromBase64(${1:b64})'
+      },
+      toBase64Url: {
+        name: 'toBase64Url',
+        kind: 'function',
+        signature: 'fn toBase64Url(data: string): string',
+        doc: 'Encodes data into URL-safe Base64 without padding.',
+        snippet: 'toBase64Url(${1:data})'
+      },
+      fromBase64Url: {
+        name: 'fromBase64Url',
+        kind: 'function',
+        signature: 'fn fromBase64Url(b64Url: string): string',
+        doc: 'Decodes a URL-safe Base64 string.',
+        snippet: 'fromBase64Url(${1:b64Url})'
+      },
+      randomBytes: {
+        name: 'randomBytes',
+        kind: 'function',
+        signature: 'fn randomBytes(length: int): string',
+        doc: 'Generates cryptographically secure random bytes of the specified length.',
+        snippet: 'randomBytes(${1:32})'
+      },
+      randomHex: {
+        name: 'randomHex',
+        kind: 'function',
+        signature: 'fn randomHex(byteCount: int): string',
+        doc: 'Generates random bytes encoded as lowercase hex.',
+        snippet: 'randomHex(${1:16})'
+      },
+      randomInt: {
+        name: 'randomInt',
+        kind: 'function',
+        signature: 'fn randomInt(min: int, max: int): int',
+        doc: 'Generates a cryptographically secure random integer in [min, max].',
+        snippet: 'randomInt(${1:1}, ${2:100})'
+      },
+      randomUuid: {
+        name: 'randomUuid',
+        kind: 'function',
+        signature: 'fn randomUuid(): string',
+        doc: 'Generates a cryptographically random RFC 4122 UUID v4 string.',
+        snippet: 'randomUuid()'
+      },
+      timingSafeEqual: {
+        name: 'timingSafeEqual',
+        kind: 'function',
+        signature: 'fn timingSafeEqual(a: string, b: string): bool',
+        doc: 'Constant-time comparison of two strings/buffers.',
+        snippet: 'timingSafeEqual(${1:a}, ${2:b})'
+      },
+      sha256: {
+        name: 'sha256',
+        kind: 'function',
+        signature: 'fn sha256(data: string): string',
+        doc: 'Computes the lowercase hex SHA-256 digest of data.',
+        snippet: 'sha256(${1:data})'
+      },
+      sha512: {
+        name: 'sha512',
+        kind: 'function',
+        signature: 'fn sha512(data: string): string',
+        doc: 'Computes the lowercase hex SHA-512 digest of data.',
+        snippet: 'sha512(${1:data})'
+      },
+      sha3_256: {
+        name: 'sha3_256',
+        kind: 'function',
+        signature: 'fn sha3_256(data: string): string',
+        doc: 'Computes the lowercase hex SHA3-256 digest of data.',
+        snippet: 'sha3_256(${1:data})'
+      },
+      sha3_512: {
+        name: 'sha3_512',
+        kind: 'function',
+        signature: 'fn sha3_512(data: string): string',
+        doc: 'Computes the lowercase hex SHA3-512 digest of data.',
+        snippet: 'sha3_512(${1:data})'
+      },
+      blake3: {
+        name: 'blake3',
+        kind: 'function',
+        signature: 'fn blake3(data: string): string',
+        doc: 'Computes the 256-bit BLAKE3 hex digest of data.',
+        snippet: 'blake3(${1:data})'
+      },
+      createHash: {
+        name: 'createHash',
+        kind: 'function',
+        signature: 'fn createHash(algorithm: string): crypto.Hasher',
+        doc: 'Creates an incremental streaming cryptographic hash instance ("sha256", "sha512", "sha3-256", "sha3-512", "blake3").',
+        snippet: 'createHash("${1:sha256}")'
+      },
+      hmacSha256: {
+        name: 'hmacSha256',
+        kind: 'function',
+        signature: 'fn hmacSha256(key: string, data: string): string',
+        doc: 'Computes the lowercase hex HMAC-SHA256 authentication tag.',
+        snippet: 'hmacSha256(${1:key}, ${2:data})'
+      },
+      hmacSha512: {
+        name: 'hmacSha512',
+        kind: 'function',
+        signature: 'fn hmacSha512(key: string, data: string): string',
+        doc: 'Computes the lowercase hex HMAC-SHA512 authentication tag.',
+        snippet: 'hmacSha512(${1:key}, ${2:data})'
+      },
+      createHmac: {
+        name: 'createHmac',
+        kind: 'function',
+        signature: 'fn createHmac(algorithm: string, key: string): crypto.Hmac',
+        doc: 'Creates an incremental streaming HMAC instance ("sha256" or "sha512").',
+        snippet: 'createHmac("${1:sha256}", ${2:key})'
+      },
+      encryptChaCha20Poly1305: {
+        name: 'encryptChaCha20Poly1305',
+        kind: 'function',
+        signature: 'fn encryptChaCha20Poly1305(key: string, nonce: string, plaintext: string, aad?: string): crypto.EncryptedPayload',
+        doc: 'Encrypts plaintext using ChaCha20-Poly1305 AEAD (RFC 8439).',
+        snippet: 'encryptChaCha20Poly1305(${1:key}, ${2:nonce}, ${3:plaintext})'
+      },
+      decryptChaCha20Poly1305: {
+        name: 'decryptChaCha20Poly1305',
+        kind: 'function',
+        signature: 'fn decryptChaCha20Poly1305(key: string, nonce: string, ciphertext: string, tag: string, aad?: string): string',
+        doc: 'Decrypts and authenticates ChaCha20-Poly1305 AEAD payload.',
+        snippet: 'decryptChaCha20Poly1305(${1:key}, ${2:nonce}, ${3:ciphertext}, ${4:tag})'
+      },
+      encryptAesGcm: {
+        name: 'encryptAesGcm',
+        kind: 'function',
+        signature: 'fn encryptAesGcm(key: string, iv: string, plaintext: string, aad?: string): crypto.EncryptedPayload',
+        doc: 'Encrypts plaintext using AES-256-GCM AEAD (NIST SP 800-38D).',
+        snippet: 'encryptAesGcm(${1:key}, ${2:iv}, ${3:plaintext})'
+      },
+      decryptAesGcm: {
+        name: 'decryptAesGcm',
+        kind: 'function',
+        signature: 'fn decryptAesGcm(key: string, iv: string, ciphertext: string, tag: string, aad?: string): string',
+        doc: 'Decrypts and authenticates AES-256-GCM AEAD payload.',
+        snippet: 'decryptAesGcm(${1:key}, ${2:iv}, ${3:ciphertext}, ${4:tag})'
+      },
+      encodeCode128: {
+        name: 'encodeCode128',
+        kind: 'function',
+        signature: 'fn encodeCode128(text: string): string',
+        doc: 'Encodes ASCII text into a Code 128 barcode binary pattern ("1" and "0").',
+        snippet: 'encodeCode128(${1:text})'
+      },
+      encodeCode128Svg: {
+        name: 'encodeCode128Svg',
+        kind: 'function',
+        signature: 'fn encodeCode128Svg(text: string, barHeight?: int, moduleWidth?: int): string',
+        doc: 'Generates a vector SVG Code 128 barcode.',
+        snippet: 'encodeCode128Svg(${1:text})'
+      },
+      encodeCode128Ascii: {
+        name: 'encodeCode128Ascii',
+        kind: 'function',
+        signature: 'fn encodeCode128Ascii(text: string): string',
+        doc: 'Generates an ASCII art Code 128 barcode.',
+        snippet: 'encodeCode128Ascii(${1:text})'
+      },
+      decodeCode128: {
+        name: 'decodeCode128',
+        kind: 'function',
+        signature: 'fn decodeCode128(pattern: string): string',
+        doc: 'Decodes a Code 128 binary pattern string back into text.',
+        snippet: 'decodeCode128(${1:pattern})'
+      },
+      generateQr: {
+        name: 'generateQr',
+        kind: 'function',
+        signature: 'fn generateQr(text: string, ecLevel?: string): crypto.QrCode',
+        doc: 'Generates an ISO/IEC 18004 QR Code.',
+        snippet: 'generateQr(${1:text})'
+      },
+      decodeQr: {
+        name: 'decodeQr',
+        kind: 'function',
+        signature: 'fn decodeQr(matrix: array<array<bool>>): string',
+        doc: 'Decodes a 2D boolean QR module matrix into text.',
+        snippet: 'decodeQr(${1:matrix})'
+      },
+      Hasher: {
+        name: 'Hasher',
+        kind: 'class',
+        signature: 'class crypto.Hasher',
+        doc: 'Streaming cryptographic hash accumulator (update, digestHex, reset).'
+      },
+      Hmac: {
+        name: 'Hmac',
+        kind: 'class',
+        signature: 'class crypto.Hmac',
+        doc: 'Streaming HMAC accumulator (update, digestHex, reset).'
+      },
+      EncryptedPayload: {
+        name: 'EncryptedPayload',
+        kind: 'class',
+        signature: 'class crypto.EncryptedPayload',
+        doc: 'AEAD encrypted payload (ciphertext, tag, iv, aad, toCombinedHex, fromCombinedHex).'
+      },
+      QrCode: {
+        name: 'QrCode',
+        kind: 'class',
+        signature: 'class crypto.QrCode',
+        doc: 'QR Code model (size, version, matrix, toSvg, toAscii).'
+      }
+    }
+  },
+  test: {
+    name: 'test',
+    doc: 'Unit testing framework, suites, test cases, and assertion primitives.',
+    members: {
+      suite: {
+        name: 'suite',
+        kind: 'function',
+        signature: 'fn suite(name: string, body: fn(): void): void',
+        doc: 'Defines a test suite grouping related test cases.',
+        snippet: 'suite("${1:Suite Name}", fn(): void {\n\t$0\n})'
+      },
+      case: {
+        name: 'case',
+        kind: 'function',
+        signature: 'fn case(name: string, body: fn(): void): void',
+        doc: 'Registers an individual unit test case.',
+        snippet: 'case("${1:test description}", fn(): void {\n\t$0\n})'
+      },
+      assertEq: {
+        name: 'assertEq',
+        kind: 'function',
+        signature: 'fn assertEq(actual: T, expected: T, msg?: string): void',
+        doc: 'Asserts that actual and expected values are deeply equal.',
+        snippet: 'assertEq(${1:actual}, ${2:expected})'
+      },
+      assertTrue: {
+        name: 'assertTrue',
+        kind: 'function',
+        signature: 'fn assertTrue(cond: bool, msg?: string): void',
+        doc: 'Asserts that condition evaluates to true.',
+        snippet: 'assertTrue(${1:cond})'
+      }
+    }
+  },
+  ui: {
+    name: 'ui',
+    doc: 'Compile-time Reactive UI engine, scene graph nodes, event modifiers, and TUI/Web/Headless backends.',
+    members: {
+      debounce: {
+        name: 'debounce',
+        kind: 'function',
+        signature: 'fn debounce(delayMs: int, handler: fn(UIEvent): void): EventCallback',
+        doc: 'Debounces an event listener by delayMs milliseconds.',
+        snippet: 'debounce(${1:200}, ${2:handler})'
+      },
+      withPreventDefault: {
+        name: 'withPreventDefault',
+        kind: 'function',
+        signature: 'fn withPreventDefault(handler: fn(UIEvent): void): EventCallback',
+        doc: 'Calls preventDefault() on the event before invoking handler.',
+        snippet: 'withPreventDefault(${1:handler})'
+      },
+      withKeyFilter: {
+        name: 'withKeyFilter',
+        kind: 'function',
+        signature: 'fn withKeyFilter(key: string, handler: fn(UIEvent): void): EventCallback',
+        doc: 'Invokes handler only when the pressed key matches key.',
+        snippet: 'withKeyFilter("${1:Enter}", ${2:handler})'
+      }
+    }
   }
 };
 
@@ -1333,21 +1702,21 @@ export const BUILTIN_METHODS: Record<string, StdlibMember> = {
   contains: {
     name: 'contains',
     kind: 'function',
-    signature: 'fn contains(element: any): bool',
+    signature: 'fn contains(element: T): bool',
     doc: 'Returns true if string contains substring or array contains item.',
     snippet: 'contains(${1:element})'
   },
   push: {
     name: 'push',
     kind: 'function',
-    signature: 'fn push(element: any): void',
+    signature: 'fn push(element: T): void',
     doc: 'Appends an element to the end of the array.',
     snippet: 'push(${1:element})'
   },
   pop: {
     name: 'pop',
     kind: 'function',
-    signature: 'fn pop(): any',
+    signature: 'fn pop(): T',
     doc: 'Removes and returns the last element of the array.',
     snippet: 'pop()'
   },
@@ -1364,6 +1733,104 @@ export const BUILTIN_METHODS: Record<string, StdlibMember> = {
     signature: 'fn values(): array<any>',
     doc: 'Returns an array of all values in the map.',
     snippet: 'values()'
+  },
+  update: {
+    name: 'update',
+    kind: 'function',
+    signature: 'fn update(data: string): void',
+    doc: 'Feeds a chunk of data into the streaming Hasher or Hmac accumulator.',
+    snippet: 'update(${1:data})'
+  },
+  digestHex: {
+    name: 'digestHex',
+    kind: 'function',
+    signature: 'fn digestHex(): string',
+    doc: 'Finalizes the calculation and returns the lowercase hexadecimal digest or authentication tag.',
+    snippet: 'digestHex()'
+  },
+  reset: {
+    name: 'reset',
+    kind: 'function',
+    signature: 'fn reset(): void',
+    doc: 'Resets the streaming Hasher or Hmac instance to its initial state.',
+    snippet: 'reset()'
+  },
+  toCombinedHex: {
+    name: 'toCombinedHex',
+    kind: 'function',
+    signature: 'fn toCombinedHex(): string',
+    doc: 'Serializes the EncryptedPayload into a single combined hex string.',
+    snippet: 'toCombinedHex()'
+  },
+  fromCombinedHex: {
+    name: 'fromCombinedHex',
+    kind: 'function',
+    signature: 'fn fromCombinedHex(hex: string): crypto.EncryptedPayload',
+    doc: 'Reconstructs an EncryptedPayload from a combined hex string.',
+    snippet: 'fromCombinedHex(${1:hex})'
+  },
+  toSvg: {
+    name: 'toSvg',
+    kind: 'function',
+    signature: 'fn toSvg(margin?: int): string',
+    doc: 'Renders the QR Code as a standalone vector SVG XML string.',
+    snippet: 'toSvg(${1:4})'
+  },
+  toAscii: {
+    name: 'toAscii',
+    kind: 'function',
+    signature: 'fn toAscii(margin?: int): string',
+    doc: 'Renders the QR Code using Unicode half-block characters for terminal display.',
+    snippet: 'toAscii(${1:2})'
+  },
+  use: {
+    name: 'use',
+    kind: 'function',
+    signature: 'fn use(middleware?: http.Middleware | fn(http.Request, http.Response): void): http.HttpServer',
+    doc: 'Registers an HTTP middleware (e.g. cors(), recover(), logger()) or custom handler.',
+    snippet: 'use(${1:middleware})'
+  },
+  listen: {
+    name: 'listen',
+    kind: 'function',
+    signature: 'fn listen(port: int, host?: string): http.HttpServer',
+    doc: 'Starts listening for incoming HTTP connections on host:port.',
+    snippet: 'listen(${1:port})'
+  },
+  isRunning: {
+    name: 'isRunning',
+    kind: 'function',
+    signature: 'fn isRunning(): bool',
+    doc: 'Returns true if the HTTP server is currently running and accepting connections.',
+    snippet: 'isRunning()'
+  },
+  stop: {
+    name: 'stop',
+    kind: 'function',
+    signature: 'fn stop(): void',
+    doc: 'Gracefully shuts down the HTTP server and terminates active connections.',
+    snippet: 'stop()'
+  },
+  port: {
+    name: 'port',
+    kind: 'function',
+    signature: 'fn port(): int',
+    doc: 'Returns the local port number the HTTP server is bound to.',
+    snippet: 'port()'
+  },
+  serveUi: {
+    name: 'serveUi',
+    kind: 'function',
+    signature: 'fn serveUi(path: string, componentFactory: fn(): ui.Component, title?: string): http.HttpServer',
+    doc: 'Mounts a reactive KML UI component tree over HTTP and WebSocket LiveView.',
+    snippet: 'serveUi("${1:/}", fn(): ${2:Component} {\n\treturn ${3:Component}();\n})'
+  },
+  ws: {
+    name: 'ws',
+    kind: 'function',
+    signature: 'fn ws(path: string, handler: fn(http.WebSocket, string): void): http.HttpServer',
+    doc: 'Registers a real-time WebSocket connection handler at path.',
+    snippet: 'ws("${1:/ws}", fn(${2:socket}, ${3:msg}): void {\n\t$0\n})'
   }
 };
 

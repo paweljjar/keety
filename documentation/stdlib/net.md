@@ -10,33 +10,29 @@ Fallible operations (such as malformed URLs, DNS resolution failures, connection
 
 ## 1. Importing the Module
 
-The `net` module can be imported using qualified module imports, module aliases, or selective member imports:
+The `net` module can be imported using any of the four standard import forms (as well as module aliases):
 
 ```keet
-// Qualified import
+// 1. Unquoted module import
 import net;
 
-fn main(): void {
-    let host: string = net.urlHost("https://api.example.com:8443/v1/status");
-    let port: int = net.urlPort("https://api.example.com:8443/v1/status");
-}
+// 2. Quoted module import
+import "net";
+
+// 3. Unquoted selective import
+from net import isIpv4, isLoopback, resolveIpv4;
+
+// 4. Quoted selective import
+from "net" import isIpv4, isLoopback, resolveIpv4;
 ```
 
 ```keet
-// Module alias
+// Module alias import
 import net as n;
 
 fn main(): void {
+    let host: string = net.urlHost("https://api.example.com:8443/v1/status");
     let encoded: string = n.urlEncode("hello world!");
-    let decoded: string = n.urlDecode(encoded);
-}
-```
-
-```keet
-// Selective import
-from "net" import isIpv4, isLoopback, resolveIpv4;
-
-fn main(): void {
     if (isIpv4("127.0.0.1") && isLoopback("127.0.0.1")) {
         let ip: string = resolveIpv4("localhost");
     }

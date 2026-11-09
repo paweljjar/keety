@@ -118,11 +118,14 @@ TEST_CASE("Analyzer getCompletions produces context-aware suggestions", "[lsp][c
         REQUIRE(containsLabel(listIo, "print"));
         REQUIRE(containsLabel(listIo, "eprintln"));
         REQUIRE(containsLabel(listIo, "Color"));
+        REQUIRE_FALSE(containsLabel(listIo, "Gray"));
+        REQUIRE_FALSE(containsLabel(listIo, "Red"));
 
         auto itemPrintln = findItem(listIo, "println");
         REQUIRE(itemPrintln != nullptr);
         REQUIRE(itemPrintln->kind == CompletionItemKind::Function);
         REQUIRE(itemPrintln->detail.find("println") != std::string::npos);
+        REQUIRE(itemPrintln->detail.find("string | int | float | bool | char | null") != std::string::npos);
         REQUIRE(itemPrintln->documentation.find("standard output") != std::string::npos);
 
         // 2. math.
@@ -193,6 +196,71 @@ TEST_CASE("Analyzer getCompletions produces context-aware suggestions", "[lsp][c
         REQUIRE(containsLabel(listInst, "name"));
         REQUIRE(containsLabel(listInst, "health"));
         REQUIRE(containsLabel(listInst, "heal"));
+    }
+
+    SECTION("Standard library class instance dot-completion (crypto.Hasher, QrCode, EncryptedPayload)") {
+        std::string code1 =
+            "import crypto;\n"
+            "fn main(): void {\n"
+            "    let b: crypto.Hasher = crypto.createHash(\"blake3\");\n"
+            "    b.\n"
+            "}\n";
+        Document doc1("file:///crypto_inst1.keet", "keet", 1, code1);
+
+        // b. on line 3, col 6
+        auto listHasher = analyzer.getCompletions(doc1, Position{3, 6});
+        REQUIRE(containsLabel(listHasher, "update"));
+        REQUIRE(containsLabel(listHasher, "digestHex"));
+        REQUIRE(containsLabel(listHasher, "reset"));
+
+        auto itemUpdate = findItem(listHasher, "update");
+        REQUIRE(itemUpdate != nullptr);
+        REQUIRE(itemUpdate->kind == CompletionItemKind::Method);
+
+        std::string code2 =
+            "import crypto;\n"
+            "fn main(): void {\n"
+            "    let qr = crypto.generateQr(\"hello\");\n"
+            "    qr.\n"
+            "}\n";
+        Document doc2("file:///crypto_inst2.keet", "keet", 1, code2);
+
+        // qr. on line 3, col 7
+        auto listQr = analyzer.getCompletions(doc2, Position{3, 7});
+        REQUIRE(containsLabel(listQr, "size"));
+        REQUIRE(containsLabel(listQr, "version"));
+        REQUIRE(containsLabel(listQr, "matrix"));
+        REQUIRE(containsLabel(listQr, "toSvg"));
+        REQUIRE(containsLabel(listQr, "toAscii"));
+
+        std::string code3 =
+            "from http import app, HttpServer;\n"
+            "fn main(): void {\n"
+            "    let server: HttpServer = app();\n"
+            "    server.\n"
+            "}\n";
+        Document doc3("file:///http_inst.keet", "keet", 1, code3);
+
+        // server. on line 3, col 11
+        auto listServer = analyzer.getCompletions(doc3, Position{3, 11});
+        REQUIRE(containsLabel(listServer, "use"));
+        REQUIRE(containsLabel(listServer, "listen"));
+        REQUIRE(containsLabel(listServer, "isRunning"));
+        REQUIRE(containsLabel(listServer, "stop"));
+        REQUIRE(containsLabel(listServer, "get"));
+        REQUIRE(containsLabel(listServer, "post"));
+
+        auto itemUse = findItem(listServer, "use");
+        REQUIRE(itemUse != nullptr);
+        REQUIRE(itemUse->kind == CompletionItemKind::Method);
+        REQUIRE(itemUse->detail.find("use") != std::string::npos);
+        REQUIRE(itemUse->documentation.find("middleware") != std::string::npos);
+
+        auto itemListen = findItem(listServer, "listen");
+        REQUIRE(itemListen != nullptr);
+        REQUIRE(itemListen->kind == CompletionItemKind::Method);
+        REQUIRE(itemListen->detail.find("listen") != std::string::npos);
+        REQUIRE(itemListen->documentation.find("listening") != std::string::npos);
     }
 
     SECTION("Enum dot-completion") {

@@ -226,11 +226,8 @@ TEST_CASE("Standard library http module scope population", "[sema][universe][htt
     REQUIRE(universe != nullptr);
 
     CHECK(isStdlibModule("net.http"));
-    CHECK(isStdlibModule("std.net.http"));
-    CHECK(isStdlibModule("keet.net.http"));
     CHECK(isStdlibModule("http"));
-    CHECK(isStdlibModule("std.http"));
-    CHECK(isStdlibModule("keet.http"));
+    CHECK_FALSE(isStdlibModule("std.http"));
 
     auto httpScope = createStdlibModuleScope("net.http", universe);
     REQUIRE(httpScope != nullptr);
@@ -249,7 +246,8 @@ TEST_CASE("Standard library http module scope population", "[sema][universe][htt
     }
 
     const std::vector<std::string> expectedTypes = {
-        "Request", "Response", "WebSocket", "HttpServer", "App", "Server", "Schema", "SchemaValidator"
+        "Request", "Response", "WebSocket", "HttpServer", "App", "Server", "Schema", "SchemaValidator",
+        "Middleware", "NextFunction"
     };
 
     for (const auto& typeName : expectedTypes) {
@@ -270,8 +268,7 @@ TEST_CASE("Standard library test module scope population", "[sema][universe][tes
     REQUIRE(universe != nullptr);
 
     CHECK(isStdlibModule("test"));
-    CHECK(isStdlibModule("std.test"));
-    CHECK(isStdlibModule("keet.test"));
+    CHECK_FALSE(isStdlibModule("std.test"));
     auto testScope = createStdlibModuleScope("test", universe);
     REQUIRE(testScope != nullptr);
 
@@ -297,9 +294,8 @@ TEST_CASE("Standard library crypto module scope population", "[sema][universe][c
     REQUIRE(universe != nullptr);
 
     CHECK(isStdlibModule("crypto"));
-    CHECK(isStdlibModule("std.crypto"));
-    CHECK(isStdlibModule("keet.crypto"));
     CHECK(isStdlibModule("crypto.hash"));
+    CHECK_FALSE(isStdlibModule("std.crypto"));
     auto cryptoScope = createStdlibModuleScope("crypto", universe);
     REQUIRE(cryptoScope != nullptr);
 

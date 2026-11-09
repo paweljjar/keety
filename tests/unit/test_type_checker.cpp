@@ -2873,6 +2873,56 @@ TEST_CASE("Standard io module type checking and semantic validation", "[typechec
         REQUIRE_FALSE(res.checkZeroCoercion());
         REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
     }
+
+    SECTION("Accept union of primitive printable types in io.print / io.println") {
+        ParseResult res(
+            "import io;\n"
+            "fn main(): void {\n"
+            "    let a: int = 1;\n"
+            "    let b: int | string = \"aaaa\";\n"
+            "    b = a;\n"
+            "    let c: float | bool | char | null = null;\n"
+            "    io.print(a, b, c);\n"
+            "    io.println(b, io.Color.Gray);\n"
+            "    io.eprint(b);\n"
+            "    io.eprintln(c, io.Color.Red);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+        REQUIRE_FALSE(res.emitter.hasErrors());
+    }
+
+    SECTION("Reject non-primitive argument (e.g. array, map, class) in io.print / io.println with E3003") {
+        ParseResult res(
+            "import io;\n"
+            "fn main(): void {\n"
+            "    let arr: array<int> = [1, 2, 3];\n"
+            "    io.println(arr);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::TypeMismatch));
+    }
+
+    SECTION("Reject direct io.Gray access (must use io.Color.Gray) with E3011") {
+        ParseResult res(
+            "import io;\n"
+            "fn main(): void {\n"
+            "    io.println(\"Test\", io.Gray);\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::InvalidMemberAccess));
+    }
+
+    SECTION("Reject selective import of Color variant directly from io with E1005") {
+        ParseResult res(
+            "from \"io\" import Gray;\n"
+            "fn main(): void {}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::SymbolNotExported));
+    }
 }
 
 TEST_CASE("Standard fs module type checking and semantic validation", "[typechecker][fs]") {

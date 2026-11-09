@@ -3,35 +3,35 @@
 #include <iostream>
 
 namespace keet_module_switch_named_loop_break {
-#line 1 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 1 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
     int64_t testSwitchNamedWhileBreak() {
-#line 2 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 2 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         int64_t count = 0;
-#line 3 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 3 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         int64_t step = 0;
-#line 4 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 4 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         while (step < 10) {
-#line 5 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 5 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
             step += 1;
-#line 6 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 6 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
             switch (step) {
             case 1:
             case 2:
             {
-#line 8 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 8 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
                 count += 10;
                 break;
             }
             case 3:
             {
-#line 11 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 11 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
                 count += 30;
-#line 12 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 12 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
                 goto outerLoop_break;
                 break;
             }
             default: {
-#line 15 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 15 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
                 count += 100;
                 break;
             }
@@ -39,51 +39,51 @@ namespace keet_module_switch_named_loop_break {
             outerLoop_continue:;
         }
         outerLoop_break:;
-#line 19 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 19 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         if (step != 3) {
-#line 20 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 20 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
             return 1;
         }
-#line 22 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 22 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         if (count != 50) {
-#line 23 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 23 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
             return 2;
         }
-#line 25 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 25 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         return 0;
     }
 
-#line 28 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 28 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
     int64_t testSwitchNamedForBreak() {
-#line 29 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 29 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         int64_t accumulated = 0;
-#line 30 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 30 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         for (int64_t i = 0; i < 20; i += 1) {
-#line 31 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 31 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
             switch (i) {
             case 0:
             case 1:
             case 2:
             {
-#line 33 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 33 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
                 accumulated += 1;
                 break;
             }
             case 3:
             case 4:
             {
-#line 36 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 36 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
                 accumulated += 10;
                 break;
             }
             case 5:
             {
-#line 39 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 39 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
                 goto forLoop_break;
                 break;
             }
             default: {
-#line 42 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 42 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
                 accumulated += 1000;
                 break;
             }
@@ -91,32 +91,32 @@ namespace keet_module_switch_named_loop_break {
             forLoop_continue:;
         }
         forLoop_break:;
-#line 46 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 46 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         if (accumulated != 23) {
-#line 47 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 47 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
             return 10;
         }
-#line 49 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 49 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         return 0;
     }
 
-#line 52 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 52 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
     int64_t testSwitchNamedContinue() {
-#line 53 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 53 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         int64_t sum = 0;
-#line 54 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 54 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         for (int64_t i = 1; i <= 5; i += 1) {
-#line 55 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 55 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
             switch (i) {
             case 2:
             case 4:
             {
-#line 57 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 57 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
                 goto loopC_continue;
                 break;
             }
             default: {
-#line 60 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 60 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
                 sum += i;
                 break;
             }
@@ -124,39 +124,39 @@ namespace keet_module_switch_named_loop_break {
             loopC_continue:;
         }
         loopC_break:;
-#line 64 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 64 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         if (sum != 9) {
-#line 65 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 65 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
             return 20;
         }
-#line 67 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 67 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         return 0;
     }
 
-#line 70 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 70 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
     int64_t _keet_main() {
-#line 71 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 71 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         int64_t r1 = testSwitchNamedWhileBreak();
-#line 72 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 72 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         if (r1 != 0) {
-#line 73 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 73 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
             return r1;
         }
-#line 76 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 76 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         int64_t r2 = testSwitchNamedForBreak();
-#line 77 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 77 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         if (r2 != 0) {
-#line 78 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 78 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
             return r2;
         }
-#line 81 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 81 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         int64_t r3 = testSwitchNamedContinue();
-#line 82 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 82 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         if (r3 != 0) {
-#line 83 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 83 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
             return r3;
         }
-#line 86 "/Users/pawel/CLionProjects/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
+#line 86 "/Users/pawel/Documents/GitHub/keety/tests/conformance/positive/05_control_flow/switch_named_loop_break.keet"
         return 0;
     }
 } // namespace keet_module_switch_named_loop_break

@@ -38,6 +38,12 @@ add_library(keety_core STATIC
     fmt/comment_attacher.cpp
     fmt/import_sorter.cpp
     fmt/formatter.cpp
+    kml/kml_token.cpp
+    kml/kml_lexer.cpp
+    kml/kml_parser.cpp
+    kml/dependency_analyzer.cpp
+    kml/style_scoper.cpp
+    kml/kml_lowerer.cpp
     lint/lint_config.cpp
     lint/suppression_map.cpp
     lint/lint_engine.cpp

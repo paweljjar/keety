@@ -8,32 +8,29 @@ All fallible file system operations throw `keet::error` instances named `"FileSy
 
 ## 1. Importing the Module
 
-The `fs` module can be imported using qualified module imports, module aliases, or selective member imports:
+The `fs` module can be imported using any of the four standard import forms (as well as module aliases):
 
 ```keet
-// Qualified import
+// 1. Unquoted module import
 import fs;
 
-fn main(): void {
-    let cwd: string = fs.cwd();
-}
+// 2. Quoted module import
+import "fs";
+
+// 3. Unquoted selective import
+from fs import readText, writeText, exists;
+
+// 4. Quoted selective import
+from "fs" import readText, writeText, exists;
 ```
 
 ```keet
-// Module alias
+// Module alias import
 import fs as files;
 
 fn main(): void {
-    let exists: bool = files.exists("data.txt");
-}
-```
-
-```keet
-// Selective import
-from "fs" import readText, writeText, exists;
-
-fn main(): void {
-    if (!exists("config.json")) {
+    let cwd: string = fs.cwd();
+    if (!files.exists("config.json")) {
         writeText("config.json", "{}");
     }
 }

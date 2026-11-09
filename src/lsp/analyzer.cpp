@@ -8,6 +8,7 @@
 #include <keety/diag/source_manager.hpp>
 #include <keety/driver/project_root.hpp>
 #include <keety/ir/ast_lowerer.hpp>
+#include <keety/kml/kml_parser.hpp>
 #include <keety/lexer/lexer.hpp>
 #include <keety/parser/parser.hpp>
 #include <keety/resolver/module_path_resolver.hpp>
@@ -221,86 +222,7 @@ struct StdlibDoc {
 
 std::optional<StdlibDoc> getStdlibMemberDoc(const std::string& name) {
     static const std::unordered_map<std::string, StdlibDoc> docs = {
-        {"println", {"fn println(...args: any): void", "Prints arguments to standard output followed by a newline."}},
-        {"print", {"fn print(...args: any): void", "Prints arguments to standard output without a trailing newline."}},
-        {"eprintln", {"fn eprintln(...args: any): void", "Prints arguments to standard error followed by a newline."}},
-        {"eprint", {"fn eprint(...args: any): void", "Prints arguments to standard error without a trailing newline."}},
-        {"readln", {"fn readln(): string", "Reads a line of text from standard input (without newline)."}},
-        {"readLine", {"fn readLine(): string", "Reads a line of text from standard input (without newline)."}},
-        {"input", {"fn input(prompt: string): string", "Displays a prompt and reads a line of user input."}},
-        {"flush", {"fn flush(): void", "Flushes standard output buffer."}},
-        {"readFile", {"fn readFile(path: string): string", "Reads the entire contents of a file as a string."}},
-        {"writeFile", {"fn writeFile(path: string, content: string): void", "Writes string content to a file."}},
-        {"appendFile", {"fn appendFile(path: string, content: string): void", "Appends string content to a file."}},
-        {"exists", {"fn exists(path: string): bool", "Returns true if the given path exists."}},
-        {"removeFile", {"fn removeFile(path: string): void", "Deletes a file at the specified path."}},
-        {"mkdir", {"fn mkdir(path: string): void", "Creates a directory at the specified path."}},
-        {"readDir", {"fn readDir(path: string): array<string>", "Returns a list of entry names in the directory."}},
-        {"exit", {"fn exit(code: int): void", "Terminates the process with the given exit code."}},
-        {"args", {"fn args(): array<string>", "Returns the command-line arguments passed to the program."}},
-        {"getEnv", {"fn getEnv(key: string): string | null", "Retrieves the value of an environment variable."}},
-        {"setEnv", {"fn setEnv(key: string, value: string): void", "Sets an environment variable."}},
-        {"platform", {"fn platform(): string", "Returns the operating system platform ('macos', 'linux', 'windows')."}},
-        {"PI", {"const PI: float", "Ratio of the circumference of a circle to its diameter (~3.14159)."}},
-        {"E", {"const E: float", "Euler's number and the base of natural logarithms (~2.71828)."}},
-        {"sqrt", {"fn sqrt(x: float): float", "Returns the square root of x."}},
-        {"pow", {"fn pow(base: float, exp: float): float", "Returns base raised to the power of exp."}},
-        {"abs", {"fn abs(x: float): float", "Returns the absolute value of x."}},
-        {"sin", {"fn sin(x: float): float", "Returns the sine of x (in radians)."}},
-        {"cos", {"fn cos(x: float): float", "Returns the cosine of x (in radians)."}},
-        {"floor", {"fn floor(x: float): float", "Returns the largest integer less than or equal to x."}},
-        {"ceil", {"fn ceil(x: float): float", "Returns the smallest integer greater than or equal to x."}},
-        {"round", {"fn round(x: float): float", "Rounds x to the nearest integer."}},
-        {"min", {"fn min(a: float, b: float): float", "Returns the smaller of two numbers."}},
-        {"max", {"fn max(a: float, b: float): float", "Returns the larger of two numbers."}},
-        {"now", {"fn now(): int", "Returns the current Unix timestamp in milliseconds."}},
-        {"sleep", {"fn sleep(ms: int): void", "Suspends execution for the specified number of milliseconds."}},
-        {"parse", {"fn parse(text: string): any", "Parses a JSON string into KeetScript data structures."}},
-        {"stringify", {"fn stringify(value: any): string", "Serializes a KeetScript value into a JSON string."}},
-        {"fetch", {"fn fetch(url: string): string", "Performs an HTTP GET request and returns the response body."}},
-        {"case", {"fn case(name: string, fn: (): void): void", "Registers a test case with the test runner."}},
-        {"suite", {"fn suite(name: string, fn: (): void): void", "Groups related test cases into a suite."}},
-        {"assertEq", {"fn assertEq(actual: any, expected: any, msg?: string): void", "Asserts that two values are deeply equal."}},
-        {"assertNe", {"fn assertNe(actual: any, expected: any, msg?: string): void", "Asserts that two values are not equal."}},
-        {"assertTrue", {"fn assertTrue(condition: bool, msg?: string): void", "Asserts that a boolean condition is true."}},
-        {"assertFalse", {"fn assertFalse(condition: bool, msg?: string): void", "Asserts that a boolean condition is false."}},
-        {"assertZonks", {"fn assertZonks(fn: (): void, expectedError?: string, msg?: string): void", "Asserts that a callback throws a KeetScript zonk error."}},
-        {"fail", {"fn fail(msg?: string): void", "Explicitly fails the current test case."}},
-        // Standard Library Module: crypto
-        {"toHex", {"fn toHex(data: string): string", "Encodes binary data or string into lowercase hexadecimal representation."}},
-        {"fromHex", {"fn fromHex(hexStr: string): string", "Decodes a hexadecimal string into binary data or ASCII string."}},
-        {"toBase64", {"fn toBase64(data: string): string", "Encodes data into standard RFC 4648 Base64 representation."}},
-        {"fromBase64", {"fn fromBase64(b64Str: string): string", "Decodes standard RFC 4648 Base64 encoded string."}},
-        {"toBase64Url", {"fn toBase64Url(data: string): string", "Encodes data into URL-safe Base64 representation without padding."}},
-        {"fromBase64Url", {"fn fromBase64Url(b64UrlStr: string): string", "Decodes URL-safe Base64 encoded string."}},
-        {"randomBytes", {"fn randomBytes(size: int): string", "Generates cryptographically secure random bytes of the specified length."}},
-        {"randomHex", {"fn randomHex(size: int): string", "Generates cryptographically secure random hex string of the specified byte count."}},
-        {"randomInt", {"fn randomInt(min: int, max: int): int", "Generates a uniform cryptographically secure random integer in [min, max]."}},
-        {"randomUuid", {"fn randomUuid(): string", "Generates an RFC 4122 Version 4 random UUID string."}},
-        {"timingSafeEqual", {"fn timingSafeEqual(a: string, b: string): bool", "Constant-time string/byte buffer comparison to mitigate side-channel timing attacks."}},
-        {"sha256", {"fn sha256(data: string): string", "Computes SHA-256 hash returned as lowercase hex string."}},
-        {"sha512", {"fn sha512(data: string): string", "Computes SHA-512 hash returned as lowercase hex string."}},
-        {"sha3_256", {"fn sha3_256(data: string): string", "Computes SHA3-256 (FIPS 202) hash returned as lowercase hex string."}},
-        {"sha3_512", {"fn sha3_512(data: string): string", "Computes SHA3-512 (FIPS 202) hash returned as lowercase hex string."}},
-        {"blake3", {"fn blake3(data: string): string", "Computes BLAKE3 high-performance cryptographic hash returned as hex string."}},
-        {"createHash", {"fn createHash(algorithm: string): Hasher", "Creates an incremental streaming cryptographic hash instance ('sha256', 'sha512', 'sha3-256', 'sha3-512', 'blake3')."}},
-        {"hmacSha256", {"fn hmacSha256(key: string, data: string): string", "Computes HMAC-SHA256 message authentication code returned as hex string."}},
-        {"hmacSha512", {"fn hmacSha512(key: string, data: string): string", "Computes HMAC-SHA512 message authentication code returned as hex string."}},
-        {"createHmac", {"fn createHmac(algorithm: string, key: string): Hmac", "Creates an incremental streaming HMAC instance ('sha256' or 'sha512')."}},
-        {"encryptChaCha20Poly1305", {"fn encryptChaCha20Poly1305(plaintext: string, key: string, iv: string, aad?: string): EncryptedPayload", "Encrypts data using ChaCha20-Poly1305 AEAD (RFC 8439)."}},
-        {"decryptChaCha20Poly1305", {"fn decryptChaCha20Poly1305(payload: EncryptedPayload, key: string, aad?: string): string", "Decrypts and verifies data using ChaCha20-Poly1305 AEAD (RFC 8439)."}},
-        {"encryptAesGcm", {"fn encryptAesGcm(plaintext: string, key: string, iv: string, aad?: string): EncryptedPayload", "Encrypts data using AES-256-GCM AEAD (NIST SP 800-38D)."}},
-        {"decryptAesGcm", {"fn decryptAesGcm(payload: EncryptedPayload, key: string, aad?: string): string", "Decrypts and verifies data using AES-256-GCM AEAD (NIST SP 800-38D)."}},
-        {"encodeCode128", {"fn encodeCode128(text: string): string", "Encodes text into a Code 128 barcode binary pattern ('1' for bar, '0' for space)."}},
-        {"encodeCode128Svg", {"fn encodeCode128Svg(text: string, height?: int): string", "Renders Code 128 barcode as a standalone vector SVG XML string."}},
-        {"encodeCode128Ascii", {"fn encodeCode128Ascii(text: string): string", "Renders Code 128 barcode as an ASCII art block string."}},
-        {"decodeCode128", {"fn decodeCode128(pattern: string): string", "Decodes a Code 128 binary pattern string ('1' and '0') back into text."}},
-        {"generateQr", {"fn generateQr(text: string, eccLevel?: string): QrCode", "Generates a 2D QR Code ISO/IEC 18004 matrix with specified ECC level ('L', 'M', 'Q', 'H')."}},
-        {"decodeQr", {"fn decodeQr(matrix: array<array<bool>>): string", "Decodes a 2D boolean module matrix of a QR Code into string text."}},
-        {"EncryptedPayload", {"class EncryptedPayload", "AEAD encryption payload containing ciphertext, auth tag, and initialization vector (iv)."}},
-        {"QrCode", {"class QrCode", "QR Code model providing SVG/ASCII rendering and matrix access."}},
-        {"Hasher", {"class Hasher", "Streaming cryptographic hash accumulator (`update(data)`, `digestHex()`)."}},
-        {"Hmac", {"class Hmac", "Streaming HMAC accumulator (`update(data)`, `digestHex()`)."}},
+#include "analyzer_stdlib_docs.inc"
     };
     auto it = docs.find(name);
     if (it != docs.end()) return it->second;
@@ -501,6 +423,61 @@ void collectLocalBindings(
     }
 }
 
+std::string inferTypeNameFromAnnotation(const ast::TypeAnnotation* typeAnn) {
+    if (!typeAnn) return "";
+    if (const auto* ct = dynamic_cast<const ast::CustomType*>(typeAnn)) {
+        return ct->getName();
+    }
+    if (dynamic_cast<const ast::ArrayType*>(typeAnn)) {
+        return "array";
+    }
+    if (dynamic_cast<const ast::MapType*>(typeAnn)) {
+        return "map";
+    }
+    if (const auto* pt = dynamic_cast<const ast::PrimitiveType*>(typeAnn)) {
+        return formatType(pt);
+    }
+    return "";
+}
+
+std::string inferClassNameFromExpr(const ast::Expr* expr) {
+    if (!expr) return "";
+    if (const auto* call = dynamic_cast<const ast::CallExpr*>(expr)) {
+        std::string fnName;
+        if (const auto* id = dynamic_cast<const ast::IdentExpr*>(call->getCallee())) {
+            fnName = id->getName();
+        } else if (const auto* mem = dynamic_cast<const ast::MemberExpr*>(call->getCallee())) {
+            fnName = mem->getMemberName();
+        }
+        if (fnName == "createHash") return "Hasher";
+        if (fnName == "createHmac") return "Hmac";
+        if (fnName == "encryptChaCha20Poly1305" || fnName == "encryptAesGcm" || fnName == "fromCombinedHex") {
+            return "EncryptedPayload";
+        }
+        if (fnName == "generateQr") return "QrCode";
+        if (fnName == "app" || fnName == "createServer") return "HttpServer";
+        if (fnName == "schema") return "SchemaValidator";
+        if (const auto* id = dynamic_cast<const ast::IdentExpr*>(call->getCallee())) {
+            return id->getName();
+        }
+    } else if (const auto* lit = dynamic_cast<const ast::LiteralExpr*>(expr)) {
+        if (lit->getLiteralKind() == lexer::TokenKind::StringLiteral) return "string";
+        if (lit->getLiteralKind() == lexer::TokenKind::IntLiteral) return "int";
+        if (lit->getLiteralKind() == lexer::TokenKind::FloatLiteral) return "float";
+        if (lit->getLiteralKind() == lexer::TokenKind::KwTrue || lit->getLiteralKind() == lexer::TokenKind::KwFalse) return "bool";
+        if (lit->getLiteralKind() == lexer::TokenKind::CharLiteral) return "char";
+    } else if (dynamic_cast<const ast::TemplateLitExpr*>(expr)) {
+        return "string";
+    } else if (dynamic_cast<const ast::ArrayLitExpr*>(expr)) {
+        return "array";
+    } else if (dynamic_cast<const ast::MapLitExpr*>(expr)) {
+        return "map";
+    } else if (const auto* zonkExpr = dynamic_cast<const ast::ZonkExpr*>(expr)) {
+        return inferClassNameFromExpr(zonkExpr->getPrimary());
+    }
+    return "";
+}
+
 std::string findReceiverClassName(
     const parser::ModuleAST& ast,
     const std::string& varName,
@@ -513,9 +490,8 @@ std::string findReceiverClassName(
             if (targetOffset >= fnDecl->getSpan().start.offset && targetOffset <= fnDecl->getSpan().end.offset) {
                 for (const auto& p : fnDecl->getParams()) {
                     if (p.name == varName && p.type) {
-                        if (const auto* ct = dynamic_cast<const ast::CustomType*>(p.type.get())) {
-                            return ct->getName();
-                        }
+                        auto tName = inferTypeNameFromAnnotation(p.type.get());
+                        if (!tName.empty()) return tName;
                     }
                 }
             }
@@ -524,15 +500,32 @@ std::string findReceiverClassName(
                 if (m && targetOffset >= m->getSpan().start.offset && targetOffset <= m->getSpan().end.offset) {
                     for (const auto& p : m->getParams()) {
                         if (p.name == varName && p.type) {
-                            if (const auto* ct = dynamic_cast<const ast::CustomType*>(p.type.get())) {
-                                return ct->getName();
-                            }
+                            auto tName = inferTypeNameFromAnnotation(p.type.get());
+                            if (!tName.empty()) return tName;
                         }
                     }
                 }
             }
         }
     }
+
+    auto extractFromDecl = [&](const ast::Decl* d) -> std::string {
+        if (!d) return "";
+        if (const auto* vd = dynamic_cast<const ast::VarDecl*>(d)) {
+            if (vd->getName() == varName) {
+                auto tName = inferTypeNameFromAnnotation(vd->getType());
+                if (!tName.empty()) return tName;
+                return inferClassNameFromExpr(vd->getInitializer());
+            }
+        } else if (const auto* cd = dynamic_cast<const ast::ConstDecl*>(d)) {
+            if (cd->getName() == varName) {
+                auto tName = inferTypeNameFromAnnotation(cd->getType());
+                if (!tName.empty()) return tName;
+                return inferClassNameFromExpr(cd->getInitializer());
+            }
+        }
+        return "";
+    };
 
     // 2. Search statements for variable declaration
     std::function<std::string(const ast::Stmt*)> searchStmt = [&](const ast::Stmt* s) -> std::string {
@@ -541,29 +534,28 @@ std::string findReceiverClassName(
             for (const auto& stmt : block->getStatements()) {
                 if (!stmt) continue;
                 if (const auto* declStmt = dynamic_cast<const ast::DeclStmt*>(stmt.get())) {
-                    if (const auto* vd = dynamic_cast<const ast::VarDecl*>(declStmt->getDeclaration())) {
-                        if (vd->getName() == varName) {
-                            if (vd->getType()) {
-                                if (const auto* ct = dynamic_cast<const ast::CustomType*>(vd->getType())) {
-                                    return ct->getName();
-                                }
-                            }
-                            if (vd->getInitializer()) {
-                                if (const auto* call = dynamic_cast<const ast::CallExpr*>(vd->getInitializer())) {
-                                    if (const auto* id = dynamic_cast<const ast::IdentExpr*>(call->getCallee())) {
-                                        return id->getName();
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    auto r = extractFromDecl(declStmt->getDeclaration());
+                    if (!r.empty()) return r;
                 } else if (const auto* ifStmt = dynamic_cast<const ast::IfStmt*>(stmt.get())) {
                     auto r = searchStmt(ifStmt->getThenBranch());
                     if (!r.empty()) return r;
                     r = searchStmt(ifStmt->getElseBranch());
                     if (!r.empty()) return r;
+                } else if (const auto* whileStmt = dynamic_cast<const ast::WhileStmt*>(stmt.get())) {
+                    auto r = searchStmt(whileStmt->getBody());
+                    if (!r.empty()) return r;
+                } else if (const auto* forStmt = dynamic_cast<const ast::ForStmt*>(stmt.get())) {
+                    auto r = searchStmt(forStmt->getInit());
+                    if (!r.empty()) return r;
+                    r = searchStmt(forStmt->getBody());
+                    if (!r.empty()) return r;
+                } else if (const auto* forInStmt = dynamic_cast<const ast::ForInStmt*>(stmt.get())) {
+                    auto r = searchStmt(forInStmt->getBody());
+                    if (!r.empty()) return r;
                 }
             }
+        } else if (const auto* declStmt = dynamic_cast<const ast::DeclStmt*>(s)) {
+            return extractFromDecl(declStmt->getDeclaration());
         }
         return "";
     };
@@ -571,13 +563,13 @@ std::string findReceiverClassName(
     for (const auto& decl : ast.declarations) {
         if (!decl) continue;
         if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
-            if (targetOffset >= fnDecl->getSpan().start.offset && targetOffset <= fnDecl->getSpan().end.offset) {
+            if (targetOffset >= fnDecl->getSpan().start.offset) {
                 auto r = searchStmt(fnDecl->getBody());
                 if (!r.empty()) return r;
             }
         } else if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
             for (const auto& m : cd->getMethods()) {
-                if (m && targetOffset >= m->getSpan().start.offset && targetOffset <= m->getSpan().end.offset) {
+                if (m && targetOffset >= m->getSpan().start.offset) {
                     auto r = searchStmt(m->getBody());
                     if (!r.empty()) return r;
                 }
@@ -588,22 +580,8 @@ std::string findReceiverClassName(
     // 3. Top-level variables
     for (const auto& decl : ast.declarations) {
         if (!decl) continue;
-        if (const auto* vd = dynamic_cast<const ast::VarDecl*>(decl.get())) {
-            if (vd->getName() == varName) {
-                if (vd->getType()) {
-                    if (const auto* ct = dynamic_cast<const ast::CustomType*>(vd->getType())) {
-                        return ct->getName();
-                    }
-                }
-                if (vd->getInitializer()) {
-                    if (const auto* call = dynamic_cast<const ast::CallExpr*>(vd->getInitializer())) {
-                        if (const auto* id = dynamic_cast<const ast::IdentExpr*>(call->getCallee())) {
-                            return id->getName();
-                        }
-                    }
-                }
-            }
-        }
+        auto r = extractFromDecl(decl.get());
+        if (!r.empty()) return r;
     }
 
     return "";
@@ -620,13 +598,50 @@ std::vector<Diagnostic> Analyzer::analyze(const Document& doc) {
     std::string pathStr = uriToPath(doc.uri());
     diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
 
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+
+    if (fsPath.extension() == ".kml" || doc.languageId() == "kml") {
+        kml::KmlParser kmlParser(doc.text(), fileId, &sm, &emitter);
+        (void)kmlParser.parseDocument(moduleName);
+
+        if (emitter.hasErrors()) {
+            collectLspDiagnostics(doc, emitter.getDiagnostics(), lspDiagnostics);
+            return lspDiagnostics;
+        }
+
+        auto universe = std::make_shared<sema::Scope>(sema::ScopeKind::Universe);
+        sema::registerUniverseSymbols(*universe);
+        parser::ModuleAST emptyAst;
+        emptyAst.fileId = fileId;
+        emptyAst.moduleName = moduleName;
+        std::vector<lexer::Comment> comments;
+
+        lint::LintConfig lintConfig = lint::LintConfig::discover(fsPath.parent_path());
+        lint::LintEngine lintEngine(lintConfig);
+        lintEngine.registerDefaultRules();
+
+        auto lintDiags = lintEngine.lintModule(emptyAst, comments, sm, doc.text(), pathStr, universe.get());
+        for (const auto& ld : lintDiags) {
+            Diagnostic lspDiag;
+            lspDiag.severity = convertSeverity(ld.severity);
+            lspDiag.code = ld.ruleCode;
+            lspDiag.source = "keetlint";
+            lspDiag.message = ld.message;
+            lspDiag.range = spanToRange(doc, ld.span);
+            for (const auto& f : ld.footers) {
+                lspDiag.message += "\n" + f.message;
+            }
+            lspDiagnostics.push_back(std::move(lspDiag));
+        }
+        return lspDiagnostics;
+    }
+
     // 1. Lexical & Syntactic Analysis (Parser)
     lexer::Lexer lexer(fileId, doc.text());
     lexer.setCaptureComments(true);
     parser::Parser parser(lexer, &emitter);
 
-    std::filesystem::path fsPath(pathStr);
-    std::string moduleName = fsPath.stem().string();
     auto ast = parser.parseModule(moduleName);
 
     if (emitter.hasErrors()) {
@@ -656,10 +671,20 @@ std::vector<Diagnostic> Analyzer::analyze(const Document& doc) {
                     effName = std::filesystem::path(resolved->canonicalPath).stem().string();
                 }
                 if (!effName.empty()) {
-                    moduleScope->define(
-                        std::make_shared<sema::Symbol>(effName, sema::SymbolKind::Module, imp->getSpan()),
-                        false
-                    );
+                    if (!resolved->isStandardLibrary() &&
+                        resolved->canonicalPath.extension() == ".kml" &&
+                        imp->getModuleAlias().empty()) {
+                        auto compSym = std::make_shared<sema::Symbol>(
+                            effName, sema::SymbolKind::Class, imp->getSpan());
+                        compSym->setIsType(true);
+                        compSym->setExported(true);
+                        moduleScope->define(compSym, false);
+                    } else {
+                        moduleScope->define(
+                            std::make_shared<sema::Symbol>(effName, sema::SymbolKind::Module, imp->getSpan()),
+                            false
+                        );
+                    }
                 }
             }
         }
@@ -798,7 +823,8 @@ std::optional<Location> Analyzer::findDefinition(
             // Check namespace or bare import
             std::string modAlias = imp->getModuleAlias();
             std::string modPath = imp->getModulePath();
-            if (modAlias == ident || modPath == ident) {
+            std::string modStem = std::filesystem::path(modPath).stem().string();
+            if (modAlias == ident || modPath == ident || (modAlias.empty() && modStem == ident)) {
                 std::filesystem::path projectRoot = driver::findProjectRoot(fsPath);
                 resolver::ModulePathResolver pathResolver(projectRoot);
                 auto resolved = pathResolver.resolve(fsPath, modPath, imp->getSpan());
@@ -991,12 +1017,6 @@ std::optional<Hover> Analyzer::getHover(
         return Hover{MarkupContent{"markdown", "```keet\nimport crypto;\n```\n**Standard Library Module: `crypto`**\n\nCryptographic hashing, HMAC, symmetric encryption (AEAD), CSPRNG, encodings, and symbology (QR & barcodes)."}, tokRange};
     }
 
-    // 3b. Standard Library Built-in Functions/Constants
-    if (auto stdDoc = getStdlibMemberDoc(ident); stdDoc.has_value()) {
-        std::string content = "```keet\n" + stdDoc->signature + "\n```\n" + stdDoc->doc;
-        return Hover{MarkupContent{"markdown", std::move(content)}, tokRange};
-    }
-
     // Parse AST to query user declarations
     diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
     lexer::Lexer pLexer(fileId, doc.text());
@@ -1152,6 +1172,12 @@ std::optional<Hover> Analyzer::getHover(
         }
     }
 
+    // 3e. Standard Library Built-in Functions/Constants
+    if (auto stdDoc = getStdlibMemberDoc(ident); stdDoc.has_value()) {
+        std::string content = "```keet\n" + stdDoc->signature + "\n```\n" + stdDoc->doc;
+        return Hover{MarkupContent{"markdown", std::move(content)}, tokRange};
+    }
+
     return std::nullopt;
 }
 
@@ -1263,6 +1289,7 @@ CompletionList Analyzer::getCompletions(
     bool isDot = (p > 0 && text[p - 1] == '.');
 
     if (isDot) {
+        size_t dotPos = p - 1;
         p--; // Skip '.'
         while (p > 0 && (text[p - 1] == ' ' || text[p - 1] == '\t')) {
             p--;
@@ -1335,10 +1362,18 @@ CompletionList Analyzer::getCompletions(
         }
 
         // Parse AST to resolve classes, enums, 'this', and variables
+        // Replace active '.' (and partial member prefix) with ';' so incomplete 'b.' does not swallow subsequent statements
+        std::string parseText = text;
+        if (dotPos < parseText.size()) {
+            parseText[dotPos] = ';';
+            for (size_t i = dotPos + 1; i < targetOffset && i < parseText.size(); ++i) {
+                parseText[i] = ' ';
+            }
+        }
         diag::SourceManager sm;
-        diag::FileId fileId = sm.addBuffer(pathStr, text);
+        diag::FileId fileId = sm.addBuffer(pathStr, parseText);
         diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
-        lexer::Lexer pLexer(fileId, text);
+        lexer::Lexer pLexer(fileId, parseText);
         parser::Parser parser(pLexer, &emitter);
         auto ast = parser.parseModule(moduleName);
 
@@ -1413,6 +1448,168 @@ CompletionList Analyzer::getCompletions(
         std::string inferredClass = findReceiverClassName(ast, receiver, targetOffset);
         if (inferredClass.empty()) {
             inferredClass = receiver;
+        }
+
+        auto addMemberItem = [&](std::string label, CompletionItemKind kind, std::string detail, std::string doc = "") {
+            CompletionItem item;
+            item.label = std::move(label);
+            item.kind = kind;
+            item.detail = std::move(detail);
+            item.documentation = std::move(doc);
+            list.items.push_back(std::move(item));
+        };
+
+        // Built-in / Standard Library Class & Primitive Type Member Completions
+        if (inferredClass == "Hasher" || inferredClass == "crypto.Hasher") {
+            addMemberItem("update", CompletionItemKind::Method, "fn update(data: string): void",
+                          "Feeds a chunk of data into the streaming hash accumulator.");
+            addMemberItem("digestHex", CompletionItemKind::Method, "fn digestHex(): string",
+                          "Finalizes the hash calculation and returns the lowercase hexadecimal digest.");
+            addMemberItem("reset", CompletionItemKind::Method, "fn reset(): void",
+                          "Resets the streaming hash accumulator to its initial state.");
+            return list;
+        }
+        if (inferredClass == "Hmac" || inferredClass == "crypto.Hmac") {
+            addMemberItem("update", CompletionItemKind::Method, "fn update(data: string): void",
+                          "Feeds a chunk of data into the streaming HMAC accumulator.");
+            addMemberItem("digestHex", CompletionItemKind::Method, "fn digestHex(): string",
+                          "Finalizes the HMAC calculation and returns the lowercase hexadecimal authentication tag.");
+            addMemberItem("reset", CompletionItemKind::Method, "fn reset(): void",
+                          "Resets the streaming HMAC instance to its initial keyed state.");
+            return list;
+        }
+        if (inferredClass == "EncryptedPayload" || inferredClass == "crypto.EncryptedPayload") {
+            addMemberItem("ciphertext", CompletionItemKind::Field, "let ciphertext: string",
+                          "Encrypted ciphertext bytes.");
+            addMemberItem("tag", CompletionItemKind::Field, "let tag: string",
+                          "16-byte AEAD authentication tag.");
+            addMemberItem("iv", CompletionItemKind::Field, "let iv: string",
+                          "12-byte initialization vector / nonce.");
+            addMemberItem("aad", CompletionItemKind::Field, "let aad: string",
+                          "Optional associated authenticated data (AAD).");
+            addMemberItem("toCombinedHex", CompletionItemKind::Method, "fn toCombinedHex(): string",
+                          "Serializes the encrypted payload into a single combined hex string.");
+            addMemberItem("fromCombinedHex", CompletionItemKind::Method, "fn fromCombinedHex(hex: string): crypto.EncryptedPayload",
+                          "Reconstructs an EncryptedPayload from a combined hex string.");
+            return list;
+        }
+        if (inferredClass == "QrCode" || inferredClass == "crypto.QrCode") {
+            addMemberItem("size", CompletionItemKind::Field, "let size: int",
+                          "Module grid dimension (e.g. 21 for Version 1).");
+            addMemberItem("version", CompletionItemKind::Field, "let version: int",
+                          "ISO/IEC 18004 QR Code version (1..6).");
+            addMemberItem("matrix", CompletionItemKind::Field, "let matrix: array<array<bool>>",
+                          "2D boolean module grid (true = dark module, false = light module).");
+            addMemberItem("toSvg", CompletionItemKind::Method, "fn toSvg(margin?: int): string",
+                          "Renders the QR code as a standalone vector SVG XML string.");
+            addMemberItem("toAscii", CompletionItemKind::Method, "fn toAscii(margin?: int): string",
+                          "Renders the QR code using Unicode half-block characters for terminal display.");
+            return list;
+        }
+        if (inferredClass == "HttpServer" || inferredClass == "App" || inferredClass == "Server" ||
+            inferredClass == "http.HttpServer" || inferredClass == "http.App" || inferredClass == "http.Server") {
+            addMemberItem("use", CompletionItemKind::Method, "fn use(middleware?: http.Middleware | fn(http.Request, http.Response): void): http.HttpServer",
+                          "Registers middleware (e.g. cors(), recover(), logger()) or custom handler.");
+            addMemberItem("listen", CompletionItemKind::Method, "fn listen(port: int, host?: string): http.HttpServer",
+                          "Starts listening for incoming HTTP connections on host:port.");
+            addMemberItem("stop", CompletionItemKind::Method, "fn stop(): void",
+                          "Gracefully shuts down the HTTP server and terminates active connections.");
+            addMemberItem("isRunning", CompletionItemKind::Method, "fn isRunning(): bool",
+                          "Returns true if the HTTP server is currently running and accepting connections.");
+            addMemberItem("port", CompletionItemKind::Method, "fn port(): int",
+                          "Returns the local port number the server is bound to.");
+            addMemberItem("get", CompletionItemKind::Method, "fn get(path: string, handler: fn(http.Request, http.Response): void): http.HttpServer",
+                          "Registers an HTTP GET route handler.");
+            addMemberItem("post", CompletionItemKind::Method, "fn post(path: string, handler: fn(http.Request, http.Response): void): http.HttpServer",
+                          "Registers an HTTP POST route handler.");
+            addMemberItem("put", CompletionItemKind::Method, "fn put(path: string, handler: fn(http.Request, http.Response): void): http.HttpServer",
+                          "Registers an HTTP PUT route handler.");
+            addMemberItem("delete", CompletionItemKind::Method, "fn delete(path: string, handler: fn(http.Request, http.Response): void): http.HttpServer",
+                          "Registers an HTTP DELETE route handler.");
+            addMemberItem("patch", CompletionItemKind::Method, "fn patch(path: string, handler: fn(http.Request, http.Response): void): http.HttpServer",
+                          "Registers an HTTP PATCH route handler.");
+            addMemberItem("ws", CompletionItemKind::Method, "fn ws(path: string, handler: fn(http.WebSocket, string): void): http.HttpServer",
+                          "Registers a WebSocket route handler.");
+            addMemberItem("serveUi", CompletionItemKind::Method, "fn serveUi(path: string, componentFactory: fn(): ui.Component, title?: string): http.HttpServer",
+                          "Mounts a reactive KML UI component over HTTP/WebSocket LiveView.");
+            addMemberItem("mount", CompletionItemKind::Method, "fn mount(prefix: string, app: http.HttpServer): http.HttpServer",
+                          "Mounts a sub-application router under the given URL prefix.");
+            addMemberItem("route", CompletionItemKind::Method, "fn route(path: string): http.HttpServer",
+                          "Creates a scoped route group for chained HTTP method handlers.");
+            return list;
+        }
+        if (inferredClass == "Request" || inferredClass == "http.Request") {
+            addMemberItem("method", CompletionItemKind::Field, "let method: string", "HTTP request method.");
+            addMemberItem("path", CompletionItemKind::Field, "let path: string", "Request URL path.");
+            addMemberItem("url", CompletionItemKind::Field, "let url: string", "Full request URL.");
+            addMemberItem("body", CompletionItemKind::Field, "let body: string", "Raw request body.");
+            addMemberItem("remoteIp", CompletionItemKind::Field, "let remoteIp: string", "Client remote IP address.");
+            addMemberItem("headers", CompletionItemKind::Field, "let headers: map<string, string>", "Request HTTP headers.");
+            addMemberItem("params", CompletionItemKind::Field, "let params: map<string, string>", "Route path parameters.");
+            addMemberItem("query", CompletionItemKind::Field, "let query: map<string, string>", "Parsed URL query parameters.");
+            addMemberItem("cookies", CompletionItemKind::Field, "let cookies: map<string, string>", "Parsed request cookies.");
+            return list;
+        }
+        if (inferredClass == "Response" || inferredClass == "http.Response") {
+            addMemberItem("status", CompletionItemKind::Method, "fn status(code: int): http.Response", "Sets the HTTP response status code.");
+            addMemberItem("header", CompletionItemKind::Method, "fn header(name: string, value: string): http.Response", "Sets an HTTP response header.");
+            addMemberItem("text", CompletionItemKind::Method, "fn text(body: string): void", "Sends a plain text response.");
+            addMemberItem("html", CompletionItemKind::Method, "fn html(body: string): void", "Sends an HTML response.");
+            addMemberItem("json", CompletionItemKind::Method, "fn json(body: string): void", "Sends a JSON response.");
+            addMemberItem("send", CompletionItemKind::Method, "fn send(body: string): void", "Sends a response body.");
+            addMemberItem("redirect", CompletionItemKind::Method, "fn redirect(url: string, status?: int): void", "Redirects the client to url.");
+            return list;
+        }
+        if (inferredClass == "WebSocket" || inferredClass == "http.WebSocket") {
+            addMemberItem("id", CompletionItemKind::Field, "let id: string", "WebSocket connection ID.");
+            addMemberItem("path", CompletionItemKind::Field, "let path: string", "WebSocket route path.");
+            addMemberItem("remoteIp", CompletionItemKind::Field, "let remoteIp: string", "Client remote IP address.");
+            addMemberItem("send", CompletionItemKind::Method, "fn send(message: string): void", "Sends a message to this WebSocket client.");
+            addMemberItem("broadcast", CompletionItemKind::Method, "fn broadcast(message: string): void", "Broadcasts a message to all connected WebSocket clients.");
+            addMemberItem("close", CompletionItemKind::Method, "fn close(): void", "Closes the WebSocket connection.");
+            return list;
+        }
+        if (inferredClass == "SchemaValidator" || inferredClass == "Schema" ||
+            inferredClass == "http.SchemaValidator" || inferredClass == "http.Schema") {
+            addMemberItem("validate", CompletionItemKind::Method, "fn validate(jsonBody: string): bool", "Validates a JSON string against the schema.");
+            addMemberItem("isValid", CompletionItemKind::Method, "fn isValid(jsonBody: string): bool", "Returns true if jsonBody conforms to the schema.");
+            addMemberItem("errors", CompletionItemKind::Method, "fn errors(jsonBody: string): array<string>", "Returns validation error messages.");
+            return list;
+        }
+        if (inferredClass == "string") {
+            addMemberItem("length", CompletionItemKind::Method, "fn length(): int", "Returns the number of characters in the string.");
+            addMemberItem("trim", CompletionItemKind::Method, "fn trim(): string", "Returns a copy of the string with leading and trailing whitespace removed.");
+            addMemberItem("startsWith", CompletionItemKind::Method, "fn startsWith(prefix: string): bool", "Returns true if the string begins with prefix.");
+            addMemberItem("endsWith", CompletionItemKind::Method, "fn endsWith(suffix: string): bool", "Returns true if the string ends with suffix.");
+            addMemberItem("split", CompletionItemKind::Method, "fn split(delimiter: string): array<string>", "Splits the string into substrings separated by delimiter.");
+            addMemberItem("contains", CompletionItemKind::Method, "fn contains(substr: string): bool", "Returns true if the string contains substr.");
+            addMemberItem("toInt", CompletionItemKind::Method, "fn toInt(): int", "Parses the string as a 64-bit integer.");
+            addMemberItem("tryInt", CompletionItemKind::Method, "fn tryInt(): int | null", "Attempts to parse the string into an int, returning null on failure.");
+            addMemberItem("toFloat", CompletionItemKind::Method, "fn toFloat(): float", "Parses the string as a floating-point number.");
+            addMemberItem("toString", CompletionItemKind::Method, "fn toString(): string", "Returns the string representation.");
+            return list;
+        }
+        if (inferredClass == "array") {
+            addMemberItem("length", CompletionItemKind::Method, "fn length(): int", "Returns the number of elements in the array.");
+            addMemberItem("push", CompletionItemKind::Method, "fn push(element: T): void", "Appends an element to the end of the array.");
+            addMemberItem("pop", CompletionItemKind::Method, "fn pop(): T", "Removes and returns the last element of the array.");
+            addMemberItem("contains", CompletionItemKind::Method, "fn contains(element: T): bool", "Returns true if the array contains element.");
+            return list;
+        }
+        if (inferredClass == "map") {
+            addMemberItem("length", CompletionItemKind::Method, "fn length(): int", "Returns the number of key-value entries in the map.");
+            addMemberItem("keys", CompletionItemKind::Method, "fn keys(): array<K>", "Returns an array of all keys in the map.");
+            addMemberItem("values", CompletionItemKind::Method, "fn values(): array<V>", "Returns an array of all values in the map.");
+            addMemberItem("contains", CompletionItemKind::Method, "fn contains(key: K): bool", "Returns true if the map contains key.");
+            return list;
+        }
+        if (inferredClass == "int" || inferredClass == "float" || inferredClass == "bool" || inferredClass == "char") {
+            addMemberItem("toString", CompletionItemKind::Method, "fn toString(): string", "Converts value into its string representation.");
+            if (inferredClass == "int" || inferredClass == "float") {
+                addMemberItem("toInt", CompletionItemKind::Method, "fn toInt(): int", "Converts number to int.");
+                addMemberItem("toFloat", CompletionItemKind::Method, "fn toFloat(): float", "Converts number to float.");
+            }
+            return list;
         }
 
         for (const auto& decl : ast.declarations) {
@@ -1528,7 +1725,8 @@ CompletionList Analyzer::getCompletions(
         {"json", "Standard Library Module: `json` (JSON serialization and parsing)"},
         {"net", "Standard Library Module: `net` (Networking, HTTP and sockets)"},
         {"test", "Standard Library Module: `test` (Unit testing and assertions)"},
-        {"crypto", "Standard Library Module: `crypto` (Hashing, HMAC, AEAD ciphers, CSPRNG, and QR/barcodes)"}
+        {"crypto", "Standard Library Module: `crypto` (Hashing, HMAC, AEAD ciphers, CSPRNG, and QR/barcodes)"},
+        {"ui", "Standard Library Module: `ui` (Universal Reactive UI, TUI, Flexbox, and Web VDOM)"}
     };
     for (const auto& [mod, desc] : stdModules) {
         if (seen.insert(mod).second) {
@@ -1537,6 +1735,38 @@ CompletionList Analyzer::getCompletions(
             item.kind = CompletionItemKind::Module;
             item.detail = "Standard library module";
             item.documentation = desc;
+            list.items.push_back(std::move(item));
+        }
+    }
+
+    // 3f. KML Runes, Primitives and Directives
+    static const std::vector<std::pair<std::string, std::string>> kmlRunes = {
+        {"$state", "KML State Rune: `$state(initialValue)` creates reactive local state"},
+        {"$derived", "KML Derived Rune: `$derived(expression)` creates computed reactive state"},
+        {"$effect", "KML Effect Rune: `$effect(() => { ... })` creates reactive side effect"},
+        {"$props", "KML Props Rune: `$props()` retrieves component props"},
+        {"$bind", "KML Two-Way Binding: `$bind.value={state}` binds property bidirectionally"}
+    };
+    for (const auto& [rune, kmlDoc] : kmlRunes) {
+        if (seen.insert(rune).second) {
+            CompletionItem item;
+            item.label = rune;
+            item.kind = CompletionItemKind::Keyword;
+            item.detail = "KML Rune";
+            item.documentation = kmlDoc;
+            list.items.push_back(std::move(item));
+        }
+    }
+
+    static const std::vector<std::string> kmlTags = {
+        "box", "vstack", "hstack", "text", "button", "input", "scroll", "slot"
+    };
+    for (const auto& tag : kmlTags) {
+        if (seen.insert(tag).second) {
+            CompletionItem item;
+            item.label = tag;
+            item.kind = CompletionItemKind::Class;
+            item.detail = "KML Layout Primitive";
             list.items.push_back(std::move(item));
         }
     }

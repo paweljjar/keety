@@ -178,6 +178,9 @@ private:
     bool has_http_import_{false};
     std::unordered_set<std::string> http_aliases_{};
     std::unordered_set<std::string> imported_http_symbols_{};
+    bool has_ui_import_{false};
+    std::unordered_set<std::string> ui_aliases_{};
+    std::unordered_set<std::string> imported_ui_symbols_{};
     std::vector<std::string> test_function_names_{};
     std::unordered_set<std::string> user_imported_modules_{};
     mutable LineDirectiveTracker line_tracker_;

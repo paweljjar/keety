@@ -10,40 +10,35 @@ Fallible operations (such as malformed JSON syntax, missing dot-paths, type mism
 
 ## 1. Importing the Module
 
-The `json` module can be imported using qualified module imports, module aliases, or selective member imports:
+The `json` module can be imported using any of the four standard import forms (as well as module aliases):
 
 ```keet
-// Qualified import
+// 1. Unquoted module import
 import json;
+
+// 2. Quoted module import
+import "json";
+
+// 3. Unquoted selective import
+from json import getString, getIntOr, stringify;
+
+// 4. Quoted selective import
+from "json" import getString, getIntOr, stringify;
+```
+
+```keet
+// Module alias import
+import json as j;
 
 fn main(): void {
     let raw: string = "{\"host\":\"localhost\",\"port\":8080}";
     if (json.isValid(raw)) {
-        let host: string = json.getString(raw, "host");
+        let host: string = getString(raw, "host");
         let port: int = json.getInt(raw, "port");
+        let retries: int = getIntOr(raw, "retries", 3);
     }
-}
-```
-
-```keet
-// Module alias
-import json as j;
-
-fn main(): void {
     let doc: string = j.setString(j.emptyObject(), "status", "ok");
     let formatted: string = j.format(doc, 2);
-}
-```
-
-```keet
-// Selective import
-from "json" import getString, getIntOr, stringify;
-
-fn main(): void {
-    let raw: string = "{\"service\":\"keety\"}";
-    let name: string = getString(raw, "service");
-    let retries: int = getIntOr(raw, "retries", 3);
-    let serialized: string = stringify([1, 2, 3]);
 }
 ```
 

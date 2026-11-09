@@ -1,0 +1,157 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Keet Markup Language",
+  "scopeName": "source.kml",
+  "fileTypes": ["kml"],
+  "patterns": [
+    {
+      "include": "#script-block"
+    },
+    {
+      "include": "#style-block"
+    },
+    {
+      "include": "#template-tags"
+    },
+    {
+      "include": "#control-blocks"
+    },
+    {
+      "include": "#interpolation"
+    }
+  ],
+  "repository": {
+    "script-block": {
+      "begin": "(<script\\b[^>]*>)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.kml entity.name.tag.kml" }
+      },
+      "end": "(</script>)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.tag.kml entity.name.tag.kml" }
+      },
+      "patterns": [
+        {
+          "match": "\\$(state|derived|effect|props)\\b",
+          "name": "keyword.control.rune.keet"
+        },
+        {
+          "include": "source.keet"
+        }
+      ]
+    },
+    "style-block": {
+      "begin": "(<style\\b[^>]*>)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.kml entity.name.tag.kml" }
+      },
+      "end": "(</style>)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.tag.kml entity.name.tag.kml" }
+      },
+      "patterns": [
+        {
+          "include": "source.css"
+        }
+      ]
+    },
+    "template-tags": {
+      "patterns": [
+        {
+          "begin": "(<)([a-zA-Z0-9_:-]+)",
+          "beginCaptures": {
+            "1": { "name": "punctuation.definition.tag.begin.kml" },
+            "2": { "name": "entity.name.tag.kml support.class.component.kml" }
+          },
+          "end": "(/?>)",
+          "endCaptures": {
+            "1": { "name": "punctuation.definition.tag.end.kml" }
+          },
+          "patterns": [
+            {
+              "include": "#tag-attributes"
+            }
+          ]
+        },
+        {
+          "match": "(</)([a-zA-Z0-9_:-]+)(>)",
+          "captures": {
+            "1": { "name": "punctuation.definition.tag.begin.kml" },
+            "2": { "name": "entity.name.tag.kml support.class.component.kml" },
+            "3": { "name": "punctuation.definition.tag.end.kml" }
+          }
+        }
+      ]
+    },
+    "tag-attributes": {
+      "patterns": [
+        {
+          "match": "(@[a-zA-Z0-9_-]+)(\\.[a-zA-Z0-9_()]+)*",
+          "captures": {
+            "1": { "name": "entity.other.attribute-name.directive.event.kml" },
+            "2": { "name": "entity.other.attribute-name.modifier.kml" }
+          }
+        },
+        {
+          "match": "(\\$(?:bind)(?:\\.[a-zA-Z0-9_]+)*)",
+          "name": "entity.other.attribute-name.directive.bind.kml"
+        },
+        {
+          "match": "\\b([a-zA-Z0-9_:-]+)=",
+          "captures": {
+            "1": { "name": "entity.other.attribute-name.kml" }
+          }
+        },
+        {
+          "begin": "\"",
+          "end": "\"",
+          "name": "string.quoted.double.kml"
+        },
+        {
+          "begin": "'",
+          "end": "'",
+          "name": "string.quoted.single.kml"
+        },
+        {
+          "include": "#interpolation"
+        }
+      ]
+    },
+    "control-blocks": {
+      "patterns": [
+        {
+          "match": "\\{([#/])(if|for|await)\\b([^}]*)\\}",
+          "captures": {
+            "1": { "name": "punctuation.definition.block.kml" },
+            "2": { "name": "keyword.control.kml" },
+            "3": { "name": "meta.embedded.expression.keet" }
+          }
+        },
+        {
+          "match": "\\{(:)(else\\s*if|else|then|catch)\\b([^}]*)\\}",
+          "captures": {
+            "1": { "name": "punctuation.definition.block.kml" },
+            "2": { "name": "keyword.control.kml" },
+            "3": { "name": "meta.embedded.expression.keet" }
+          }
+        }
+      ]
+    },
+    "interpolation": {
+      "begin": "\\{",
+      "beginCaptures": {
+        "0": { "name": "punctuation.section.embedded.begin.kml" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.section.embedded.end.kml" }
+      },
+      "patterns": [
+        {
+          "include": "source.keet"
+        }
+      ]
+    }
+  }
+}
+

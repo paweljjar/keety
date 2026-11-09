@@ -50,6 +50,13 @@ TEST_CASE("ModulePathResolver resolves standard library modules", "[resolver]") 
         REQUIRE(mathMod->isStandardLibrary());
         REQUIRE(mathMod->moduleName == "math");
 
+        for (const char* pkg : {"crypto", "fs", "http", "io", "json", "math", "net", "sys", "test", "time", "ui"}) {
+            auto mod = resolver.resolve("src/main.keet", pkg);
+            REQUIRE(mod.has_value());
+            REQUIRE(mod->isStandardLibrary());
+            REQUIRE(mod->moduleName == pkg);
+        }
+
         auto netHttpMod = resolver.resolve("src/main.keet", "net.http");
         REQUIRE(netHttpMod.has_value());
         REQUIRE(netHttpMod->isStandardLibrary());

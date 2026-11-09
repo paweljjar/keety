@@ -4,6 +4,7 @@
 #include <keety/emitter/cpp_emitter.hpp>
 #include <keety/emitter/header_emitter.hpp>
 #include <keety/ir/ast_lowerer.hpp>
+#include <keety/kml/kml_parser.hpp>
 #include <keety/lexer/lexer.hpp>
 #include <keety/parser/parser.hpp>
 #include <keety/resolver/cycle_detector.hpp>
@@ -830,6 +831,10 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
     module_scopes["<stdlib>/json"] = sema::createStdlibModuleScope("json", universe);
     module_scopes["<stdlib>/net"] = sema::createStdlibModuleScope("net", universe);
     module_scopes["<stdlib>/test"] = sema::createStdlibModuleScope("test", universe);
+    module_scopes["<stdlib>/crypto"] = sema::createStdlibModuleScope("crypto", universe);
+    module_scopes["<stdlib>/http"] = sema::createStdlibModuleScope("http", universe);
+    module_scopes["<stdlib>/net.http"] = sema::createStdlibModuleScope("net.http", universe);
+    module_scopes["<stdlib>/ui"] = sema::createStdlibModuleScope("ui", universe);
 
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
@@ -1005,6 +1010,10 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
     module_scopes["<stdlib>/json"] = sema::createStdlibModuleScope("json", universe);
     module_scopes["<stdlib>/net"] = sema::createStdlibModuleScope("net", universe);
     module_scopes["<stdlib>/test"] = sema::createStdlibModuleScope("test", universe);
+    module_scopes["<stdlib>/crypto"] = sema::createStdlibModuleScope("crypto", universe);
+    module_scopes["<stdlib>/http"] = sema::createStdlibModuleScope("http", universe);
+    module_scopes["<stdlib>/net.http"] = sema::createStdlibModuleScope("net.http", universe);
+    module_scopes["<stdlib>/ui"] = sema::createStdlibModuleScope("ui", universe);
 
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
@@ -1103,6 +1112,10 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
         break;
     }
     case EmitTarget::Hpp: {
+        if (target_node->isKmlComponent && !target_node->kmlGeneratedHpp.empty()) {
+            content = target_node->kmlGeneratedHpp;
+            break;
+        }
         ir::AstLowerer lowerer(&emitter);
         auto ir_mod = lowerer.lower_module(*target_node->ast);
         if (emitter.hasErrors() || !ir_mod) {
@@ -1118,6 +1131,10 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
         break;
     }
     case EmitTarget::Cpp: {
+        if (target_node->isKmlComponent && !target_node->kmlGeneratedCpp.empty()) {
+            content = target_node->kmlGeneratedCpp;
+            break;
+        }
         ir::AstLowerer lowerer(&emitter);
         auto ir_mod = lowerer.lower_module(*target_node->ast);
         if (emitter.hasErrors() || !ir_mod) {
@@ -1251,6 +1268,10 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     module_scopes["<stdlib>/json"] = sema::createStdlibModuleScope("json", universe);
     module_scopes["<stdlib>/net"] = sema::createStdlibModuleScope("net", universe);
     module_scopes["<stdlib>/test"] = sema::createStdlibModuleScope("test", universe);
+    module_scopes["<stdlib>/crypto"] = sema::createStdlibModuleScope("crypto", universe);
+    module_scopes["<stdlib>/http"] = sema::createStdlibModuleScope("http", universe);
+    module_scopes["<stdlib>/net.http"] = sema::createStdlibModuleScope("net.http", universe);
+    module_scopes["<stdlib>/ui"] = sema::createStdlibModuleScope("ui", universe);
 
     // 1. Semantic and type checking across all modules
     for (const auto* node : ordered_nodes) {
@@ -1377,35 +1398,45 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
             continue;
         }
 
-        ir::AstLowerer lowerer(&emitter);
-        auto ir_mod = lowerer.lower_module(*node->ast);
-        if (emitter.hasErrors() || !ir_mod) {
-            for (const auto& d : emitter.getDiagnostics()) {
-                err << emitter.format(d);
+        std::string hpp_content;
+        std::string cpp_content;
+
+        if (node->isKmlComponent && !node->kmlGeneratedHpp.empty()) {
+            hpp_content = node->kmlGeneratedHpp;
+            cpp_content = node->kmlGeneratedCpp;
+        } else {
+            ir::AstLowerer lowerer(&emitter);
+            auto ir_mod = lowerer.lower_module(*node->ast);
+            if (emitter.hasErrors() || !ir_mod) {
+                for (const auto& d : emitter.getDiagnostics()) {
+                    err << emitter.format(d);
+                }
+                return std::nullopt;
             }
-            return std::nullopt;
+
+            // Header emission
+            emitter::HeaderEmitterOptions h_opts;
+            h_opts.emit_line_directives = options.emit_line_directives;
+            emitter::HeaderEmitter header_emitter(*node->ast, *ir_mod, h_opts);
+            hpp_content = header_emitter.emit();
+
+            // C++ source emission
+            emitter::CppEmitterOptions cpp_opts;
+            cpp_opts.header_include = "\"" + node->moduleName + ".hpp\"";
+            cpp_opts.emit_line_directives = options.emit_line_directives;
+            cpp_opts.source_manager = &sm;
+            cpp_opts.source_file_path = node->canonicalPath;
+            if (node->canonicalPath == canonical_entry.string()) {
+                cpp_opts.is_root_module = true;
+            }
+            emitter::CppEmitter cpp_emitter(*node->ast, *ir_mod, cpp_opts);
+            cpp_content = cpp_emitter.emit();
         }
 
-        // Header emission
-        emitter::HeaderEmitterOptions h_opts;
-        h_opts.emit_line_directives = options.emit_line_directives;
-        emitter::HeaderEmitter header_emitter(*node->ast, *ir_mod, h_opts);
-        std::string hpp_content = header_emitter.emit();
         std::filesystem::path hpp_path = build_dir / (node->moduleName + ".hpp");
         std::ofstream hpp_file(hpp_path);
         hpp_file << hpp_content;
 
-        // C++ source emission
-        emitter::CppEmitterOptions cpp_opts;
-        cpp_opts.header_include = "\"" + node->moduleName + ".hpp\"";
-        cpp_opts.emit_line_directives = options.emit_line_directives;
-        cpp_opts.source_manager = &sm;
-        cpp_opts.source_file_path = node->canonicalPath;
-        if (node->canonicalPath == canonical_entry.string()) {
-            cpp_opts.is_root_module = true;
-        }
-        emitter::CppEmitter cpp_emitter(*node->ast, *ir_mod, cpp_opts);
-        std::string cpp_content = cpp_emitter.emit();
         std::filesystem::path cpp_path = build_dir / (node->moduleName + ".cpp");
         std::ofstream cpp_file(cpp_path);
         cpp_file << cpp_content;
@@ -1447,7 +1478,7 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     CompileOptions comp_opts;
     comp_opts.opt_level = options.opt_level;
     comp_opts.wrapv = options.wrapv;
-    comp_opts.cpp_standard = "c++17";
+    comp_opts.cpp_standard = "c++20";
     comp_opts.compile_only = true;
     comp_opts.debug_symbols = options.debug_info || (options.opt_level == OptimizationLevel::O0);
     comp_opts.include_directories.push_back(build_dir);
@@ -1607,13 +1638,14 @@ std::vector<std::filesystem::path> CliDriver::discover_test_files(const std::fil
             continue;
         }
 
-        if (entry.is_regular_file(ec) && entry.path().extension() == ".keet") {
+        if (entry.is_regular_file(ec) && (entry.path().extension() == ".keet" || entry.path().extension() == ".kml")) {
             bool matches = false;
-            // 1. *.test.keet
-            if (filename.size() > 10 && filename.rfind(".test.keet") == filename.size() - 10) {
+            // 1. *.test.keet or *.test.kml
+            if ((filename.size() > 10 && filename.rfind(".test.keet") == filename.size() - 10) ||
+                (filename.size() > 9 && filename.rfind(".test.kml") == filename.size() - 9)) {
                 matches = true;
             }
-            // 2. test_*.keet
+            // 2. test_*.keet or test_*.kml
             else if (filename.rfind("test_", 0) == 0) {
                 matches = true;
             }
@@ -2160,7 +2192,7 @@ std::vector<std::filesystem::path> CliDriver::discover_keet_files(const std::fil
             continue;
         }
 
-        if (entry.is_regular_file(ec) && entry.path().extension() == ".keet") {
+        if (entry.is_regular_file(ec) && (entry.path().extension() == ".keet" || entry.path().extension() == ".kml")) {
             results.push_back(entry.path());
         }
     }
@@ -2497,12 +2529,22 @@ int CliDriver::execute_lint(const CliOptions& options, std::ostream& out, std::o
         }
 
         auto fileId = sm.addBuffer(file_path.string(), source);
-        lexer::Lexer lexer(fileId, source);
-        lexer.setCaptureComments(true);
         diag::DiagnosticEmitter parseEmitter(sm, options.color_mode);
-        parser::Parser parser(lexer, &parseEmitter);
-        auto moduleAst = parser.parseModule(file_path.string());
-        auto comments = lexer.getCapturedComments();
+        parser::ModuleAST moduleAst;
+        std::vector<lexer::Comment> comments;
+
+        if (file_path.extension() == ".kml") {
+            kml::KmlParser kmlParser(source, fileId, &sm, &parseEmitter);
+            (void)kmlParser.parseDocument(file_path.stem().string());
+            moduleAst.fileId = fileId;
+            moduleAst.moduleName = file_path.string();
+        } else {
+            lexer::Lexer lexer(fileId, source);
+            lexer.setCaptureComments(true);
+            parser::Parser parser(lexer, &parseEmitter);
+            moduleAst = parser.parseModule(file_path.string());
+            comments = lexer.getCapturedComments();
+        }
 
         if (parseEmitter.hasErrors()) {
             for (const auto& d : parseEmitter.getDiagnostics()) {

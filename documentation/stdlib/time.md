@@ -10,37 +10,31 @@ Fallible domain operations (such as negative sleep durations, `NaN`/`Infinity` i
 
 ## 1. Importing the Module
 
-The `time` module can be imported using qualified module imports, module aliases, or selective member imports:
+The `time` module can be imported using any of the four standard import forms (as well as module aliases):
 
 ```keet
-// Qualified import
+// 1. Unquoted module import
 import time;
 
-fn main(): void {
-    let t0: int = time.nowMs();
-    time.sleepMs(10);
-    let elapsed: int = time.elapsedMs(t0);
-}
+// 2. Quoted module import
+import "time";
+
+// 3. Unquoted selective import
+from time import nowMs, sleepMs, MS_PER_SEC, monotonicSec, elapsedSec;
+
+// 4. Quoted selective import
+from "time" import nowMs, sleepMs, MS_PER_SEC, monotonicSec, elapsedSec;
 ```
 
 ```keet
-// Module alias
+// Module alias import
 import time as t;
 
 fn main(): void {
-    let now: int = t.now();
-    let iso: string = t.formatIso8601(now);
-}
-```
-
-```keet
-// Selective import
-from "time" import nowMs, sleepMs, MS_PER_SEC, monotonicSec, elapsedSec;
-
-fn main(): void {
-    let t0: float = monotonicSec();
-    sleepMs(5);
-    let dt: float = elapsedSec(0);
+    let t0: int = time.nowMs();
+    sleepMs(10);
+    let elapsed: int = time.elapsedMs(t0);
+    let iso: string = t.formatIso8601(t.now());
 }
 ```
 

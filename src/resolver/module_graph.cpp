@@ -1,4 +1,6 @@
 #include <keety/resolver/module_graph.hpp>
+#include <keety/kml/kml_parser.hpp>
+#include <keety/kml/kml_lowerer.hpp>
 
 #include <fstream>
 #include <sstream>
@@ -122,11 +124,31 @@ bool ModuleGraph::buildGraph(const std::filesystem::path& entryFilePath,
     diag::FileId fileId = sourceManager.addBuffer(canonicalStr, content);
     node.fileId = fileId;
 
-    lexer::Lexer lexer(fileId, content);
-    parser::Parser parser(lexer, emitter);
-    auto parsedModule = parser.parseModule(modName);
+    if (canonicalEntry.extension() == ".kml") {
+        // Parse and lower KML Single-File Component
+        kml::KmlParser kmlParser(content, fileId, &sourceManager, emitter);
+        auto doc = kmlParser.parseDocument(modName);
+        kml::KmlLowerer lowerer(doc, &sourceManager);
+        auto lowered = lowerer.lower();
+        node.isKmlComponent = true;
+        node.kmlGeneratedHpp = lowered.generatedHppCode;
+        node.kmlGeneratedCpp = lowered.generatedCppCode;
 
-    node.ast = std::make_shared<parser::ModuleAST>(std::move(parsedModule));
+        // Feed generated KeetScript interface code into standard KeetScript parser
+        const std::string& keetInterface = lowered.generatedInterfaceKeet.empty()
+            ? lowered.generatedKeetScript
+            : lowered.generatedInterfaceKeet;
+        diag::FileId generatedFileId = sourceManager.addBuffer(canonicalStr + ".lowered.keet", keetInterface);
+        lexer::Lexer lexer(generatedFileId, keetInterface);
+        parser::Parser parser(lexer, emitter);
+        auto parsedModule = parser.parseModule(modName);
+        node.ast = std::make_shared<parser::ModuleAST>(std::move(parsedModule));
+    } else {
+        lexer::Lexer lexer(fileId, content);
+        parser::Parser parser(lexer, emitter);
+        auto parsedModule = parser.parseModule(modName);
+        node.ast = std::make_shared<parser::ModuleAST>(std::move(parsedModule));
+    }
 
     // Inspect import declarations to construct directed edges
     for (const auto& decl : node.ast->declarations) {

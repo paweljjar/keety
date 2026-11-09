@@ -1,0 +1,9 @@
+{
+  "buildDir": "build",
+  "entry": "src/main.keet",
+  "name": "ui_demo",
+  "scripts": {
+    "start": "keety run src/main.keet"
+  },
+  "version": "0.1.0"
+}

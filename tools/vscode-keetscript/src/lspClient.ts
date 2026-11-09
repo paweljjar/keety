@@ -100,9 +100,12 @@ export class LspClientManager implements vscode.Disposable {
     };
 
     const clientOptions: LanguageClientOptions = {
-      documentSelector: [{ scheme: 'file', language: 'keetscript' }],
+      documentSelector: [
+        { scheme: 'file', language: 'keetscript' },
+        { scheme: 'file', language: 'kml' }
+      ],
       synchronize: {
-        fileEvents: vscode.workspace.createFileSystemWatcher('**/*.keet')
+        fileEvents: vscode.workspace.createFileSystemWatcher('**/*.{keet,kml}')
       }
     };
 

@@ -201,7 +201,7 @@ flowchart TD
 
 1. **Lexer (`keety::lexer`):** UTF-8 maximal-munch tokenizer with context-sensitive disambiguation for blank identifiers (`_`), generic `<TypeArgs>`, nested closing brackets (`>>`), and recursive `${...}` template string interpolation.
 2. **Parser (`keety::parser`):** Recursive descent + Pratt expression parser producing a strongly typed AST with exact `SourceSpan` tracking.
-3. **Module Resolver (`keety::resolver`):** Resolves standard library (`io`, `fs`, `sys`, `math`, `time`, `json`, `net`), `keet_modules/`, and relative imports into a dependency graph, detects cycles via Tarjan's SCC algorithm, and computes topological initialization order.
+3. **Module Resolver (`keety::resolver`):** Resolves standard library (`crypto`, `fs`, `http`, `io`, `json`, `math`, `net`, `sys`, `test`, `time`, `ui`), `keet_modules/`, and relative `.keet` / `.kml` imports into a dependency graph, detects cycles via Tarjan's SCC algorithm, and computes topological initialization order.
 4. **Semantic Analyzer & Type Checker (`keety::sema`, `keety::typechecker`):** Enforces strict no-shadowing, exported `const`-view rules, union algebra normalization, flow-sensitive type narrowing with mutation invalidation, and the 5 `mut` borrow-checking rules.
 5. **KeetIR & Optimization Passes (`keety::ir`):** Lowers the AST into basic-block intermediate representation and runs static optimization passes:
     - *Const-Ref Promotion:* Promotes unmutated by-value parameters to `const T&`.
@@ -214,17 +214,30 @@ flowchart TD
 
 ## Standard Library
 
-KeetScript ships with a header-only C++20 runtime (`runtime/keet/`) and seven built-in standard library modules:
+KeetScript ships with a header-only C++20 runtime (`runtime/keet/`) and 11 built-in standard library packages (`crypto`, `fs`, `http`, `io`, `json`, `math`, `net`, `sys`, `test`, `time`, `ui`).
+
+Every standard library package can be imported in any of four ways:
+
+```keet
+import crypto;
+import "fs";
+from http import app;
+from "io" import print;
+```
 
 | Module | Import | Capabilities |
 | :--- | :--- | :--- |
-| **`io`** | `import io;` | Console output (`print`, `println`, `eprint`, `eprintln`) and standard input (`readLine`, `readAll`) |
+| **`crypto`** | `import crypto;` | Hashing (SHA-256/512, SHA3, BLAKE3), HMAC, AEAD (AES-256-GCM, ChaCha20-Poly1305), CSPRNG, Base64/Hex, Code 128 barcodes & QR codes |
 | **`fs`** | `import fs;` | File I/O (`readText`, `readLines`, `writeText`, `appendText`), path manipulation, and directory traversal |
-| **`sys`** | `import sys;` | Command-line arguments (`args`), environment variables (`getEnv`, `getEnvOr`, `setEnv`, `unsetEnv`, `hasEnv`), process exit, and platform metadata |
-| **`math`** | `import math;` | Constants (`PI`, `E`, `TAU`), trigonometry, logarithms, rounding, and clamping utilities |
-| **`time`** | `import time;` | Monotonic high-resolution timers (`nowNs`, `nowMs`), wall-clock timestamps, and thread sleep (`sleepMs`) |
+| **`http`** | `import http;` | Non-blocking HTTP/1.1 & RFC 6455 WebSocket server, radix router, middleware pipeline, schema validation, and `.kml` Reactive UI serving (`serveUi`) |
+| **`io`** | `import io;` | Console output (`print`, `println`, `eprint`, `eprintln`), ANSI colors, and standard input (`readLine`, `readAll`) |
 | **`json`** | `import json;` | RFC 8259 JSON validation, dot-path queries (`getString`, `getInt`, `getBool`, `*Or`), collection parsers, immutable builders, and polymorphic `stringify` |
+| **`math`** | `import math;` | Constants (`PI`, `E`, `TAU`), trigonometry, logarithms, rounding, clamping utilities, and PRNG |
 | **`net`** | `import net;` | RFC 3986 URL & query parsing, DNS/IP utilities, HTTP/1.1 & HTTPS client (`get`, `postJson`, `request`, `download`), and handle-based TCP/UDP sockets |
+| **`sys`** | `import sys;` | Command-line arguments (`args`), environment variables (`getEnv`, `getEnvOr`, `setEnv`, `unsetEnv`, `hasEnv`), process exit, and platform metadata |
+| **`test`** | `import test;` | Unit testing suites (`suite`), test cases (`case`), deep equality assertions (`assertEq`), and exception assertions (`assertZonks`) |
+| **`time`** | `import time;` | Monotonic high-resolution timers (`nowNs`, `nowMs`), wall-clock timestamps, calendar formatting, and thread sleep (`sleepMs`) |
+| **`ui`** | `import ui;` | Compile-time reactive UI engine for `.kml` Single-File Components (`$state`, `$derived`, `$effect`), Scene Graph nodes, TUI, Web VDOM, and Headless backends |
 
 ---
 
@@ -298,11 +311,17 @@ Detailed specifications and roadmaps are available across the repository:
 - [Keety Compiler Architecture Specification](documentation/Keety%20Compiler%20Architecture%20Specification.md) — Deep dive into the 6-stage pipeline, KeetIR optimization passes, and C++20 emission templates.
 - [KeetScript Conformance Test Suite and Benchmark Specification](documentation/KeetScript%20Conformance%20Test%20Suite%20and%20Benchmark%20Specification.md) — Validation test cases and benchmark methodology.
 - **Standard Library Reference:**
-    - [`io` — Input / Output](documentation/stdlib/io.md)
+    - [`crypto` — Cryptography, AEAD & Barcodes/QR](documentation/stdlib/crypto.md)
     - [`fs` — File System](documentation/stdlib/fs.md)
-    - [`sys` — System & Process](documentation/stdlib/sys.md)
+    - [`http` — HTTP/1.1, WebSockets & Reactive UI Server](documentation/stdlib/http.md)
+    - [`io` — Input / Output](documentation/stdlib/io.md)
+    - [`json` — JSON Parsing & Serialization](documentation/stdlib/json.md)
     - [`math` — Mathematical Functions](documentation/stdlib/math.md)
+    - [`net` — Networking, HTTP Client & Sockets](documentation/stdlib/net.md)
+    - [`sys` — System & Process](documentation/stdlib/sys.md)
+    - [`test` — Unit Testing & Assertions](documentation/stdlib/test.md)
     - [`time` — Clocks & Durations](documentation/stdlib/time.md)
+    - [`ui` — Reactive UI Engine & `.kml` Components](documentation/stdlib/ui.md)
 
 ---
 

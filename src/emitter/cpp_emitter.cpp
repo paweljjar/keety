@@ -183,31 +183,31 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
         if (!decl) continue;
         if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
             const std::string& p = imp->getModulePath();
-            if (p == "io" || p == "std.io" || p == "keet.io") {
+            if (p == "io") {
                 has_io_import_ = true;
                 add_standard_header("<keet/runtime.hpp>");
                 for (const auto& s : imp->getSymbols()) {
                     imported_io_symbols_.insert(s.getEffectiveName());
                 }
-            } else if (p == "fs" || p == "std.fs" || p == "keet.fs") {
+            } else if (p == "fs") {
                 has_fs_import_ = true;
                 add_standard_header("<keet/runtime.hpp>");
                 for (const auto& s : imp->getSymbols()) {
                     imported_fs_symbols_.insert(s.getEffectiveName());
                 }
-            } else if (p == "sys" || p == "std.sys" || p == "keet.sys") {
+            } else if (p == "sys") {
                 has_sys_import_ = true;
                 add_standard_header("<keet/runtime.hpp>");
                 for (const auto& s : imp->getSymbols()) {
                     imported_sys_symbols_.insert(s.getEffectiveName());
                 }
-            } else if (p == "math" || p == "std.math" || p == "keet.math") {
+            } else if (p == "math") {
                 has_math_import_ = true;
                 add_standard_header("<keet/runtime.hpp>");
                 for (const auto& s : imp->getSymbols()) {
                     imported_math_symbols_.insert(s.getEffectiveName());
                 }
-            } else if (p == "time" || p == "std.time" || p == "keet.time") {
+            } else if (p == "time") {
                 has_time_import_ = true;
                 add_standard_header("<keet/runtime.hpp>");
                 for (const auto& s : imp->getSymbols()) {
@@ -220,7 +220,7 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                         imported_time_symbols_.insert(sym_name);
                     }
                 }
-            } else if (p == "json" || p == "std.json" || p == "keet.json") {
+            } else if (p == "json") {
                 has_json_import_ = true;
                 add_standard_header("<keet/runtime.hpp>");
                 if (!imp->getModuleAlias().empty()) {
@@ -229,7 +229,7 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                 for (const auto& s : imp->getSymbols()) {
                     imported_json_symbols_.insert(s.getEffectiveName());
                 }
-            } else if (p == "net" || p == "std.net" || p == "keet.net") {
+            } else if (p == "net") {
                 has_net_import_ = true;
                 add_standard_header("<keet/runtime.hpp>");
                 if (!imp->getModuleAlias().empty()) {
@@ -238,7 +238,7 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                 for (const auto& s : imp->getSymbols()) {
                     imported_net_symbols_.insert(s.getEffectiveName());
                 }
-            } else if (p == "test" || p == "std.test" || p == "keet.test") {
+            } else if (p == "test") {
                 has_test_import_ = true;
                 add_standard_header("<keet/runtime.hpp>");
                 if (!imp->getModuleAlias().empty()) {
@@ -247,7 +247,7 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                 for (const auto& s : imp->getSymbols()) {
                     imported_test_symbols_.insert(s.getEffectiveName());
                 }
-            } else if (p == "crypto" || p == "std.crypto" || p == "keet.crypto" || p == "crypto.hash") {
+            } else if (p == "crypto" || p == "crypto.hash") {
                 has_crypto_import_ = true;
                 add_standard_header("<keet/runtime.hpp>");
                 if (!imp->getModuleAlias().empty()) {
@@ -256,8 +256,7 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                 for (const auto& s : imp->getSymbols()) {
                     imported_crypto_symbols_.insert(s.getEffectiveName());
                 }
-            } else if (p == "net.http" || p == "std.net.http" || p == "keet.net.http" ||
-                       p == "http" || p == "std.http" || p == "keet.http") {
+            } else if (p == "net.http" || p == "http") {
                 has_http_import_ = true;
                 add_standard_header("<keet/runtime.hpp>");
                 if (!imp->getModuleAlias().empty()) {
@@ -266,6 +265,16 @@ void CppEmitter::collect_declarations(const std::vector<std::unique_ptr<ast::Dec
                 for (const auto& s : imp->getSymbols()) {
                     imported_http_symbols_.insert(s.getEffectiveName());
                 }
+            } else if (p == "ui") {
+                has_ui_import_ = true;
+                add_standard_header("<keet/runtime.hpp>");
+                if (!imp->getModuleAlias().empty()) {
+                    ui_aliases_.insert(imp->getModuleAlias());
+                }
+                for (const auto& s : imp->getSymbols()) {
+                    imported_ui_symbols_.insert(s.getEffectiveName());
+                }
+                user_imported_modules_.insert("ui");
             } else {
                 std::string mod_id = !imp->getModuleAlias().empty() ? imp->getModuleAlias() : p;
                 if (mod_id.find('/') != std::string::npos || mod_id.find('\\') != std::string::npos) {
@@ -560,6 +569,9 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             if (obj_id->getName() == "http" || http_aliases_.count(obj_id->getName())) {
                 return "::keet::net::http::" + mem->getMemberName();
             }
+            if (obj_id->getName() == "ui" || ui_aliases_.count(obj_id->getName())) {
+                return "::keet::ui::" + mem->getMemberName();
+            }
         }
         if (const auto* obj_mem = dynamic_cast<const ast::MemberExpr*>(mem->getObject())) {
             if (const auto* root_id = dynamic_cast<const ast::IdentExpr*>(obj_mem->getObject())) {
@@ -671,6 +683,9 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
             }
             if (obj_s == "http" || obj_s == "::keet::net::http" || http_aliases_.count(obj_s)) {
                 return "::keet::net::http::" + m_name + "(" + args_str + ")";
+            }
+            if (obj_s == "ui" || obj_s == "::keet::ui" || ui_aliases_.count(obj_s)) {
+                return "::keet::ui::" + m_name + "(" + args_str + ")";
             }
             // Container & method mapping
             if (m_name == "delete") {
@@ -851,6 +866,9 @@ std::string CppEmitter::translate_expression(const ast::Expr* expr) const {
                 name == "jsonParser" || name == "urlencoded" || name == "logger" ||
                 name == "staticDir" || name == "recover" || name == "validate")) {
                 return "::keet::net::http::" + name + "(" + args_str + ")";
+            }
+            if (has_ui_import_ && imported_ui_symbols_.count(name)) {
+                return "::keet::ui::" + name + "(" + args_str + ")";
             }
         }
 
