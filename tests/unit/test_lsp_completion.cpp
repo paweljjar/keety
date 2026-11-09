@@ -198,6 +198,42 @@ TEST_CASE("Analyzer getCompletions produces context-aware suggestions", "[lsp][c
         REQUIRE(containsLabel(listInst, "heal"));
     }
 
+    SECTION("Standard library class instance dot-completion (crypto.Hasher, QrCode, EncryptedPayload)") {
+        std::string code1 =
+            "import crypto;\n"
+            "fn main(): void {\n"
+            "    let b: crypto.Hasher = crypto.createHash(\"blake3\");\n"
+            "    b.\n"
+            "}\n";
+        Document doc1("file:///crypto_inst1.keet", "keet", 1, code1);
+
+        // b. on line 3, col 6
+        auto listHasher = analyzer.getCompletions(doc1, Position{3, 6});
+        REQUIRE(containsLabel(listHasher, "update"));
+        REQUIRE(containsLabel(listHasher, "digestHex"));
+        REQUIRE(containsLabel(listHasher, "reset"));
+
+        auto itemUpdate = findItem(listHasher, "update");
+        REQUIRE(itemUpdate != nullptr);
+        REQUIRE(itemUpdate->kind == CompletionItemKind::Method);
+
+        std::string code2 =
+            "import crypto;\n"
+            "fn main(): void {\n"
+            "    let qr = crypto.generateQr(\"hello\");\n"
+            "    qr.\n"
+            "}\n";
+        Document doc2("file:///crypto_inst2.keet", "keet", 1, code2);
+
+        // qr. on line 3, col 7
+        auto listQr = analyzer.getCompletions(doc2, Position{3, 7});
+        REQUIRE(containsLabel(listQr, "size"));
+        REQUIRE(containsLabel(listQr, "version"));
+        REQUIRE(containsLabel(listQr, "matrix"));
+        REQUIRE(containsLabel(listQr, "toSvg"));
+        REQUIRE(containsLabel(listQr, "toAscii"));
+    }
+
     SECTION("Enum dot-completion") {
         std::string code =
             "enum Status {\n"

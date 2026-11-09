@@ -1336,40 +1336,19 @@ export const STDLIB_MODULES: Record<string, StdlibModule> = {
     name: 'crypto',
     doc: 'Cryptographic hashes, HMAC, AEAD ciphers, CSPRNG, Base64/Hex, and QR/Code128 symbology.',
     members: {
-      sha256: {
-        name: 'sha256',
+      toHex: {
+        name: 'toHex',
         kind: 'function',
-        signature: 'fn sha256(data: string): string',
-        doc: 'Computes the lowercase hex SHA-256 digest of data.',
-        snippet: 'sha256(${1:data})'
+        signature: 'fn toHex(data: string): string',
+        doc: 'Encodes binary data or text into lowercase hexadecimal characters.',
+        snippet: 'toHex(${1:data})'
       },
-      sha512: {
-        name: 'sha512',
+      fromHex: {
+        name: 'fromHex',
         kind: 'function',
-        signature: 'fn sha512(data: string): string',
-        doc: 'Computes the lowercase hex SHA-512 digest of data.',
-        snippet: 'sha512(${1:data})'
-      },
-      blake3: {
-        name: 'blake3',
-        kind: 'function',
-        signature: 'fn blake3(data: string): string',
-        doc: 'Computes the 256-bit BLAKE3 hex digest of data.',
-        snippet: 'blake3(${1:data})'
-      },
-      randomUuid: {
-        name: 'randomUuid',
-        kind: 'function',
-        signature: 'fn randomUuid(): string',
-        doc: 'Generates a cryptographically random RFC 4122 UUID v4 string.',
-        snippet: 'randomUuid()'
-      },
-      randomHex: {
-        name: 'randomHex',
-        kind: 'function',
-        signature: 'fn randomHex(byteCount: int): string',
-        doc: 'Generates random bytes encoded as lowercase hex.',
-        snippet: 'randomHex(${1:16})'
+        signature: 'fn fromHex(hexStr: string): string',
+        doc: 'Decodes a hexadecimal string into raw binary or ASCII string.',
+        snippet: 'fromHex(${1:hexStr})'
       },
       toBase64: {
         name: 'toBase64',
@@ -1384,6 +1363,212 @@ export const STDLIB_MODULES: Record<string, StdlibModule> = {
         signature: 'fn fromBase64(b64: string): string',
         doc: 'Decodes an RFC 4648 Base64 string.',
         snippet: 'fromBase64(${1:b64})'
+      },
+      toBase64Url: {
+        name: 'toBase64Url',
+        kind: 'function',
+        signature: 'fn toBase64Url(data: string): string',
+        doc: 'Encodes data into URL-safe Base64 without padding.',
+        snippet: 'toBase64Url(${1:data})'
+      },
+      fromBase64Url: {
+        name: 'fromBase64Url',
+        kind: 'function',
+        signature: 'fn fromBase64Url(b64Url: string): string',
+        doc: 'Decodes a URL-safe Base64 string.',
+        snippet: 'fromBase64Url(${1:b64Url})'
+      },
+      randomBytes: {
+        name: 'randomBytes',
+        kind: 'function',
+        signature: 'fn randomBytes(length: int): string',
+        doc: 'Generates cryptographically secure random bytes of the specified length.',
+        snippet: 'randomBytes(${1:32})'
+      },
+      randomHex: {
+        name: 'randomHex',
+        kind: 'function',
+        signature: 'fn randomHex(byteCount: int): string',
+        doc: 'Generates random bytes encoded as lowercase hex.',
+        snippet: 'randomHex(${1:16})'
+      },
+      randomInt: {
+        name: 'randomInt',
+        kind: 'function',
+        signature: 'fn randomInt(min: int, max: int): int',
+        doc: 'Generates a cryptographically secure random integer in [min, max].',
+        snippet: 'randomInt(${1:1}, ${2:100})'
+      },
+      randomUuid: {
+        name: 'randomUuid',
+        kind: 'function',
+        signature: 'fn randomUuid(): string',
+        doc: 'Generates a cryptographically random RFC 4122 UUID v4 string.',
+        snippet: 'randomUuid()'
+      },
+      timingSafeEqual: {
+        name: 'timingSafeEqual',
+        kind: 'function',
+        signature: 'fn timingSafeEqual(a: string, b: string): bool',
+        doc: 'Constant-time comparison of two strings/buffers.',
+        snippet: 'timingSafeEqual(${1:a}, ${2:b})'
+      },
+      sha256: {
+        name: 'sha256',
+        kind: 'function',
+        signature: 'fn sha256(data: string): string',
+        doc: 'Computes the lowercase hex SHA-256 digest of data.',
+        snippet: 'sha256(${1:data})'
+      },
+      sha512: {
+        name: 'sha512',
+        kind: 'function',
+        signature: 'fn sha512(data: string): string',
+        doc: 'Computes the lowercase hex SHA-512 digest of data.',
+        snippet: 'sha512(${1:data})'
+      },
+      sha3_256: {
+        name: 'sha3_256',
+        kind: 'function',
+        signature: 'fn sha3_256(data: string): string',
+        doc: 'Computes the lowercase hex SHA3-256 digest of data.',
+        snippet: 'sha3_256(${1:data})'
+      },
+      sha3_512: {
+        name: 'sha3_512',
+        kind: 'function',
+        signature: 'fn sha3_512(data: string): string',
+        doc: 'Computes the lowercase hex SHA3-512 digest of data.',
+        snippet: 'sha3_512(${1:data})'
+      },
+      blake3: {
+        name: 'blake3',
+        kind: 'function',
+        signature: 'fn blake3(data: string): string',
+        doc: 'Computes the 256-bit BLAKE3 hex digest of data.',
+        snippet: 'blake3(${1:data})'
+      },
+      createHash: {
+        name: 'createHash',
+        kind: 'function',
+        signature: 'fn createHash(algorithm: string): crypto.Hasher',
+        doc: 'Creates an incremental streaming cryptographic hash instance ("sha256", "sha512", "sha3-256", "sha3-512", "blake3").',
+        snippet: 'createHash("${1:sha256}")'
+      },
+      hmacSha256: {
+        name: 'hmacSha256',
+        kind: 'function',
+        signature: 'fn hmacSha256(key: string, data: string): string',
+        doc: 'Computes the lowercase hex HMAC-SHA256 authentication tag.',
+        snippet: 'hmacSha256(${1:key}, ${2:data})'
+      },
+      hmacSha512: {
+        name: 'hmacSha512',
+        kind: 'function',
+        signature: 'fn hmacSha512(key: string, data: string): string',
+        doc: 'Computes the lowercase hex HMAC-SHA512 authentication tag.',
+        snippet: 'hmacSha512(${1:key}, ${2:data})'
+      },
+      createHmac: {
+        name: 'createHmac',
+        kind: 'function',
+        signature: 'fn createHmac(algorithm: string, key: string): crypto.Hmac',
+        doc: 'Creates an incremental streaming HMAC instance ("sha256" or "sha512").',
+        snippet: 'createHmac("${1:sha256}", ${2:key})'
+      },
+      encryptChaCha20Poly1305: {
+        name: 'encryptChaCha20Poly1305',
+        kind: 'function',
+        signature: 'fn encryptChaCha20Poly1305(key: string, nonce: string, plaintext: string, aad?: string): crypto.EncryptedPayload',
+        doc: 'Encrypts plaintext using ChaCha20-Poly1305 AEAD (RFC 8439).',
+        snippet: 'encryptChaCha20Poly1305(${1:key}, ${2:nonce}, ${3:plaintext})'
+      },
+      decryptChaCha20Poly1305: {
+        name: 'decryptChaCha20Poly1305',
+        kind: 'function',
+        signature: 'fn decryptChaCha20Poly1305(key: string, nonce: string, ciphertext: string, tag: string, aad?: string): string',
+        doc: 'Decrypts and authenticates ChaCha20-Poly1305 AEAD payload.',
+        snippet: 'decryptChaCha20Poly1305(${1:key}, ${2:nonce}, ${3:ciphertext}, ${4:tag})'
+      },
+      encryptAesGcm: {
+        name: 'encryptAesGcm',
+        kind: 'function',
+        signature: 'fn encryptAesGcm(key: string, iv: string, plaintext: string, aad?: string): crypto.EncryptedPayload',
+        doc: 'Encrypts plaintext using AES-256-GCM AEAD (NIST SP 800-38D).',
+        snippet: 'encryptAesGcm(${1:key}, ${2:iv}, ${3:plaintext})'
+      },
+      decryptAesGcm: {
+        name: 'decryptAesGcm',
+        kind: 'function',
+        signature: 'fn decryptAesGcm(key: string, iv: string, ciphertext: string, tag: string, aad?: string): string',
+        doc: 'Decrypts and authenticates AES-256-GCM AEAD payload.',
+        snippet: 'decryptAesGcm(${1:key}, ${2:iv}, ${3:ciphertext}, ${4:tag})'
+      },
+      encodeCode128: {
+        name: 'encodeCode128',
+        kind: 'function',
+        signature: 'fn encodeCode128(text: string): string',
+        doc: 'Encodes ASCII text into a Code 128 barcode binary pattern ("1" and "0").',
+        snippet: 'encodeCode128(${1:text})'
+      },
+      encodeCode128Svg: {
+        name: 'encodeCode128Svg',
+        kind: 'function',
+        signature: 'fn encodeCode128Svg(text: string, barHeight?: int, moduleWidth?: int): string',
+        doc: 'Generates a vector SVG Code 128 barcode.',
+        snippet: 'encodeCode128Svg(${1:text})'
+      },
+      encodeCode128Ascii: {
+        name: 'encodeCode128Ascii',
+        kind: 'function',
+        signature: 'fn encodeCode128Ascii(text: string): string',
+        doc: 'Generates an ASCII art Code 128 barcode.',
+        snippet: 'encodeCode128Ascii(${1:text})'
+      },
+      decodeCode128: {
+        name: 'decodeCode128',
+        kind: 'function',
+        signature: 'fn decodeCode128(pattern: string): string',
+        doc: 'Decodes a Code 128 binary pattern string back into text.',
+        snippet: 'decodeCode128(${1:pattern})'
+      },
+      generateQr: {
+        name: 'generateQr',
+        kind: 'function',
+        signature: 'fn generateQr(text: string, ecLevel?: string): crypto.QrCode',
+        doc: 'Generates an ISO/IEC 18004 QR Code.',
+        snippet: 'generateQr(${1:text})'
+      },
+      decodeQr: {
+        name: 'decodeQr',
+        kind: 'function',
+        signature: 'fn decodeQr(matrix: array<array<bool>>): string',
+        doc: 'Decodes a 2D boolean QR module matrix into text.',
+        snippet: 'decodeQr(${1:matrix})'
+      },
+      Hasher: {
+        name: 'Hasher',
+        kind: 'class',
+        signature: 'class crypto.Hasher',
+        doc: 'Streaming cryptographic hash accumulator (update, digestHex, reset).'
+      },
+      Hmac: {
+        name: 'Hmac',
+        kind: 'class',
+        signature: 'class crypto.Hmac',
+        doc: 'Streaming HMAC accumulator (update, digestHex, reset).'
+      },
+      EncryptedPayload: {
+        name: 'EncryptedPayload',
+        kind: 'class',
+        signature: 'class crypto.EncryptedPayload',
+        doc: 'AEAD encrypted payload (ciphertext, tag, iv, aad, toCombinedHex, fromCombinedHex).'
+      },
+      QrCode: {
+        name: 'QrCode',
+        kind: 'class',
+        signature: 'class crypto.QrCode',
+        doc: 'QR Code model (size, version, matrix, toSvg, toAscii).'
       }
     }
   },
@@ -1548,6 +1733,55 @@ export const BUILTIN_METHODS: Record<string, StdlibMember> = {
     signature: 'fn values(): array<any>',
     doc: 'Returns an array of all values in the map.',
     snippet: 'values()'
+  },
+  update: {
+    name: 'update',
+    kind: 'function',
+    signature: 'fn update(data: string): void',
+    doc: 'Feeds a chunk of data into the streaming Hasher or Hmac accumulator.',
+    snippet: 'update(${1:data})'
+  },
+  digestHex: {
+    name: 'digestHex',
+    kind: 'function',
+    signature: 'fn digestHex(): string',
+    doc: 'Finalizes the calculation and returns the lowercase hexadecimal digest or authentication tag.',
+    snippet: 'digestHex()'
+  },
+  reset: {
+    name: 'reset',
+    kind: 'function',
+    signature: 'fn reset(): void',
+    doc: 'Resets the streaming Hasher or Hmac instance to its initial state.',
+    snippet: 'reset()'
+  },
+  toCombinedHex: {
+    name: 'toCombinedHex',
+    kind: 'function',
+    signature: 'fn toCombinedHex(): string',
+    doc: 'Serializes the EncryptedPayload into a single combined hex string.',
+    snippet: 'toCombinedHex()'
+  },
+  fromCombinedHex: {
+    name: 'fromCombinedHex',
+    kind: 'function',
+    signature: 'fn fromCombinedHex(hex: string): crypto.EncryptedPayload',
+    doc: 'Reconstructs an EncryptedPayload from a combined hex string.',
+    snippet: 'fromCombinedHex(${1:hex})'
+  },
+  toSvg: {
+    name: 'toSvg',
+    kind: 'function',
+    signature: 'fn toSvg(margin?: int): string',
+    doc: 'Renders the QR Code as a standalone vector SVG XML string.',
+    snippet: 'toSvg(${1:4})'
+  },
+  toAscii: {
+    name: 'toAscii',
+    kind: 'function',
+    signature: 'fn toAscii(margin?: int): string',
+    doc: 'Renders the QR Code using Unicode half-block characters for terminal display.',
+    snippet: 'toAscii(${1:2})'
   }
 };
 
