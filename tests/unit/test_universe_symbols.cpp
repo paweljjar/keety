@@ -246,7 +246,8 @@ TEST_CASE("Standard library http module scope population", "[sema][universe][htt
     }
 
     const std::vector<std::string> expectedTypes = {
-        "Request", "Response", "WebSocket", "HttpServer", "App", "Server", "Schema", "SchemaValidator"
+        "Request", "Response", "WebSocket", "HttpServer", "App", "Server", "Schema", "SchemaValidator",
+        "Middleware", "NextFunction"
     };
 
     for (const auto& typeName : expectedTypes) {

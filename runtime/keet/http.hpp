@@ -2734,10 +2734,9 @@ inline void set_reuse_addr_port(net::detail::socket_t fd, bool reuse_port = true
 #else
     ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, static_cast<socklen_t>(sizeof(one)));
 #if defined(SO_REUSEPORT)
-    (void)reuse_port;
-    ::setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, static_cast<socklen_t>(sizeof(one)));
-#else
-    (void)reuse_port;
+    if (reuse_port) {
+        ::setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, static_cast<socklen_t>(sizeof(one)));
+    }
 #endif
 #endif
 }

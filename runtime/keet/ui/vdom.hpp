@@ -1,5 +1,10 @@
 #pragma once
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
+#include <algorithm>
 #include <keet/json.hpp>
 #include <keet/ui/node.hpp>
 
@@ -236,7 +241,7 @@ private:
         }
 
         // Compare children
-        size_t minCount = std::min(oldNode->children.size(), newNode->children.size());
+        size_t minCount = (std::min)(oldNode->children.size(), newNode->children.size());
         for (size_t i = 0; i < minCount; ++i) {
             diffRecursive(oldNode->children[i], newNode->children[i], patches);
         }
