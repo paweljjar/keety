@@ -1593,7 +1593,7 @@ export const STDLIB_MODULES: Record<string, StdlibModule> = {
       assertEq: {
         name: 'assertEq',
         kind: 'function',
-        signature: 'fn assertEq(actual: any, expected: any, msg?: string): void',
+        signature: 'fn assertEq(actual: T, expected: T, msg?: string): void',
         doc: 'Asserts that actual and expected values are deeply equal.',
         snippet: 'assertEq(${1:actual}, ${2:expected})'
       },
@@ -1702,21 +1702,21 @@ export const BUILTIN_METHODS: Record<string, StdlibMember> = {
   contains: {
     name: 'contains',
     kind: 'function',
-    signature: 'fn contains(element: any): bool',
+    signature: 'fn contains(element: T): bool',
     doc: 'Returns true if string contains substring or array contains item.',
     snippet: 'contains(${1:element})'
   },
   push: {
     name: 'push',
     kind: 'function',
-    signature: 'fn push(element: any): void',
+    signature: 'fn push(element: T): void',
     doc: 'Appends an element to the end of the array.',
     snippet: 'push(${1:element})'
   },
   pop: {
     name: 'pop',
     kind: 'function',
-    signature: 'fn pop(): any',
+    signature: 'fn pop(): T',
     doc: 'Removes and returns the last element of the array.',
     snippet: 'pop()'
   },
@@ -1782,6 +1782,55 @@ export const BUILTIN_METHODS: Record<string, StdlibMember> = {
     signature: 'fn toAscii(margin?: int): string',
     doc: 'Renders the QR Code using Unicode half-block characters for terminal display.',
     snippet: 'toAscii(${1:2})'
+  },
+  use: {
+    name: 'use',
+    kind: 'function',
+    signature: 'fn use(middleware?: http.Middleware | fn(http.Request, http.Response): void): http.HttpServer',
+    doc: 'Registers an HTTP middleware (e.g. cors(), recover(), logger()) or custom handler.',
+    snippet: 'use(${1:middleware})'
+  },
+  listen: {
+    name: 'listen',
+    kind: 'function',
+    signature: 'fn listen(port: int, host?: string): http.HttpServer',
+    doc: 'Starts listening for incoming HTTP connections on host:port.',
+    snippet: 'listen(${1:port})'
+  },
+  isRunning: {
+    name: 'isRunning',
+    kind: 'function',
+    signature: 'fn isRunning(): bool',
+    doc: 'Returns true if the HTTP server is currently running and accepting connections.',
+    snippet: 'isRunning()'
+  },
+  stop: {
+    name: 'stop',
+    kind: 'function',
+    signature: 'fn stop(): void',
+    doc: 'Gracefully shuts down the HTTP server and terminates active connections.',
+    snippet: 'stop()'
+  },
+  port: {
+    name: 'port',
+    kind: 'function',
+    signature: 'fn port(): int',
+    doc: 'Returns the local port number the HTTP server is bound to.',
+    snippet: 'port()'
+  },
+  serveUi: {
+    name: 'serveUi',
+    kind: 'function',
+    signature: 'fn serveUi(path: string, componentFactory: fn(): ui.Component, title?: string): http.HttpServer',
+    doc: 'Mounts a reactive KML UI component tree over HTTP and WebSocket LiveView.',
+    snippet: 'serveUi("${1:/}", fn(): ${2:Component} {\n\treturn ${3:Component}();\n})'
+  },
+  ws: {
+    name: 'ws',
+    kind: 'function',
+    signature: 'fn ws(path: string, handler: fn(http.WebSocket, string): void): http.HttpServer',
+    doc: 'Registers a real-time WebSocket connection handler at path.',
+    snippet: 'ws("${1:/ws}", fn(${2:socket}, ${3:msg}): void {\n\t$0\n})'
   }
 };
 

@@ -222,104 +222,7 @@ struct StdlibDoc {
 
 std::optional<StdlibDoc> getStdlibMemberDoc(const std::string& name) {
     static const std::unordered_map<std::string, StdlibDoc> docs = {
-        {"println", {"fn println(...args: string | int | float | bool | char | null, color?: io.Color): void", "Prints arguments to standard output followed by a newline."}},
-        {"print", {"fn print(...args: string | int | float | bool | char | null, color?: io.Color): void", "Prints arguments to standard output without a trailing newline."}},
-        {"eprintln", {"fn eprintln(...args: string | int | float | bool | char | null, color?: io.Color): void", "Prints arguments to standard error followed by a newline."}},
-        {"eprint", {"fn eprint(...args: string | int | float | bool | char | null, color?: io.Color): void", "Prints arguments to standard error without a trailing newline."}},
-        {"readln", {"fn readln(): string", "Reads a line of text from standard input (without newline)."}},
-        {"readLine", {"fn readLine(): string | null", "Reads a line of text from standard input (without newline), or null on EOF."}},
-        {"input", {"fn input(prompt?: string): string", "Displays an optional prompt and reads a line of user input."}},
-        {"eof", {"fn eof(): bool", "Returns true if standard input has reached end-of-file (EOF)."}},
-        {"flush", {"fn flush(): void", "Flushes standard output buffer."}},
-        {"red", {"fn red(s: string): string", "Formats string with ANSI red color."}},
-        {"green", {"fn green(s: string): string", "Formats string with ANSI green color."}},
-        {"yellow", {"fn yellow(s: string): string", "Formats string with ANSI yellow color."}},
-        {"blue", {"fn blue(s: string): string", "Formats string with ANSI blue color."}},
-        {"magenta", {"fn magenta(s: string): string", "Formats string with ANSI magenta color."}},
-        {"cyan", {"fn cyan(s: string): string", "Formats string with ANSI cyan color."}},
-        {"white", {"fn white(s: string): string", "Formats string with ANSI white color."}},
-        {"gray", {"fn gray(s: string): string", "Formats string with ANSI gray color."}},
-        {"bold", {"fn bold(s: string): string", "Formats string with ANSI bold style."}},
-        {"Color", {"enum io.Color", "Terminal output color enum (Default, Red, Green, Yellow, Blue, Magenta, Cyan, White, Gray)."}},
-        {"readFile", {"fn readFile(path: string): string", "Reads the entire contents of a file as a string."}},
-        {"writeFile", {"fn writeFile(path: string, content: string): void", "Writes string content to a file."}},
-        {"appendFile", {"fn appendFile(path: string, content: string): void", "Appends string content to a file."}},
-        {"exists", {"fn exists(path: string): bool", "Returns true if the given path exists."}},
-        {"removeFile", {"fn removeFile(path: string): void", "Deletes a file at the specified path."}},
-        {"mkdir", {"fn mkdir(path: string): void", "Creates a directory at the specified path."}},
-        {"readDir", {"fn readDir(path: string): array<string>", "Returns a list of entry names in the directory."}},
-        {"exit", {"fn exit(code: int): void", "Terminates the process with the given exit code."}},
-        {"args", {"fn args(): array<string>", "Returns the command-line arguments passed to the program."}},
-        {"getEnv", {"fn getEnv(key: string): string | null", "Retrieves the value of an environment variable."}},
-        {"setEnv", {"fn setEnv(key: string, value: string): void", "Sets an environment variable."}},
-        {"platform", {"fn platform(): string", "Returns the operating system platform ('macos', 'linux', 'windows')."}},
-        {"PI", {"const PI: float", "Ratio of the circumference of a circle to its diameter (~3.14159)."}},
-        {"E", {"const E: float", "Euler's number and the base of natural logarithms (~2.71828)."}},
-        {"sqrt", {"fn sqrt(x: float): float", "Returns the square root of x."}},
-        {"pow", {"fn pow(base: float, exp: float): float", "Returns base raised to the power of exp."}},
-        {"abs", {"fn abs(x: float): float", "Returns the absolute value of x."}},
-        {"sin", {"fn sin(x: float): float", "Returns the sine of x (in radians)."}},
-        {"cos", {"fn cos(x: float): float", "Returns the cosine of x (in radians)."}},
-        {"floor", {"fn floor(x: float): float", "Returns the largest integer less than or equal to x."}},
-        {"ceil", {"fn ceil(x: float): float", "Returns the smallest integer greater than or equal to x."}},
-        {"round", {"fn round(x: float): float", "Rounds x to the nearest integer."}},
-        {"min", {"fn min(a: float, b: float): float", "Returns the smaller of two numbers."}},
-        {"max", {"fn max(a: float, b: float): float", "Returns the larger of two numbers."}},
-        {"now", {"fn now(): int", "Returns the current Unix timestamp in milliseconds."}},
-        {"sleep", {"fn sleep(ms: int): void", "Suspends execution for the specified number of milliseconds."}},
-        {"parse", {"fn parse(text: string): any", "Parses a JSON string into KeetScript data structures."}},
-        {"stringify", {"fn stringify(value: any): string", "Serializes a KeetScript value into a JSON string."}},
-        {"fetch", {"fn fetch(url: string): string", "Performs an HTTP GET request and returns the response body."}},
-        {"case", {"fn case(name: string, fn: (): void): void", "Registers a test case with the test runner."}},
-        {"suite", {"fn suite(name: string, fn: (): void): void", "Groups related test cases into a suite."}},
-        {"assertEq", {"fn assertEq(actual: any, expected: any, msg?: string): void", "Asserts that two values are deeply equal."}},
-        {"assertNe", {"fn assertNe(actual: any, expected: any, msg?: string): void", "Asserts that two values are not equal."}},
-        {"assertTrue", {"fn assertTrue(condition: bool, msg?: string): void", "Asserts that a boolean condition is true."}},
-        {"assertFalse", {"fn assertFalse(condition: bool, msg?: string): void", "Asserts that a boolean condition is false."}},
-        {"assertZonks", {"fn assertZonks(fn: (): void, expectedError?: string, msg?: string): void", "Asserts that a callback throws a KeetScript zonk error."}},
-        {"fail", {"fn fail(msg?: string): void", "Explicitly fails the current test case."}},
-        // Standard Library Module: crypto
-        {"toHex", {"fn toHex(data: string): string", "Encodes binary data or string into lowercase hexadecimal representation."}},
-        {"fromHex", {"fn fromHex(hexStr: string): string", "Decodes a hexadecimal string into binary data or ASCII string."}},
-        {"toBase64", {"fn toBase64(data: string): string", "Encodes data into standard RFC 4648 Base64 representation."}},
-        {"fromBase64", {"fn fromBase64(b64Str: string): string", "Decodes standard RFC 4648 Base64 encoded string."}},
-        {"toBase64Url", {"fn toBase64Url(data: string): string", "Encodes data into URL-safe Base64 representation without padding."}},
-        {"fromBase64Url", {"fn fromBase64Url(b64UrlStr: string): string", "Decodes URL-safe Base64 encoded string."}},
-        {"randomBytes", {"fn randomBytes(size: int): string", "Generates cryptographically secure random bytes of the specified length."}},
-        {"randomHex", {"fn randomHex(size: int): string", "Generates cryptographically secure random hex string of the specified byte count."}},
-        {"randomInt", {"fn randomInt(min: int, max: int): int", "Generates a uniform cryptographically secure random integer in [min, max]."}},
-        {"randomUuid", {"fn randomUuid(): string", "Generates an RFC 4122 Version 4 random UUID string."}},
-        {"timingSafeEqual", {"fn timingSafeEqual(a: string, b: string): bool", "Constant-time string/byte buffer comparison to mitigate side-channel timing attacks."}},
-        {"sha256", {"fn sha256(data: string): string", "Computes SHA-256 hash returned as lowercase hex string."}},
-        {"sha512", {"fn sha512(data: string): string", "Computes SHA-512 hash returned as lowercase hex string."}},
-        {"sha3_256", {"fn sha3_256(data: string): string", "Computes SHA3-256 (FIPS 202) hash returned as lowercase hex string."}},
-        {"sha3_512", {"fn sha3_512(data: string): string", "Computes SHA3-512 (FIPS 202) hash returned as lowercase hex string."}},
-        {"blake3", {"fn blake3(data: string): string", "Computes BLAKE3 high-performance cryptographic hash returned as hex string."}},
-        {"createHash", {"fn createHash(algorithm: string): Hasher", "Creates an incremental streaming cryptographic hash instance ('sha256', 'sha512', 'sha3-256', 'sha3-512', 'blake3')."}},
-        {"hmacSha256", {"fn hmacSha256(key: string, data: string): string", "Computes HMAC-SHA256 message authentication code returned as hex string."}},
-        {"hmacSha512", {"fn hmacSha512(key: string, data: string): string", "Computes HMAC-SHA512 message authentication code returned as hex string."}},
-        {"createHmac", {"fn createHmac(algorithm: string, key: string): Hmac", "Creates an incremental streaming HMAC instance ('sha256' or 'sha512')."}},
-        {"encryptChaCha20Poly1305", {"fn encryptChaCha20Poly1305(plaintext: string, key: string, iv: string, aad?: string): EncryptedPayload", "Encrypts data using ChaCha20-Poly1305 AEAD (RFC 8439)."}},
-        {"decryptChaCha20Poly1305", {"fn decryptChaCha20Poly1305(payload: EncryptedPayload, key: string, aad?: string): string", "Decrypts and verifies data using ChaCha20-Poly1305 AEAD (RFC 8439)."}},
-        {"encryptAesGcm", {"fn encryptAesGcm(plaintext: string, key: string, iv: string, aad?: string): EncryptedPayload", "Encrypts data using AES-256-GCM AEAD (NIST SP 800-38D)."}},
-        {"decryptAesGcm", {"fn decryptAesGcm(payload: EncryptedPayload, key: string, aad?: string): string", "Decrypts and verifies data using AES-256-GCM AEAD (NIST SP 800-38D)."}},
-        {"encodeCode128", {"fn encodeCode128(text: string): string", "Encodes text into a Code 128 barcode binary pattern ('1' for bar, '0' for space)."}},
-        {"encodeCode128Svg", {"fn encodeCode128Svg(text: string, height?: int): string", "Renders Code 128 barcode as a standalone vector SVG XML string."}},
-        {"encodeCode128Ascii", {"fn encodeCode128Ascii(text: string): string", "Renders Code 128 barcode as an ASCII art block string."}},
-        {"decodeCode128", {"fn decodeCode128(pattern: string): string", "Decodes a Code 128 binary pattern string ('1' and '0') back into text."}},
-        {"generateQr", {"fn generateQr(text: string, eccLevel?: string): QrCode", "Generates a 2D QR Code ISO/IEC 18004 matrix with specified ECC level ('L', 'M', 'Q', 'H')."}},
-        {"decodeQr", {"fn decodeQr(matrix: array<array<bool>>): string", "Decodes a 2D boolean module matrix of a QR Code into string text."}},
-        {"EncryptedPayload", {"class EncryptedPayload", "AEAD encryption payload containing ciphertext, auth tag, and initialization vector (iv)."}},
-        {"QrCode", {"class QrCode", "QR Code model providing SVG/ASCII rendering and matrix access."}},
-        {"Hasher", {"class Hasher", "Streaming cryptographic hash accumulator (`update(data)`, `digestHex()`, `reset()`)."}},
-        {"Hmac", {"class Hmac", "Streaming HMAC accumulator (`update(data)`, `digestHex()`, `reset()`)."}},
-        {"update", {"fn update(data: string): void", "Feeds a chunk of data into the streaming Hasher or Hmac accumulator."}},
-        {"digestHex", {"fn digestHex(): string", "Finalizes the calculation and returns the lowercase hexadecimal digest or authentication tag."}},
-        {"reset", {"fn reset(): void", "Resets the streaming Hasher or Hmac instance to its initial state."}},
-        {"toCombinedHex", {"fn toCombinedHex(): string", "Serializes the EncryptedPayload (iv, tag, aad, ciphertext) into a single combined hex string."}},
-        {"fromCombinedHex", {"fn fromCombinedHex(hex: string): crypto.EncryptedPayload", "Reconstructs an EncryptedPayload from a combined hex string."}},
-        {"toSvg", {"fn toSvg(margin?: int): string", "Renders the QR Code as a standalone vector SVG XML string."}},
-        {"toAscii", {"fn toAscii(margin?: int): string", "Renders the QR Code using Unicode half-block characters for terminal display."}},
+#include "analyzer_stdlib_docs.inc"
     };
     auto it = docs.find(name);
     if (it != docs.end()) return it->second;
@@ -1605,6 +1508,16 @@ CompletionList Analyzer::getCompletions(
         }
         if (inferredClass == "HttpServer" || inferredClass == "App" || inferredClass == "Server" ||
             inferredClass == "http.HttpServer" || inferredClass == "http.App" || inferredClass == "http.Server") {
+            addMemberItem("use", CompletionItemKind::Method, "fn use(middleware?: http.Middleware | fn(http.Request, http.Response): void): http.HttpServer",
+                          "Registers middleware (e.g. cors(), recover(), logger()) or custom handler.");
+            addMemberItem("listen", CompletionItemKind::Method, "fn listen(port: int, host?: string): http.HttpServer",
+                          "Starts listening for incoming HTTP connections on host:port.");
+            addMemberItem("stop", CompletionItemKind::Method, "fn stop(): void",
+                          "Gracefully shuts down the HTTP server and terminates active connections.");
+            addMemberItem("isRunning", CompletionItemKind::Method, "fn isRunning(): bool",
+                          "Returns true if the HTTP server is currently running and accepting connections.");
+            addMemberItem("port", CompletionItemKind::Method, "fn port(): int",
+                          "Returns the local port number the server is bound to.");
             addMemberItem("get", CompletionItemKind::Method, "fn get(path: string, handler: fn(http.Request, http.Response): void): http.HttpServer",
                           "Registers an HTTP GET route handler.");
             addMemberItem("post", CompletionItemKind::Method, "fn post(path: string, handler: fn(http.Request, http.Response): void): http.HttpServer",
@@ -1615,16 +1528,14 @@ CompletionList Analyzer::getCompletions(
                           "Registers an HTTP DELETE route handler.");
             addMemberItem("patch", CompletionItemKind::Method, "fn patch(path: string, handler: fn(http.Request, http.Response): void): http.HttpServer",
                           "Registers an HTTP PATCH route handler.");
-            addMemberItem("use", CompletionItemKind::Method, "fn use(middleware: any): http.HttpServer",
-                          "Registers an HTTP middleware.");
             addMemberItem("ws", CompletionItemKind::Method, "fn ws(path: string, handler: fn(http.WebSocket, string): void): http.HttpServer",
                           "Registers a WebSocket route handler.");
-            addMemberItem("serveUi", CompletionItemKind::Method, "fn serveUi(path: string, componentFactory: fn(): any): http.HttpServer",
+            addMemberItem("serveUi", CompletionItemKind::Method, "fn serveUi(path: string, componentFactory: fn(): ui.Component, title?: string): http.HttpServer",
                           "Mounts a reactive KML UI component over HTTP/WebSocket LiveView.");
-            addMemberItem("listen", CompletionItemKind::Method, "fn listen(port: int, host?: string): http.HttpServer",
-                          "Starts listening for incoming HTTP connections.");
-            addMemberItem("stop", CompletionItemKind::Method, "fn stop(): void",
-                          "Stops the HTTP server.");
+            addMemberItem("mount", CompletionItemKind::Method, "fn mount(prefix: string, app: http.HttpServer): http.HttpServer",
+                          "Mounts a sub-application router under the given URL prefix.");
+            addMemberItem("route", CompletionItemKind::Method, "fn route(path: string): http.HttpServer",
+                          "Creates a scoped route group for chained HTTP method handlers.");
             return list;
         }
         if (inferredClass == "Request" || inferredClass == "http.Request") {

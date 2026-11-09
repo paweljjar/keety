@@ -589,6 +589,8 @@ void populateNetHttpModuleScope(Scope& httpScope) {
     makeType("Server");
     makeType("Schema");
     makeType("SchemaValidator");
+    makeType("Middleware");
+    makeType("NextFunction");
 
     // Server / App creation
     makeFn("app");

@@ -232,6 +232,35 @@ TEST_CASE("Analyzer getCompletions produces context-aware suggestions", "[lsp][c
         REQUIRE(containsLabel(listQr, "matrix"));
         REQUIRE(containsLabel(listQr, "toSvg"));
         REQUIRE(containsLabel(listQr, "toAscii"));
+
+        std::string code3 =
+            "from http import app, HttpServer;\n"
+            "fn main(): void {\n"
+            "    let server: HttpServer = app();\n"
+            "    server.\n"
+            "}\n";
+        Document doc3("file:///http_inst.keet", "keet", 1, code3);
+
+        // server. on line 3, col 11
+        auto listServer = analyzer.getCompletions(doc3, Position{3, 11});
+        REQUIRE(containsLabel(listServer, "use"));
+        REQUIRE(containsLabel(listServer, "listen"));
+        REQUIRE(containsLabel(listServer, "isRunning"));
+        REQUIRE(containsLabel(listServer, "stop"));
+        REQUIRE(containsLabel(listServer, "get"));
+        REQUIRE(containsLabel(listServer, "post"));
+
+        auto itemUse = findItem(listServer, "use");
+        REQUIRE(itemUse != nullptr);
+        REQUIRE(itemUse->kind == CompletionItemKind::Method);
+        REQUIRE(itemUse->detail.find("use") != std::string::npos);
+        REQUIRE(itemUse->documentation.find("middleware") != std::string::npos);
+
+        auto itemListen = findItem(listServer, "listen");
+        REQUIRE(itemListen != nullptr);
+        REQUIRE(itemListen->kind == CompletionItemKind::Method);
+        REQUIRE(itemListen->detail.find("listen") != std::string::npos);
+        REQUIRE(itemListen->documentation.find("listening") != std::string::npos);
     }
 
     SECTION("Enum dot-completion") {
