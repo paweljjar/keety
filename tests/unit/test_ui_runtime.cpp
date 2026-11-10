@@ -71,8 +71,47 @@ TEST_CASE("std.ui Universal Runtime - Primitives & Geometry", "[ui][geometry]") 
 
     Dimension dAuto = Dimension::Auto();
     CHECK(dAuto.mode == SizeMode::Auto);
+    CHECK(dAuto.isAuto());
     Dimension dCells = Dimension::Cells(20);
     CHECK(dCells.value == 20);
+    CHECK(dCells.isFixed());
+    Dimension dPixels = Dimension::Pixels(350);
+    CHECK(dPixels.value == 350);
+    CHECK(dPixels.isPixels());
+    Dimension dPercent = Dimension::Percent(50);
+    CHECK(dPercent.value == 50);
+    CHECK(dPercent.isPercent());
+
+    // RgbaColor tests
+    RgbaColor c1 = RgbaColor::fromRgb(10, 20, 30, 200);
+    CHECK(c1.r == 10);
+    CHECK(c1.g == 20);
+    CHECK(c1.b == 30);
+    CHECK(c1.a == 200);
+
+    RgbaColor cHex = RgbaColor::fromHex(0x1E1E2E);
+    CHECK(cHex.r == 0x1E);
+    CHECK(cHex.g == 0x1E);
+    CHECK(cHex.b == 0x2E);
+    CHECK(cHex.a == 255);
+
+    RgbaColor cParsed6 = RgbaColor::parseHex("#CDD6F4");
+    CHECK(cParsed6.r == 0xCD);
+    CHECK(cParsed6.g == 0xD6);
+    CHECK(cParsed6.b == 0xF4);
+    CHECK(cParsed6.a == 255);
+
+    RgbaColor cParsed8 = RgbaColor::parseHex("#11223344");
+    CHECK(cParsed8.r == 0x11);
+    CHECK(cParsed8.g == 0x22);
+    CHECK(cParsed8.b == 0x33);
+    CHECK(cParsed8.a == 0x44);
+
+    RgbaColor cTheme = RgbaColor::fromThemeColor(Color::Red);
+    CHECK(cTheme.r == 243);
+    CHECK(cTheme.g == 139);
+    CHECK(cTheme.b == 168);
+    CHECK(cTheme.a == 255);
 }
 
 TEST_CASE("std.ui Universal Runtime - Node Hierarchy & Events", "[ui][node]") {

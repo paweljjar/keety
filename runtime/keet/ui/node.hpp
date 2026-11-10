@@ -62,6 +62,18 @@ struct NodeStyle {
     Color color{Color::Default};
     Color backgroundColor{Color::Default};
     FontStyle fontStyle{FontStyle::Normal};
+
+    // Desktop RGBA overrides & rich styling
+    std::optional<RgbaColor> textColorRgba;
+    std::optional<RgbaColor> backgroundColorRgba;
+    std::optional<RgbaColor> borderColorRgba;
+
+    int borderRadius{0};
+    int fontSize{14};
+    int gap{0};
+
+    bool overflowScrollY{false};
+    bool overflowScrollX{false};
 };
 
 using EventCallback = std::function<void(const std::string& arg)>;
@@ -226,13 +238,23 @@ public:
 
 class ScrollNode : public UINode {
 public:
-    ScrollNode() : UINode(NodeKind::Scroll) {}
+    ScrollNode() : UINode(NodeKind::Scroll) {
+        style_.overflowScrollY = true;
+    }
 
     void setScrollOffset(int off) noexcept { scrollOffset_ = off; setDirty(true); }
     [[nodiscard]] int getScrollOffset() const noexcept { return scrollOffset_; }
 
+    void setContentHeight(int h) noexcept { contentHeight_ = h; }
+    [[nodiscard]] int getContentHeight() const noexcept { return contentHeight_; }
+
+    void setContentWidth(int w) noexcept { contentWidth_ = w; }
+    [[nodiscard]] int getContentWidth() const noexcept { return contentWidth_; }
+
 private:
     int scrollOffset_{0};
+    int contentHeight_{0};
+    int contentWidth_{0};
 };
 
 } // namespace keet::ui
