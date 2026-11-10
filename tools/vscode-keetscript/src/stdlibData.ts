@@ -1630,6 +1630,34 @@ export const STDLIB_MODULES: Record<string, StdlibModule> = {
         signature: 'fn withKeyFilter(key: string, handler: fn(UIEvent): void): EventCallback',
         doc: 'Invokes handler only when the pressed key matches key.',
         snippet: 'withKeyFilter("${1:Enter}", ${2:handler})'
+      },
+      mountDesktop: {
+        name: 'mountDesktop',
+        kind: 'function',
+        signature: 'fn mountDesktop(root: ui.Component, width?: int, height?: int): ui.DesktopBackend',
+        doc: 'Mounts UI component tree onto a native desktop raster backend.',
+        snippet: 'mountDesktop(${1:root})'
+      },
+      renderDesktop: {
+        name: 'renderDesktop',
+        kind: 'function',
+        signature: 'fn renderDesktop(root: ui.Component, title?: string, width?: int, height?: int): void',
+        doc: 'Renders a UI component into a native OS window with event loop execution.',
+        snippet: 'renderDesktop(${1:root}, "${2:Title}")'
+      },
+      mountHeadless: {
+        name: 'mountHeadless',
+        kind: 'function',
+        signature: 'fn mountHeadless(root: ui.Component): ui.HeadlessBackend',
+        doc: 'Mounts UI component tree in headless test mode.',
+        snippet: 'mountHeadless(${1:root})'
+      },
+      renderTui: {
+        name: 'renderTui',
+        kind: 'function',
+        signature: 'fn renderTui(root: ui.Component): void',
+        doc: 'Renders reactive UI component in terminal console.',
+        snippet: 'renderTui(${1:root})'
       }
     }
   }

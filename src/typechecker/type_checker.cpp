@@ -84,6 +84,14 @@ const std::vector<std::string> kHttpCandidates = {
     "Request", "Response", "WebSocket", "HttpServer", "App", "Server", "Schema", "SchemaValidator"
 };
 
+const std::vector<std::string> kUiCandidates = {
+    "mountDesktop", "renderDesktop", "mountHeadless", "renderTui", "serveUi",
+    "debounce", "withPreventDefault", "withKeyFilter",
+    "Component", "UINode", "BoxNode", "StackNode", "TextNode", "ButtonNode", "InputNode", "ScrollNode",
+    "DesktopBackend", "WindowConfig", "HeadlessBackend", "TuiBackend", "WebVdomBackend",
+    "Canvas2D", "FrameBuffer", "RgbaColor"
+};
+
 const std::vector<std::string> kColorCandidates = {
     "Default", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White", "Gray"
 };
@@ -4793,6 +4801,76 @@ TypePtr TypeChecker::checkHttpDirectCall(const ast::IdentExpr* callee, const ast
     return checkHttpMemberCall(&synthetic, call, scope);
 }
 
+TypePtr TypeChecker::checkUiMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!member || !call) return Type::unknownType();
+    const std::string& name = member->getMemberName();
+
+    auto checkArgCountMinMax = [&](size_t minExpected, size_t maxExpected) -> bool {
+        size_t count = call->getArgs().size();
+        if (count < minExpected || count > maxExpected) {
+            if (emitter_) {
+                std::string expStr = (minExpected == maxExpected)
+                    ? std::to_string(minExpected)
+                    : std::to_string(minExpected) + " to " + std::to_string(maxExpected);
+                emitter_->report(diag::Diagnostic::makeError(
+                    diag::ErrorCode::TypeMismatch,
+                    "function 'ui." + name + "' expects " + expStr +
+                    " arguments, but got " + std::to_string(count),
+                    call->getSpan().start).withLabel(call->getSpan(), "wrong argument count"));
+            }
+            hasErrors_ = true;
+            return false;
+        }
+        return true;
+    };
+
+    for (const auto& arg : call->getArgs()) {
+        if (arg.value) inferType(*arg.value, scope);
+    }
+
+    if (name == "mountDesktop") {
+        checkArgCountMinMax(1, 3);
+        return std::make_shared<CustomType>("DesktopBackend");
+    }
+    if (name == "renderDesktop") {
+        checkArgCountMinMax(1, 4);
+        return Type::voidType();
+    }
+    if (name == "mountHeadless") {
+        checkArgCountMinMax(1, 1);
+        return std::make_shared<CustomType>("HeadlessBackend");
+    }
+    if (name == "renderTui") {
+        checkArgCountMinMax(1, 1);
+        return Type::voidType();
+    }
+    if (name == "serveUi") {
+        checkArgCountMinMax(2, 3);
+        return Type::voidType();
+    }
+    if (name == "debounce" || name == "withPreventDefault" || name == "withKeyFilter") {
+        checkArgCountMinMax(1, 2);
+        return Type::unknownType();
+    }
+
+    if (emitter_) {
+        auto d = diag::Diagnostic::makeError(
+            diag::ErrorCode::InvalidMemberAccess,
+            "module 'ui' has no member named '" + name + "'",
+            member->getSpan().start).withLabel(member->getSpan(), "unknown ui member");
+        attachMemberSuggestions(d, name, kUiCandidates);
+        emitter_->report(d);
+    }
+    hasErrors_ = true;
+    return Type::unknownType();
+}
+
+TypePtr TypeChecker::checkUiDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope) {
+    if (!callee || !call) return Type::unknownType();
+    ast::MemberExpr synthetic(callee->getSpan(), nullptr, callee->getName());
+    return checkUiMemberCall(&synthetic, call, scope);
+}
+
 bool TypeChecker::checkZeroCoercion(const parser::ModuleAST& module, sema::Scope* rootScope) {
     return checkTypes(module, rootScope);
 }
@@ -6345,10 +6423,19 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                     return checkHttpMemberCall(member, call, scope);
                 }
                 if (objIdent->getName() == "ui" || (sym && sym->isModule() && sym->getName() == "ui")) {
-                    for (const auto& arg : call->getArgs()) {
-                        if (arg.value) inferType(*arg.value, scope);
+                    if (!sym) {
+                        if (emitter_) {
+                            auto d = diag::Diagnostic::makeError(
+                                diag::ErrorCode::UndeclaredIdentifier,
+                                "undeclared identifier '" + objIdent->getName() + "'",
+                                objIdent->getSpan().start).withLabel(objIdent->getSpan(), "undeclared identifier");
+                            d.withHelp("add 'import ui;' at the top of the file");
+                            emitter_->report(d);
+                        }
+                        hasErrors_ = true;
+                        return Type::unknownType();
                     }
-                    return Type::unknownType();
+                    return checkUiMemberCall(member, call, scope);
                 }
             }
 
@@ -6531,6 +6618,38 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                         return Type::array(Type::stringType());
                     }
                     if (m == "errorString") {
+                        return Type::stringType();
+                    }
+                } else if (clsName == "DesktopBackend" || clsName == "ui.DesktopBackend") {
+                    const std::string& m = member->getMemberName();
+                    if (m == "renderFrame" || m == "relayout" || m == "resize" || m == "dispatchMouseMove") {
+                        return Type::voidType();
+                    }
+                    if (m == "dispatchClick" || m == "dispatchMouseDown" || m == "dispatchMouseUp" ||
+                        m == "dispatchScroll" || m == "dispatchKey") {
+                        return Type::boolType();
+                    }
+                    if (m == "getWidth" || m == "getHeight") {
+                        return Type::intType();
+                    }
+                    if (m == "snapshot") {
+                        return Type::stringType();
+                    }
+                    if (m == "findNodeById" || m == "getRootNode") {
+                        return std::make_shared<CustomType>("UINode");
+                    }
+                    if (m == "getFrameBuffer") {
+                        return std::make_shared<CustomType>("FrameBuffer");
+                    }
+                } else if (clsName == "HeadlessBackend" || clsName == "ui.HeadlessBackend") {
+                    const std::string& m = member->getMemberName();
+                    if (m == "simulateClick" || m == "simulateType") {
+                        return Type::boolType();
+                    }
+                    if (m == "findById" || m == "findByText" || m == "find" || m == "getRootNode") {
+                        return std::make_shared<CustomType>("UINode");
+                    }
+                    if (m == "snapshot") {
                         return Type::stringType();
                     }
                 }

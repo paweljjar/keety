@@ -631,6 +631,7 @@ void populateUiModuleScope(Scope& uiScope) {
     makeType("Component");
     makeType("UINode");
     makeType("BoxNode");
+    makeType("StackNode");
     makeType("TextNode");
     makeType("ButtonNode");
     makeType("InputNode");
@@ -638,6 +639,11 @@ void populateUiModuleScope(Scope& uiScope) {
     makeType("VNode");
     makeType("HeadlessBackend");
     makeType("TuiBackend");
+    makeType("DesktopBackend");
+    makeType("WindowConfig");
+    makeType("Canvas2D");
+    makeType("FrameBuffer");
+    makeType("RgbaColor");
     makeType("WebVdomBackend");
     makeType("MicrotaskScheduler");
 
@@ -646,6 +652,8 @@ void populateUiModuleScope(Scope& uiScope) {
     makeFn("withPreventDefault");
     makeFn("withKeyFilter");
     makeFn("mountHeadless");
+    makeFn("mountDesktop");
+    makeFn("renderDesktop");
     makeFn("renderTui");
     makeFn("serveUi");
 }

@@ -501,6 +501,34 @@ bool CustomType::equals(const Type& other) const {
         (name_ == "crypto.Hmac" && o.name_ == "Hmac")) {
         return true;
     }
+    if ((name_ == "DesktopBackend" && o.name_ == "ui.DesktopBackend") ||
+        (name_ == "ui.DesktopBackend" && o.name_ == "DesktopBackend")) {
+        return true;
+    }
+    if ((name_ == "HeadlessBackend" && o.name_ == "ui.HeadlessBackend") ||
+        (name_ == "ui.HeadlessBackend" && o.name_ == "HeadlessBackend")) {
+        return true;
+    }
+    if ((name_ == "WindowConfig" && o.name_ == "ui.WindowConfig") ||
+        (name_ == "ui.WindowConfig" && o.name_ == "WindowConfig")) {
+        return true;
+    }
+    if ((name_ == "StackNode" && o.name_ == "ui.StackNode") ||
+        (name_ == "ui.StackNode" && o.name_ == "StackNode")) {
+        return true;
+    }
+    if ((name_ == "Canvas2D" && o.name_ == "ui.Canvas2D") ||
+        (name_ == "ui.Canvas2D" && o.name_ == "Canvas2D")) {
+        return true;
+    }
+    if ((name_ == "FrameBuffer" && o.name_ == "ui.FrameBuffer") ||
+        (name_ == "ui.FrameBuffer" && o.name_ == "FrameBuffer")) {
+        return true;
+    }
+    if ((name_ == "RgbaColor" && o.name_ == "ui.RgbaColor") ||
+        (name_ == "ui.RgbaColor" && o.name_ == "RgbaColor")) {
+        return true;
+    }
     return false;
 }
 

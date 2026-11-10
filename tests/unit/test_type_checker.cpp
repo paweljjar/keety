@@ -3797,6 +3797,55 @@ TEST_CASE("Standard library net.http module type checking", "[typechecker][http]
     }
 }
 
+TEST_CASE("Standard library ui module type checking", "[typechecker][ui]") {
+    SECTION("Valid import and call to ui.mountDesktop, ui.renderDesktop and DesktopBackend methods") {
+        ParseResult res(
+            "import ui;\n"
+            "fn runDesktop(): void {\n"
+            "    let backend: ui.DesktopBackend = ui.mountDesktop(1);\n"
+            "    backend.renderFrame();\n"
+            "    let clicked: bool = backend.dispatchClick(100, 100);\n"
+            "    let w: int = backend.getWidth();\n"
+            "    let s: string = backend.snapshot();\n"
+            "    ui.renderDesktop(1);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+    }
+
+    SECTION("Valid selective import from ui module") {
+        ParseResult res(
+            "from \"ui\" import mountDesktop, renderDesktop, DesktopBackend, WindowConfig, StackNode;\n"
+            "fn run(): void {\n"
+            "    let backend: DesktopBackend = mountDesktop(1);\n"
+            "    renderDesktop(1);\n"
+            "}\n"
+        );
+        REQUIRE(res.checkZeroCoercion());
+    }
+
+    SECTION("Reject unknown member on ui with E3011") {
+        ParseResult res(
+            "import ui;\n"
+            "fn test_invalid(): void {\n"
+            "    ui.nonExistentUiMember();\n"
+            "}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::InvalidMemberAccess));
+    }
+
+    SECTION("Reject non-exported symbol from ui with E1005") {
+        ParseResult res(
+            "from \"ui\" import nonExistentUiSymbol;\n"
+            "fn test_invalid(): void {}\n"
+        );
+        REQUIRE_FALSE(res.checkZeroCoercion());
+        REQUIRE(res.hasError(diag::ErrorCode::SymbolNotExported));
+    }
+}
+
+
 
 
 

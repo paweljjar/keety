@@ -1576,6 +1576,22 @@ CompletionList Analyzer::getCompletions(
             addMemberItem("errors", CompletionItemKind::Method, "fn errors(jsonBody: string): array<string>", "Returns validation error messages.");
             return list;
         }
+        if (inferredClass == "DesktopBackend" || inferredClass == "ui.DesktopBackend") {
+            addMemberItem("renderFrame", CompletionItemKind::Method, "fn renderFrame(): void", "Renders the UI scene graph to the frame buffer.");
+            addMemberItem("relayout", CompletionItemKind::Method, "fn relayout(): void", "Recomputes Flexbox layout coordinates for all nodes.");
+            addMemberItem("resize", CompletionItemKind::Method, "fn resize(width: int, height: int): void", "Resizes the desktop frame buffer and triggers layout recalculation.");
+            addMemberItem("dispatchClick", CompletionItemKind::Method, "fn dispatchClick(x: int, y: int, button?: int): bool", "Dispatches a full pointer click cycle (down + up) at the specified coordinates.");
+            addMemberItem("dispatchMouseDown", CompletionItemKind::Method, "fn dispatchMouseDown(x: int, y: int, button?: int): bool", "Dispatches pointer down and updates active element focus.");
+            addMemberItem("dispatchMouseUp", CompletionItemKind::Method, "fn dispatchMouseUp(x: int, y: int, button?: int): bool", "Dispatches pointer up and triggers click listeners if hovering matching target.");
+            addMemberItem("dispatchMouseMove", CompletionItemKind::Method, "fn dispatchMouseMove(x: int, y: int): void", "Dispatches pointer position and synthesizes mouseenter/mouseleave events.");
+            addMemberItem("dispatchScroll", CompletionItemKind::Method, "fn dispatchScroll(x: int, y: int, deltaY: int): bool", "Dispatches mouse wheel vertical scroll deltas to enclosing ScrollNode.");
+            addMemberItem("dispatchKey", CompletionItemKind::Method, "fn dispatchKey(key: string): bool", "Dispatches a keyboard event to the currently focused input or component.");
+            addMemberItem("getWidth", CompletionItemKind::Method, "fn getWidth(): int", "Returns current desktop surface width in pixels.");
+            addMemberItem("getHeight", CompletionItemKind::Method, "fn getHeight(): int", "Returns current desktop surface height in pixels.");
+            addMemberItem("snapshot", CompletionItemKind::Method, "fn snapshot(): string", "Serializes the current scene graph hierarchy to an XML representation.");
+            addMemberItem("findNodeById", CompletionItemKind::Method, "fn findNodeById(id: int): ui.UINode", "Finds a node by its numeric identifier in the scene graph.");
+            return list;
+        }
         if (inferredClass == "string") {
             addMemberItem("length", CompletionItemKind::Method, "fn length(): int", "Returns the number of characters in the string.");
             addMemberItem("trim", CompletionItemKind::Method, "fn trim(): string", "Returns a copy of the string with leading and trailing whitespace removed.");
