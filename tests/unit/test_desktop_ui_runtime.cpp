@@ -137,3 +137,152 @@ TEST_CASE("SceneGraphRenderer - Renders UINode Hierarchy to FrameBuffer", "[ui][
     CHECK(inputPixel.g == 24);
     CHECK(inputPixel.b == 37);
 }
+
+// Test component for DesktopBackend integration
+class TestDesktopApp : public Component {
+public:
+    int counter{0};
+    std::string textValue{"initial"};
+    std::string hoverStatus{"none"};
+    bool enterPressed{false};
+
+    std::shared_ptr<UINode> mount() override {
+        auto box = std::make_shared<BoxNode>();
+        box->setId(1);
+        box->getStyle().flexDirection = FlexDirection::Column;
+        box->getStyle().padding = Edges::All(20);
+        box->getStyle().gap = 10;
+
+        auto label = std::make_shared<TextNode>("Count: " + std::to_string(counter));
+        label->setId(2);
+        labelNode_ = label;
+        box->appendChild(label);
+
+        auto btn = std::make_shared<ButtonNode>("Increment");
+        btn->setId(3);
+        btn->getStyle().width = Dimension::Pixels(120);
+        btn->getStyle().height = Dimension::Pixels(36);
+        btn->on("click", [this](const std::string&) {
+            counter++;
+            invalidate(0x01);
+        });
+        btn->on("mouseenter", [this](const std::string&) {
+            hoverStatus = "btn_hovered";
+        });
+        btn->on("mouseleave", [this](const std::string&) {
+            hoverStatus = "btn_left";
+        });
+        box->appendChild(btn);
+
+        auto input = std::make_shared<InputNode>(textValue);
+        input->setId(4);
+        input->getStyle().width = Dimension::Pixels(200);
+        input->getStyle().height = Dimension::Pixels(32);
+        input->on("input", [this](const std::string& v) {
+            textValue = v;
+            invalidate(0x02);
+        });
+        input->on("keydown", [this](const std::string& key) {
+            if (key == "Enter") enterPressed = true;
+        });
+        inputNode_ = input;
+        box->appendChild(input);
+
+        // Scrollable feed
+        auto scroll = std::make_shared<ScrollNode>();
+        scroll->setId(5);
+        scroll->getStyle().width = Dimension::Pixels(300);
+        scroll->getStyle().height = Dimension::Pixels(100);
+        scroll->getStyle().flexDirection = FlexDirection::Column;
+
+        for (int i = 0; i < 10; ++i) {
+            auto item = std::make_shared<TextNode>("Item " + std::to_string(i));
+            item->setId(10 + i);
+            item->getStyle().height = Dimension::Pixels(25);
+            scroll->appendChild(item);
+        }
+        scrollNode_ = scroll;
+        box->appendChild(scroll);
+
+        rootNode_ = box;
+        return rootNode_;
+    }
+
+    void update(uint32_t mask) override {
+        if ((mask & 0x01) && labelNode_) {
+            labelNode_->setContent("Count: " + std::to_string(counter));
+        }
+        if ((mask & 0x02) && labelNode_) {
+            labelNode_->setContent("Input: " + textValue);
+        }
+    }
+
+    std::shared_ptr<TextNode> labelNode_;
+    std::shared_ptr<InputNode> inputNode_;
+    std::shared_ptr<ScrollNode> scrollNode_;
+};
+
+TEST_CASE("DesktopBackend - Spatial Hit Testing, Click, Hover, Key and Scroll Dispatch", "[ui][desktop][backend]") {
+    auto app = std::make_shared<TestDesktopApp>();
+    DesktopBackend backend(app, 800, 600);
+
+    CHECK(backend.getWidth() == 800);
+    CHECK(backend.getHeight() == 600);
+
+    // Initial state
+    CHECK(app->counter == 0);
+    auto btn = backend.findNodeById(3);
+    REQUIRE(btn != nullptr);
+    Rect btnBounds = btn->getBounds();
+
+    // 1. Mouse move into button emits mouseenter
+    backend.dispatchMouseMove(btnBounds.x + 5, btnBounds.y + 5);
+    CHECK(app->hoverStatus == "btn_hovered");
+
+    // Mouse move away emits mouseleave
+    backend.dispatchMouseMove(1, 1);
+    CHECK(app->hoverStatus == "btn_left");
+
+    // 2. Click button triggers click listener and reactive update
+    bool clicked = backend.dispatchClick(btnBounds.x + 10, btnBounds.y + 10);
+    CHECK(clicked);
+    CHECK(app->counter == 1);
+    CHECK(app->labelNode_->getContent() == "Count: 1");
+
+    // 3. Click input sets focus (click towards end of "initial" -> x + 80)
+    auto input = backend.findNodeById(4);
+    REQUIRE(input != nullptr);
+    Rect inputBounds = input->getBounds();
+
+    backend.dispatchClick(inputBounds.x + 80, inputBounds.y + 10);
+    CHECK(backend.getFocusManager().getFocusedNodeId() == 4);
+
+    // 4. Keyboard dispatch types into input
+    backend.dispatchKey("!");
+    CHECK(app->inputNode_->getValue() == "initial!");
+    CHECK(app->textValue == "initial!");
+
+    backend.dispatchKey("Enter");
+    CHECK(app->enterPressed);
+
+    // Cursor navigation
+    backend.dispatchKey("Home");
+    CHECK(app->inputNode_->getCursorPos() == 0);
+    backend.dispatchKey("ArrowRight");
+    CHECK(app->inputNode_->getCursorPos() == 1);
+
+    // 5. Scroll dispatch on ScrollNode
+    auto scroll = backend.findNodeById(5);
+    REQUIRE(scroll != nullptr);
+    Rect scrollBounds = scroll->getBounds();
+
+    CHECK(app->scrollNode_->getScrollOffset() == 0);
+    bool scrolled = backend.dispatchScroll(scrollBounds.x + 10, scrollBounds.y + 10, 40);
+    CHECK(scrolled);
+    CHECK(app->scrollNode_->getScrollOffset() == 40);
+
+    // Snapshot check
+    std::string snap = backend.snapshot();
+    CHECK(snap.find("<button id=\"3\"") != std::string::npos);
+    CHECK(snap.find("<input id=\"4\"") != std::string::npos);
+}

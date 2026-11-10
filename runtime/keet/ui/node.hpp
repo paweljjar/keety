@@ -212,10 +212,13 @@ private:
 
 class InputNode : public UINode {
 public:
-    InputNode(std::string val = "") : UINode(NodeKind::Input), value_(std::move(val)) {}
+    InputNode(std::string val = "") : UINode(NodeKind::Input), value_(std::move(val)) {
+        cursorPos_ = static_cast<int>(value_.size());
+    }
 
     void setValue(std::string val) {
         value_ = std::move(val);
+        cursorPos_ = std::min(cursorPos_, static_cast<int>(value_.size()));
         setDirty(true);
         emit("input", value_);
     }

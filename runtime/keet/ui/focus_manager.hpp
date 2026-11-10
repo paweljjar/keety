@@ -120,19 +120,57 @@ public:
         if (node->getKind() == NodeKind::Button) {
             if (key == " " || key == "Enter") {
                 node->emit("click");
+                node->emit("keydown", key);
                 return true;
             }
         } else if (node->getKind() == NodeKind::Input) {
             auto input = std::static_pointer_cast<InputNode>(node);
-            if (key == "Backspace") {
-                std::string val = input->getValue();
-                if (!val.empty()) {
-                    val.pop_back();
-                    input->setValue(val);
-                }
+            int cursor = std::clamp(input->getCursorPos(), 0, static_cast<int>(input->getValue().size()));
+            std::string val = input->getValue();
+
+            if (key == "ArrowLeft") {
+                if (cursor > 0) input->setCursorPos(cursor - 1);
+                node->emit("keydown", key);
                 return true;
-            } else if (key.size() == 1 && std::isprint(static_cast<unsigned char>(key[0]))) {
-                input->setValue(input->getValue() + key);
+            }
+            if (key == "ArrowRight") {
+                if (cursor < static_cast<int>(val.size())) input->setCursorPos(cursor + 1);
+                node->emit("keydown", key);
+                return true;
+            }
+            if (key == "Home") {
+                input->setCursorPos(0);
+                node->emit("keydown", key);
+                return true;
+            }
+            if (key == "End") {
+                input->setCursorPos(static_cast<int>(val.size()));
+                node->emit("keydown", key);
+                return true;
+            }
+            if (key == "Backspace") {
+                if (cursor > 0 && !val.empty()) {
+                    val.erase(cursor - 1, 1);
+                    input->setValue(val);
+                    input->setCursorPos(cursor - 1);
+                }
+                node->emit("keydown", key);
+                return true;
+            }
+            if (key == "Delete") {
+                if (cursor < static_cast<int>(val.size())) {
+                    val.erase(cursor, 1);
+                    input->setValue(val);
+                    input->setCursorPos(cursor);
+                }
+                node->emit("keydown", key);
+                return true;
+            }
+            if (key.size() == 1 && std::isprint(static_cast<unsigned char>(key[0]))) {
+                val.insert(cursor, key);
+                input->setValue(val);
+                input->setCursorPos(cursor + 1);
+                node->emit("keydown", key);
                 return true;
             }
         }
