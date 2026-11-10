@@ -338,7 +338,7 @@ std::vector<std::string> ToolchainDriver::build_link_args(
         }
 
         for (const auto& lib : options.libraries) {
-            if (lib.size() >= 4 && lib.substr(lib.size() - 4) == ".lib") {
+            if (lib.ends_with(".lib")) {
                 args.push_back(lib);
             } else {
                 args.push_back(lib + ".lib");
@@ -376,7 +376,7 @@ std::vector<std::string> ToolchainDriver::build_link_args(
         for (const auto& lib : options.libraries) {
             if (lib.rfind("-l", 0) == 0 || lib.find('/') != std::string::npos || lib.find('\\') != std::string::npos) {
                 args.push_back(lib);
-            } else if (lib.size() >= 2 && (lib.substr(lib.size() - 2) == ".a" || lib.substr(lib.size() - 3) == ".so")) {
+            } else if (lib.ends_with(".a") || lib.ends_with(".so")) {
                 args.push_back(lib);
             } else {
                 args.push_back("-l" + lib);

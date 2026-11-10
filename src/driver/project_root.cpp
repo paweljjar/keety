@@ -87,19 +87,19 @@ std::optional<std::filesystem::path> resolveBuildDirectory(const std::filesystem
         return std::nullopt;
     };
 
-    // 1. Walk upward from current working directory
-    if (auto res = checkDirForBuildDir(std::filesystem::current_path())) {
-        return res;
-    }
-
-    // 2. Walk upward from entry file's parent directory if provided
+    // 1. Walk upward from entry file's directory if provided
     if (!entryFile.empty()) {
-        std::filesystem::path entryParent = entryFile.has_parent_path()
-            ? entryFile.parent_path()
-            : std::filesystem::current_path();
-        if (auto res = checkDirForBuildDir(entryParent)) {
+        std::filesystem::path entryDir = std::filesystem::is_directory(entryFile)
+            ? entryFile
+            : (entryFile.has_parent_path() ? entryFile.parent_path() : std::filesystem::current_path());
+        if (auto res = checkDirForBuildDir(entryDir)) {
             return res;
         }
+    }
+
+    // 2. Fallback: walk upward from current working directory
+    if (auto res = checkDirForBuildDir(std::filesystem::current_path())) {
+        return res;
     }
 
     return std::nullopt;
