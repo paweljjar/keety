@@ -286,3 +286,117 @@ TEST_CASE("DesktopBackend - Spatial Hit Testing, Click, Hover, Key and Scroll Di
     CHECK(snap.find("<button id=\"3\"") != std::string::npos);
     CHECK(snap.find("<input id=\"4\"") != std::string::npos);
 }
+
+TEST_CASE("NativeWindow - WindowConfig Defaults and Headless Driver", "[ui][desktop][window]") {
+    WindowConfig config;
+    CHECK(config.title == "Keet App");
+    CHECK(config.width == 800);
+    CHECK(config.height == 600);
+    CHECK(config.resizable == true);
+    CHECK(config.headless == false);
+    CHECK(config.backgroundColor == RgbaColor{30, 30, 46, 255});
+
+    config.title = "Custom Keet Window";
+    config.width = 1024;
+    config.height = 768;
+    config.headless = true;
+
+    auto window = NativeWindow::create(config);
+    REQUIRE(window != nullptr);
+    CHECK(window->isOpen());
+    CHECK(window->getWidth() == 1024);
+    CHECK(window->getHeight() == 768);
+    CHECK(window->getConfig().title == "Custom Keet Window");
+
+    // Title & resize mutation
+    window->setTitle("Renamed Window");
+    CHECK(window->getConfig().title == "Renamed Window");
+
+    window->resize(1280, 720);
+    CHECK(window->getWidth() == 1280);
+    CHECK(window->getHeight() == 720);
+
+    // Present frame buffer
+    FrameBuffer fb(1280, 720);
+    fb.setPixel(10, 10, RgbaColor{255, 100, 50, 255});
+    window->present(fb);
+
+    auto* headlessWin = dynamic_cast<HeadlessNativeWindow*>(window.get());
+    REQUIRE(headlessWin != nullptr);
+    CHECK(headlessWin->getPresentedFrameCount() == 1);
+    REQUIRE(headlessWin->getLastPresentedFrameBuffer() != nullptr);
+    CHECK(headlessWin->getLastPresentedFrameBuffer()->getPixel(10, 10).r == 255);
+
+    // Close window
+    window->close();
+    CHECK(!window->isOpen());
+}
+
+TEST_CASE("NativeWindow - Desktop Event Loop and Backend Integration", "[ui][desktop][window]") {
+    auto app = std::make_shared<TestDesktopApp>();
+    auto backend = mountDesktop(app, 640, 480);
+    REQUIRE(backend != nullptr);
+    CHECK(backend->getWidth() == 640);
+    CHECK(backend->getHeight() == 480);
+
+    WindowConfig config;
+    config.title = "Test App";
+    config.width = 640;
+    config.height = 480;
+    config.headless = true;
+
+    auto window = NativeWindow::create(config);
+    REQUIRE(window != nullptr);
+
+    // Initial frame presentation
+    window->present(backend->getFrameBuffer());
+
+    auto* headlessWin = dynamic_cast<HeadlessNativeWindow*>(window.get());
+    REQUIRE(headlessWin != nullptr);
+    CHECK(headlessWin->getPresentedFrameCount() == 1);
+
+    // Event poll on headless window returns open status
+    bool stillOpen = window->pollEvents(*backend);
+    CHECK(stillOpen);
+
+    // Interact with backend and present updated frame
+    backend->dispatchClick(30, 60); // Click button
+    CHECK(app->counter == 1);
+
+    window->present(backend->getFrameBuffer());
+    CHECK(headlessWin->getPresentedFrameCount() == 2);
+
+    window->close();
+    CHECK(!window->isOpen());
+    CHECK(!window->pollEvents(*backend));
+}
+
+#if defined(__APPLE__)
+TEST_CASE("NativeWindow - Cocoa Driver Instantiation and Surface", "[ui][desktop][window][cocoa]") {
+    WindowConfig config;
+    config.title = "Keet Cocoa Integration Test";
+    config.width = 400;
+    config.height = 300;
+    config.headless = false;
+
+    auto window = NativeWindow::create(config);
+    REQUIRE(window != nullptr);
+    CHECK(window->isOpen());
+    CHECK(window->getWidth() == 400);
+    CHECK(window->getHeight() == 300);
+
+    auto app = std::make_shared<TestDesktopApp>();
+    DesktopBackend backend(app, 400, 300);
+
+    // Present frame to Cocoa view
+    window->present(backend.getFrameBuffer());
+
+    // Non-blocking event poll
+    bool open = window->pollEvents(backend);
+    CHECK(open);
+
+    // Close window
+    window->close();
+    CHECK(!window->isOpen());
+}
+#endif

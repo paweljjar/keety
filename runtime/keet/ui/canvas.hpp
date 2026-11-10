@@ -42,6 +42,7 @@ public:
     [[nodiscard]] uint32_t* data() noexcept { return pixels_.data(); }
     [[nodiscard]] const uint32_t* data() const noexcept { return pixels_.data(); }
     [[nodiscard]] size_t size() const noexcept { return pixels_.size(); }
+    [[nodiscard]] const std::vector<uint32_t>& getPixels() const noexcept { return pixels_; }
 
     [[nodiscard]] inline RgbaColor getPixel(int x, int y) const noexcept {
         if (x < 0 || x >= width_ || y < 0 || y >= height_) return RgbaColor{};
