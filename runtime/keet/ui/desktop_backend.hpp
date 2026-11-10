@@ -137,6 +137,11 @@ public:
     [[nodiscard]] std::shared_ptr<UINode> getRootNode() const noexcept { return rootNode_; }
     [[nodiscard]] FocusManager& getFocusManager() noexcept { return focusMgr_; }
 
+    void setClipboardProvider(std::function<void(const std::string&)> copyFn,
+                              std::function<std::string()> pasteFn) {
+        focusMgr_.setClipboardProvider(std::move(copyFn), std::move(pasteFn));
+    }
+
     void resize(int width, int height) {
         fb_.resize(width, height);
         if (canvas_) {

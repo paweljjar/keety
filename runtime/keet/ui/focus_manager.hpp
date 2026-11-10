@@ -103,6 +103,12 @@ public:
         }
     }
 
+    void setClipboardProvider(std::function<void(const std::string&)> copyFn,
+                              std::function<std::string()> pasteFn) {
+        clipboardCopyFn_ = std::move(copyFn);
+        clipboardPasteFn_ = std::move(pasteFn);
+    }
+
     /// Handles keyboard activation (e.g. Space/Enter on Button, typing in Input)
     bool handleKey(const std::string& key) {
         auto node = getFocusedNode();
@@ -133,6 +139,68 @@ public:
                 node->emit("keydown", key);
                 return true;
             }
+            if (key == "Copy" || key == "Cmd+C" || key == "Ctrl+C" || key == "Cmd+c" || key == "Ctrl+c") {
+                if (clipboardCopyFn_) {
+                    clipboardCopyFn_(input->getSelectedOrFullText());
+                }
+                node->emit("keydown", key);
+                return true;
+            }
+            if (key == "Cut" || key == "Cmd+X" || key == "Ctrl+X" || key == "Cmd+x" || key == "Ctrl+x") {
+                if (clipboardCopyFn_) {
+                    clipboardCopyFn_(input->getSelectedOrFullText());
+                }
+                input->deleteSelectionOrAll();
+                node->emit("keydown", key);
+                return true;
+            }
+            if (key == "Paste" || key == "Cmd+V" || key == "Ctrl+V" || key == "Cmd+v" || key == "Ctrl+v") {
+                if (clipboardPasteFn_) {
+                    input->pasteText(clipboardPasteFn_());
+                }
+                node->emit("keydown", key);
+                return true;
+            }
+            if (key == "Undo" || key == "Cmd+Z" || key == "Ctrl+Z" || key == "Cmd+z" || key == "Ctrl+z") {
+                input->undo();
+                node->emit("keydown", key);
+                return true;
+            }
+            if (key == "Redo" || key == "Cmd+Shift+Z" || key == "Cmd+Y" || key == "Ctrl+Y" || key == "Cmd+y" || key == "Ctrl+y") {
+                input->redo();
+                node->emit("keydown", key);
+                return true;
+            }
+            if (key == "Cmd+Backspace") {
+                input->deleteToStartOfLine();
+                node->emit("keydown", key);
+                return true;
+            }
+            if (key == "Alt+Backspace" || key == "Ctrl+Backspace" || key == "Option+Backspace") {
+                input->deleteWordLeft();
+                node->emit("keydown", key);
+                return true;
+            }
+            if (key == "Cmd+ArrowLeft" || key == "Home") {
+                input->setCursorPos(0);
+                node->emit("keydown", key);
+                return true;
+            }
+            if (key == "Cmd+ArrowRight" || key == "End") {
+                input->setCursorPos(static_cast<int>(val.size()));
+                node->emit("keydown", key);
+                return true;
+            }
+            if (key == "Alt+ArrowLeft" || key == "Option+ArrowLeft" || key == "Ctrl+ArrowLeft") {
+                input->moveWordLeft();
+                node->emit("keydown", key);
+                return true;
+            }
+            if (key == "Alt+ArrowRight" || key == "Option+ArrowRight" || key == "Ctrl+ArrowRight") {
+                input->moveWordRight();
+                node->emit("keydown", key);
+                return true;
+            }
             if (key == "ArrowLeft") {
                 if (cursor > 0) input->setCursorPos(cursor - 1);
                 node->emit("keydown", key);
@@ -143,25 +211,16 @@ public:
                 node->emit("keydown", key);
                 return true;
             }
-            if (key == "Home") {
-                input->setCursorPos(0);
-                node->emit("keydown", key);
-                return true;
-            }
-            if (key == "End") {
-                input->setCursorPos(static_cast<int>(val.size()));
-                node->emit("keydown", key);
-                return true;
-            }
             if (key == "Backspace" || key == "Delete") {
                 if (input->hasSelection()) {
-                    input->setValue("");
-                    input->clearSelection();
+                    input->deleteSelectionOrAll();
                 } else if (key == "Backspace" && cursor > 0 && !val.empty()) {
+                    input->pushUndo();
                     val.erase(cursor - 1, 1);
                     input->setValue(val);
                     input->setCursorPos(cursor - 1);
                 } else if (key == "Delete" && cursor < static_cast<int>(val.size())) {
+                    input->pushUndo();
                     val.erase(cursor, 1);
                     input->setValue(val);
                     input->setCursorPos(cursor);
@@ -171,10 +230,9 @@ public:
             }
             if (key.size() == 1 && std::isprint(static_cast<unsigned char>(key[0]))) {
                 if (input->hasSelection()) {
-                    input->setValue(key);
-                    input->clearSelection();
-                    input->setCursorPos(1);
+                    input->pasteText(key);
                 } else {
+                    input->pushUndo();
                     val.insert(cursor, key);
                     input->setValue(val);
                     input->setCursorPos(cursor + 1);
@@ -216,6 +274,8 @@ private:
     std::shared_ptr<UINode> root_;
     std::vector<std::shared_ptr<UINode>> focusableNodes_;
     std::optional<uint32_t> focusedNodeId_{std::nullopt};
+    std::function<void(const std::string&)> clipboardCopyFn_;
+    std::function<std::string()> clipboardPasteFn_;
 };
 
 } // namespace keet::ui

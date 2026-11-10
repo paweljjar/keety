@@ -66,10 +66,18 @@ public:
     /// Returns true if the window is still open and running, false if closed.
     virtual bool pollEvents(DesktopBackend& backend) = 0;
 
+    /// Clipboard provider methods (overridden by platform drivers)
+    virtual void setClipboardText(const std::string& /*text*/) {}
+    [[nodiscard]] virtual std::string getClipboardText() const { return ""; }
+
     /// Runs a blocking event loop at the specified target framerate (default 60 FPS)
     /// until the window is closed.
     virtual void runEventLoop(DesktopBackend& backend, int targetFps = 60) {
         if (targetFps <= 0) targetFps = 60;
+        backend.setClipboardProvider(
+            [this](const std::string& text) { setClipboardText(text); },
+            [this]() -> std::string { return getClipboardText(); }
+        );
         auto frameDuration = std::chrono::microseconds(1'000'000 / targetFps);
 
         while (isOpen()) {
@@ -115,6 +123,9 @@ public:
     [[nodiscard]] int getHeight() const noexcept override { return height_; }
     [[nodiscard]] const WindowConfig& getConfig() const noexcept override { return config_; }
 
+    void setClipboardText(const std::string& text) override { headlessClipboard_ = text; }
+    [[nodiscard]] std::string getClipboardText() const override { return headlessClipboard_; }
+
     void present(const FrameBuffer& fb) override {
         lastPresentedFb_ = std::make_unique<FrameBuffer>(fb);
         presentedFrameCount_++;
@@ -139,6 +150,7 @@ private:
     bool open_{true};
     std::unique_ptr<FrameBuffer> lastPresentedFb_{nullptr};
     size_t presentedFrameCount_{0};
+    std::string headlessClipboard_;
 };
 
 // ============================================================================
@@ -216,6 +228,33 @@ public:
     [[nodiscard]] int getWidth() const noexcept override { return width_; }
     [[nodiscard]] int getHeight() const noexcept override { return height_; }
     [[nodiscard]] const WindowConfig& getConfig() const noexcept override { return config_; }
+
+    void setClipboardText(const std::string& text) override {
+        Class NSPasteboardClass = objc_getClass("NSPasteboard");
+        if (!NSPasteboardClass) return;
+        id pb = detail::callClassMsg<id>(NSPasteboardClass, sel_registerName("generalPasteboard"));
+        if (!pb) return;
+        detail::callMsg<detail::NSInteger>(pb, sel_registerName("clearContents"));
+
+        Class NSStringClass = objc_getClass("NSString");
+        id str = detail::callClassMsg<id>(NSStringClass, sel_registerName("stringWithUTF8String:"), text.c_str());
+        id type = detail::callClassMsg<id>(NSStringClass, sel_registerName("stringWithUTF8String:"), "public.utf8-plain-text");
+        detail::callMsg<BOOL, id, id>(pb, sel_registerName("setString:forType:"), str, type);
+    }
+
+    [[nodiscard]] std::string getClipboardText() const override {
+        Class NSPasteboardClass = objc_getClass("NSPasteboard");
+        if (!NSPasteboardClass) return "";
+        id pb = detail::callClassMsg<id>(NSPasteboardClass, sel_registerName("generalPasteboard"));
+        if (!pb) return "";
+
+        Class NSStringClass = objc_getClass("NSString");
+        id type = detail::callClassMsg<id>(NSStringClass, sel_registerName("stringWithUTF8String:"), "public.utf8-plain-text");
+        id str = detail::callMsg<id, id>(pb, sel_registerName("stringForType:"), type);
+        if (!str) return "";
+        const char* utf8 = detail::callMsg<const char*>(str, sel_registerName("UTF8String"));
+        return utf8 ? std::string(utf8) : "";
+    }
 
     void present(const FrameBuffer& fb) override {
         if (!open_ || !view_) return;
@@ -306,13 +345,17 @@ public:
                 }
                 case 10: { // NSEventTypeKeyDown
                     detail::NSUInteger flags = detail::callMsg<detail::NSUInteger>(event, sel_registerName("modifierFlags"));
-                    bool cmdPressed = (flags & (1 << 20)) != 0; // NSEventModifierFlagCommand
+                    bool cmd = (flags & (1 << 20)) != 0;   // NSEventModifierFlagCommand
+                    bool alt = (flags & (1 << 19)) != 0;   // NSEventModifierFlagOption
+                    bool ctrl = (flags & (1 << 18)) != 0;  // NSEventModifierFlagControl
+                    bool shift = (flags & (1 << 17)) != 0; // NSEventModifierFlagShift
 
                     id charsNoMod = detail::callMsg<id>(event, sel_registerName("charactersIgnoringModifiers"));
                     const char* noModUtf8 = charsNoMod ? detail::callMsg<const char*>(charsNoMod, sel_registerName("UTF8String")) : nullptr;
+                    char c = (noModUtf8 && noModUtf8[0] != '\0') ? noModUtf8[0] : '\0';
+                    unsigned short keyCode = detail::callMsg<unsigned short>(event, sel_registerName("keyCode"));
 
-                    if (cmdPressed && noModUtf8 && noModUtf8[0] != '\0') {
-                        char c = noModUtf8[0];
+                    if (cmd) {
                         if (c == 'q' || c == 'Q') {
                             close();
                             return false;
@@ -321,10 +364,80 @@ public:
                             close();
                             return false;
                         }
+                        if (c == 'm' || c == 'M') {
+                            detail::callMsg<void, id>(window_, sel_registerName("miniaturize:"), nullptr);
+                            break;
+                        }
+                        if (c == 'h' || c == 'H') {
+                            detail::callMsg<void, id>(app, sel_registerName("hide:"), nullptr);
+                            break;
+                        }
+                        if (c == 'f' || c == 'F' || (ctrl && (c == 'f' || c == 'F'))) {
+                            detail::callMsg<void, id>(window_, sel_registerName("toggleFullScreen:"), nullptr);
+                            break;
+                        }
                         if (c == 'a' || c == 'A') {
                             backend.dispatchKey("SelectAll");
                             break;
                         }
+                        if (c == 'c' || c == 'C') {
+                            backend.dispatchKey("Copy");
+                            break;
+                        }
+                        if (c == 'v' || c == 'V') {
+                            backend.dispatchKey("Paste");
+                            break;
+                        }
+                        if (c == 'x' || c == 'X') {
+                            backend.dispatchKey("Cut");
+                            break;
+                        }
+                        if (c == 'z' || c == 'Z') {
+                            if (shift) backend.dispatchKey("Redo");
+                            else backend.dispatchKey("Undo");
+                            break;
+                        }
+                        if (c == 'y' || c == 'Y') {
+                            backend.dispatchKey("Redo");
+                            break;
+                        }
+                        if (keyCode == 51) { // Backspace
+                            backend.dispatchKey("Cmd+Backspace");
+                            break;
+                        }
+                        if (keyCode == 123) { // Arrow Left
+                            backend.dispatchKey("Cmd+ArrowLeft");
+                            break;
+                        }
+                        if (keyCode == 124) { // Arrow Right
+                            backend.dispatchKey("Cmd+ArrowRight");
+                            break;
+                        }
+                    } else if (alt) {
+                        if (keyCode == 51) { // Backspace
+                            backend.dispatchKey("Alt+Backspace");
+                            break;
+                        }
+                        if (keyCode == 123) { // Arrow Left
+                            backend.dispatchKey("Alt+ArrowLeft");
+                            break;
+                        }
+                        if (keyCode == 124) { // Arrow Right
+                            backend.dispatchKey("Alt+ArrowRight");
+                            break;
+                        }
+                    } else if (ctrl) {
+                        if (c == 'a' || c == 'A') { backend.dispatchKey("SelectAll"); break; }
+                        if (c == 'c' || c == 'C') { backend.dispatchKey("Copy"); break; }
+                        if (c == 'v' || c == 'V') { backend.dispatchKey("Paste"); break; }
+                        if (c == 'x' || c == 'X') { backend.dispatchKey("Cut"); break; }
+                        if (c == 'z' || c == 'Z') { backend.dispatchKey("Undo"); break; }
+                        if (c == 'y' || c == 'Y') { backend.dispatchKey("Redo"); break; }
+                    }
+
+                    if (keyCode == 103) { // F11
+                        detail::callMsg<void, id>(window_, sel_registerName("toggleFullScreen:"), nullptr);
+                        break;
                     }
 
                     id charsStr = detail::callMsg<id>(event, sel_registerName("characters"));
@@ -454,6 +567,19 @@ private:
         return viewCls;
     }
 
+    static id createMenuItem(Class NSMenuItemClass, Class NSStringClass,
+                             const char* title, SEL action, const char* key, detail::NSUInteger mask = 0) {
+        id titleStr = detail::callClassMsg<id>(NSStringClass, sel_registerName("stringWithUTF8String:"), title);
+        id keyStr = detail::callClassMsg<id>(NSStringClass, sel_registerName("stringWithUTF8String:"), key);
+        id item = detail::callClassMsg<id>(NSMenuItemClass, sel_registerName("alloc"));
+        item = detail::callMsg<id, id, SEL, id>(
+            item, sel_registerName("initWithTitle:action:keyEquivalent:"), titleStr, action, keyStr);
+        if (mask != 0) {
+            detail::callMsg<void, detail::NSUInteger>(item, sel_registerName("setKeyEquivalentModifierMask:"), mask);
+        }
+        return item;
+    }
+
     void initWindow() {
         Class NSApplicationClass = objc_getClass("NSApplication");
         if (!NSApplicationClass) return;
@@ -463,34 +589,71 @@ private:
 
         detail::callMsg<void, detail::NSInteger>(app, sel_registerName("setActivationPolicy:"), 0); // Regular app
 
-        // Install standard Application Menu with Quit (Cmd+Q)
+        // Install comprehensive macOS Menubar: App, Edit, Window
         Class NSMenuClass = objc_getClass("NSMenu");
         Class NSMenuItemClass = objc_getClass("NSMenuItem");
-        if (NSMenuClass && NSMenuItemClass) {
+        Class NSStringClass = objc_getClass("NSString");
+        if (NSMenuClass && NSMenuItemClass && NSStringClass) {
             id menubar = detail::callClassMsg<id>(NSMenuClass, sel_registerName("alloc"));
             menubar = detail::callMsg<id>(menubar, sel_registerName("init"));
 
+            // 1. Application Menu
             id appMenuItem = detail::callClassMsg<id>(NSMenuItemClass, sel_registerName("alloc"));
             appMenuItem = detail::callMsg<id>(appMenuItem, sel_registerName("init"));
             detail::callMsg<void, id>(menubar, sel_registerName("addItem:"), appMenuItem);
 
             id appMenu = detail::callClassMsg<id>(NSMenuClass, sel_registerName("alloc"));
             appMenu = detail::callMsg<id>(appMenu, sel_registerName("init"));
-
-            Class NSStringClass = objc_getClass("NSString");
-            id quitTitle = detail::callClassMsg<id>(NSStringClass, sel_registerName("stringWithUTF8String:"), "Quit");
-            id quitKey = detail::callClassMsg<id>(NSStringClass, sel_registerName("stringWithUTF8String:"), "q");
-
-            id quitItem = detail::callClassMsg<id>(NSMenuItemClass, sel_registerName("alloc"));
-            quitItem = detail::callMsg<id, id, SEL, id>(
-                quitItem,
-                sel_registerName("initWithTitle:action:keyEquivalent:"),
-                quitTitle,
-                sel_registerName("terminate:"),
-                quitKey
-            );
-            detail::callMsg<void, id>(appMenu, sel_registerName("addItem:"), quitItem);
+            detail::callMsg<void, id>(appMenu, sel_registerName("addItem:"),
+                createMenuItem(NSMenuItemClass, NSStringClass, "Hide", sel_registerName("hide:"), "h"));
+            detail::callMsg<void, id>(appMenu, sel_registerName("addItem:"),
+                createMenuItem(NSMenuItemClass, NSStringClass, "Hide Others", sel_registerName("hideOtherApplications:"), "h", (1 << 20) | (1 << 19)));
+            detail::callMsg<void, id>(appMenu, sel_registerName("addItem:"),
+                createMenuItem(NSMenuItemClass, NSStringClass, "Show All", sel_registerName("unhideAllApplications:"), ""));
+            detail::callMsg<void, id>(appMenu, sel_registerName("addItem:"),
+                createMenuItem(NSMenuItemClass, NSStringClass, "Quit", sel_registerName("terminate:"), "q"));
             detail::callMsg<void, id>(appMenuItem, sel_registerName("setSubmenu:"), appMenu);
+
+            // 2. Edit Menu (Undo, Redo, Cut, Copy, Paste, Select All)
+            id editMenuItem = detail::callClassMsg<id>(NSMenuItemClass, sel_registerName("alloc"));
+            editMenuItem = detail::callMsg<id>(editMenuItem, sel_registerName("init"));
+            detail::callMsg<void, id>(menubar, sel_registerName("addItem:"), editMenuItem);
+
+            id editMenu = detail::callClassMsg<id>(NSMenuClass, sel_registerName("alloc"));
+            editMenu = detail::callMsg<id, id>(editMenu, sel_registerName("initWithTitle:"),
+                detail::callClassMsg<id>(NSStringClass, sel_registerName("stringWithUTF8String:"), "Edit"));
+            detail::callMsg<void, id>(editMenu, sel_registerName("addItem:"),
+                createMenuItem(NSMenuItemClass, NSStringClass, "Undo", sel_registerName("undo:"), "z"));
+            detail::callMsg<void, id>(editMenu, sel_registerName("addItem:"),
+                createMenuItem(NSMenuItemClass, NSStringClass, "Redo", sel_registerName("redo:"), "Z", (1 << 20) | (1 << 17)));
+            detail::callMsg<void, id>(editMenu, sel_registerName("addItem:"),
+                createMenuItem(NSMenuItemClass, NSStringClass, "Cut", sel_registerName("cut:"), "x"));
+            detail::callMsg<void, id>(editMenu, sel_registerName("addItem:"),
+                createMenuItem(NSMenuItemClass, NSStringClass, "Copy", sel_registerName("copy:"), "c"));
+            detail::callMsg<void, id>(editMenu, sel_registerName("addItem:"),
+                createMenuItem(NSMenuItemClass, NSStringClass, "Paste", sel_registerName("paste:"), "v"));
+            detail::callMsg<void, id>(editMenu, sel_registerName("addItem:"),
+                createMenuItem(NSMenuItemClass, NSStringClass, "Select All", sel_registerName("selectAll:"), "a"));
+            detail::callMsg<void, id>(editMenuItem, sel_registerName("setSubmenu:"), editMenu);
+
+            // 3. Window Menu (Minimize, Zoom, Toggle Full Screen, Close Window)
+            id winMenuItem = detail::callClassMsg<id>(NSMenuItemClass, sel_registerName("alloc"));
+            winMenuItem = detail::callMsg<id>(winMenuItem, sel_registerName("init"));
+            detail::callMsg<void, id>(menubar, sel_registerName("addItem:"), winMenuItem);
+
+            id winMenu = detail::callClassMsg<id>(NSMenuClass, sel_registerName("alloc"));
+            winMenu = detail::callMsg<id, id>(winMenu, sel_registerName("initWithTitle:"),
+                detail::callClassMsg<id>(NSStringClass, sel_registerName("stringWithUTF8String:"), "Window"));
+            detail::callMsg<void, id>(winMenu, sel_registerName("addItem:"),
+                createMenuItem(NSMenuItemClass, NSStringClass, "Minimize", sel_registerName("performMiniaturize:"), "m"));
+            detail::callMsg<void, id>(winMenu, sel_registerName("addItem:"),
+                createMenuItem(NSMenuItemClass, NSStringClass, "Zoom", sel_registerName("performZoom:"), ""));
+            detail::callMsg<void, id>(winMenu, sel_registerName("addItem:"),
+                createMenuItem(NSMenuItemClass, NSStringClass, "Toggle Full Screen", sel_registerName("toggleFullScreen:"), "f", (1 << 20) | (1 << 18)));
+            detail::callMsg<void, id>(winMenu, sel_registerName("addItem:"),
+                createMenuItem(NSMenuItemClass, NSStringClass, "Close Window", sel_registerName("performClose:"), "w"));
+            detail::callMsg<void, id>(winMenuItem, sel_registerName("setSubmenu:"), winMenu);
+
             detail::callMsg<void, id>(app, sel_registerName("setMainMenu:"), menubar);
         }
 
@@ -592,6 +755,7 @@ private:
     int fbWidth_{0};
     int fbHeight_{0};
     std::vector<uint32_t> currentFbPixels_;
+    std::string win32Clipboard_;
 };
 
 #endif // __APPLE__
@@ -646,6 +810,9 @@ public:
     [[nodiscard]] int getWidth() const noexcept override { return width_; }
     [[nodiscard]] int getHeight() const noexcept override { return height_; }
     [[nodiscard]] const WindowConfig& getConfig() const noexcept override { return config_; }
+
+    void setClipboardText(const std::string& text) override { win32Clipboard_ = text; }
+    [[nodiscard]] std::string getClipboardText() const override { return win32Clipboard_; }
 
     void present(const FrameBuffer& fb) override {
         if (!open_ || !hwnd_) return;
@@ -872,6 +1039,7 @@ private:
     int fbWidth_{0};
     int fbHeight_{0};
     std::vector<uint32_t> currentFbPixels_;
+    std::string win32Clipboard_;
 };
 
 #endif // _WIN32
@@ -935,6 +1103,9 @@ public:
     [[nodiscard]] int getWidth() const noexcept override { return width_; }
     [[nodiscard]] int getHeight() const noexcept override { return height_; }
     [[nodiscard]] const WindowConfig& getConfig() const noexcept override { return config_; }
+
+    void setClipboardText(const std::string& text) override { x11Clipboard_ = text; }
+    [[nodiscard]] std::string getClipboardText() const override { return x11Clipboard_; }
 
     void present(const FrameBuffer& fb) override {
         if (!open_ || !display_ || !window_ || !gc_) return;
@@ -1192,6 +1363,7 @@ private:
     unsigned long (*fnXInternAtom_)(void*, const char*, int){nullptr};
     int (*fnXSetWMProtocols_)(void*, unsigned long, unsigned long*, int){nullptr};
     int (*fnXFlush_)(void*){nullptr};
+    std::string x11Clipboard_;
 };
 
 #endif // __linux__ && !__APPLE__

@@ -469,3 +469,75 @@ TEST_CASE("FlexboxSolver - Desktop Pixel Dual-Unit Flexbox Layout", "[ui][deskto
         CHECK(mainFeed->getContentHeight() >= 600);
     }
 }
+
+TEST_CASE("DesktopBackend - Comprehensive Keyboard Shortcuts, Clipboard & Editing", "[ui][desktop][shortcuts]") {
+    auto app = std::make_shared<TestDesktopApp>();
+    DesktopBackend backend(app, 800, 600);
+
+    std::string fakeClipboard;
+    backend.setClipboardProvider(
+        [&fakeClipboard](const std::string& t) { fakeClipboard = t; },
+        [&fakeClipboard]() -> std::string { return fakeClipboard; }
+    );
+
+    // Focus input node (id 4)
+    backend.getFocusManager().setFocus(4);
+    REQUIRE(backend.getFocusManager().getFocusedNodeId() == 4);
+    auto input = app->inputNode_;
+    REQUIRE(input != nullptr);
+
+    // Initial value is "initial"
+    CHECK(input->getValue() == "initial");
+
+    // 1. Select All (Cmd+A)
+    backend.dispatchKey("SelectAll");
+    CHECK(input->hasSelection());
+    CHECK(input->getSelectionStart() == 0);
+    CHECK(input->getSelectionEnd() == 7);
+
+    // 2. Copy (Cmd+C)
+    backend.dispatchKey("Copy");
+    CHECK(fakeClipboard == "initial");
+
+    // 3. Cut (Cmd+X)
+    backend.dispatchKey("Cut");
+    CHECK(input->getValue() == "");
+    CHECK(fakeClipboard == "initial");
+
+    // 4. Paste (Cmd+V)
+    backend.dispatchKey("Paste");
+    CHECK(input->getValue() == "initial");
+
+    // 5. Undo (Cmd+Z)
+    backend.dispatchKey("Undo");
+    CHECK(input->getValue() == "");
+
+    // 6. Redo (Cmd+Shift+Z)
+    backend.dispatchKey("Redo");
+    CHECK(input->getValue() == "initial");
+
+    // 7. Type extra words
+    input->setCursorPos(7);
+    backend.dispatchKey(" ");
+    backend.dispatchKey("w");
+    backend.dispatchKey("o");
+    backend.dispatchKey("r");
+    backend.dispatchKey("l");
+    backend.dispatchKey("d");
+    CHECK(input->getValue() == "initial world");
+
+    // 8. Word navigation (Alt+ArrowLeft)
+    backend.dispatchKey("Alt+ArrowLeft");
+    CHECK(input->getCursorPos() == 8);
+
+    backend.dispatchKey("Alt+ArrowRight");
+    CHECK(input->getCursorPos() == 13);
+
+    // 9. Word delete (Alt+Backspace)
+    backend.dispatchKey("Alt+Backspace");
+    CHECK(input->getValue() == "initial ");
+
+    // 10. Delete to line start (Cmd+Backspace)
+    backend.dispatchKey("Cmd+Backspace");
+    CHECK(input->getValue() == "");
+}
