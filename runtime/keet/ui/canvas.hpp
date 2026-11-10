@@ -1,5 +1,15 @@
 #pragma once
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+
 #include <keet/ui/font_data.hpp>
 #include <keet/ui/geometry.hpp>
 #include <keet/ui/node.hpp>

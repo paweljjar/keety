@@ -1,4 +1,6 @@
 #include <keety/kml/kml_lowerer.hpp>
+#include <algorithm>
+#include <cctype>
 #include <iomanip>
 #include <set>
 #include <sstream>
