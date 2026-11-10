@@ -237,6 +237,18 @@ public:
             return false;
         }
 
+        // Check if window view size changed before event dispatch
+        if (view_) {
+            CGRect bounds = detail::callMsg<CGRect>(view_, sel_registerName("bounds"));
+            int curW = static_cast<int>(bounds.size.width);
+            int curH = static_cast<int>(bounds.size.height);
+            if (curW > 0 && curH > 0 && (curW != width_ || curH != height_)) {
+                width_ = curW;
+                height_ = curH;
+                backend.resize(curW, curH);
+            }
+        }
+
         Class NSApplicationClass = objc_getClass("NSApplication");
         id app = detail::callClassMsg<id>(NSApplicationClass, sel_registerName("sharedApplication"));
         SEL nextEventSel = sel_registerName("nextEventMatchingMask:untilDate:inMode:dequeue:");
@@ -312,21 +324,23 @@ public:
             detail::callMsg<void, id>(app, sendEventSel, event);
         }
 
-        // Check if window view size changed
-        CGRect bounds = detail::callMsg<CGRect>(view_, sel_registerName("bounds"));
-        int curW = static_cast<int>(bounds.size.width);
-        int curH = static_cast<int>(bounds.size.height);
-        if (curW > 0 && curH > 0 && (curW != width_ || curH != height_)) {
-            width_ = curW;
-            height_ = curH;
-            backend.resize(curW, curH);
+        // Check if window view size changed after event dispatch
+        if (view_) {
+            CGRect bounds = detail::callMsg<CGRect>(view_, sel_registerName("bounds"));
+            int curW = static_cast<int>(bounds.size.width);
+            int curH = static_cast<int>(bounds.size.height);
+            if (curW > 0 && curH > 0 && (curW != width_ || curH != height_)) {
+                width_ = curW;
+                height_ = curH;
+                backend.resize(curW, curH);
+            }
         }
 
         detail::callMsg<void>(app, sel_registerName("updateWindows"));
         return open_;
     }
 
-    void onDrawRect(id /*view*/) {
+    void onDrawRect(id view) {
         if (currentFbPixels_.empty() || fbWidth_ <= 0 || fbHeight_ <= 0) return;
 
         Class NSGraphicsContextClass = objc_getClass("NSGraphicsContext");
@@ -334,6 +348,10 @@ public:
         if (!curContext) return;
         CGContextRef ctx = detail::callMsg<CGContextRef>(curContext, sel_registerName("CGContext"));
         if (!ctx) return;
+
+        CGRect viewBounds = detail::callMsg<CGRect>(view, sel_registerName("bounds"));
+        double curW = viewBounds.size.width > 0 ? viewBounds.size.width : static_cast<double>(width_);
+        double curH = viewBounds.size.height > 0 ? viewBounds.size.height : static_cast<double>(height_);
 
         CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
         CGDataProviderRef provider = CGDataProviderCreateWithData(
@@ -363,9 +381,9 @@ public:
 
         if (image) {
             CGContextSaveGState(ctx);
-            CGContextTranslateCTM(ctx, 0, height_);
+            CGContextTranslateCTM(ctx, 0, curH);
             CGContextScaleCTM(ctx, 1.0, -1.0);
-            CGRect destRect = CGRectMake(0, 0, width_, height_);
+            CGRect destRect = CGRectMake(0, 0, curW, curH);
             CGContextDrawImage(ctx, destRect, image);
             CGContextRestoreGState(ctx);
             CGImageRelease(image);
@@ -444,11 +462,29 @@ private:
 
         if (!window_) return;
 
+        // Support native macOS fullscreen behavior
+        detail::NSUInteger collectionBehavior = (1 << 7) | (1 << 11); // NSWindowCollectionBehaviorFullScreenPrimary | NSWindowCollectionBehaviorFullScreenAllowsTiling
+        detail::callMsg<void, detail::NSUInteger>(window_, sel_registerName("setCollectionBehavior:"), collectionBehavior);
+
+        // Window background color (Catppuccin Mocha base #1e1e2e)
+        Class NSColorClass = objc_getClass("NSColor");
+        if (NSColorClass) {
+            id bgColor = detail::callClassMsg<id, double, double, double, double>(
+                NSColorClass, sel_registerName("colorWithRed:green:blue:alpha:"),
+                0.118, 0.118, 0.180, 1.0
+            );
+            detail::callMsg<void, id>(window_, sel_registerName("setBackgroundColor:"), bgColor);
+        }
+
         setTitle(config_.title);
 
         Class viewClass = getOrCreateViewClass();
         id allocView = detail::callClassMsg<id>(viewClass, sel_registerName("alloc"));
         view_ = detail::callMsg<id, CGRect>(allocView, sel_registerName("initWithFrame:"), rect);
+
+        // Enable view auto-resizing with window
+        detail::NSUInteger autoresizingMask = (1 << 1) | (1 << 4); // NSViewWidthSizable | NSViewHeightSizable
+        detail::callMsg<void, detail::NSUInteger>(view_, sel_registerName("setAutoresizingMask:"), autoresizingMask);
 
         void* thisPtr = this;
         object_setInstanceVariable(view_, "_nativeWindowPtr", thisPtr);
