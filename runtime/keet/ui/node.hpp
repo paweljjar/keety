@@ -51,7 +51,7 @@ struct NodeStyle {
 
     FlexDirection flexDirection{FlexDirection::Column};
     JustifyContent justifyContent{JustifyContent::FlexStart};
-    AlignItems alignItems{AlignItems::FlexStart};
+    AlignItems alignItems{AlignItems::Stretch};
 
     Edges padding{0, 0, 0, 0};
     Edges margin{0, 0, 0, 0};

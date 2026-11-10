@@ -62,6 +62,91 @@ public:
     }
 
 private:
+    static int estimateIntrinsicWidth(const std::shared_ptr<UINode>& node, const LayoutMetrics& metrics) {
+        if (!node) return 0;
+        const auto& cStyle = node->getStyle();
+        if (cStyle.width.mode == SizeMode::Fixed || cStyle.width.mode == SizeMode::Pixels) {
+            return cStyle.width.value;
+        }
+        bool isPixelsMode = (metrics.unitMode == LayoutUnitMode::DesktopPixels);
+        if (node->getKind() == NodeKind::Text) {
+            auto t = std::static_pointer_cast<TextNode>(node);
+            return metrics.measureText(t->getContent(), cStyle.fontSize).width;
+        }
+        if (node->getKind() == NodeKind::Button) {
+            auto b = std::static_pointer_cast<ButtonNode>(node);
+            int padX = isPixelsMode ? (metrics.buttonPaddingX * 2) : 2;
+            return metrics.measureText(b->getLabel(), cStyle.fontSize).width + padX;
+        }
+        if (node->getKind() == NodeKind::Input) {
+            return isPixelsMode ? 140 : 12;
+        }
+
+        const auto& children = node->getChildren();
+        if (children.empty()) {
+            return isPixelsMode ? metrics.defaultBoxWidthPx : 4;
+        }
+
+        int totalWidth = 0;
+        int maxChildWidth = 0;
+        int visibleCount = 0;
+        bool childIsRow = (cStyle.flexDirection == FlexDirection::Row);
+
+        for (const auto& ch : children) {
+            if (!ch || !ch->isVisible()) continue;
+            visibleCount++;
+            int w = estimateIntrinsicWidth(ch, metrics) + ch->getStyle().margin.horizontal();
+            totalWidth += w;
+            maxChildWidth = std::max(maxChildWidth, w);
+        }
+
+        int gapTotal = (visibleCount > 1 && cStyle.gap > 0) ? (cStyle.gap * (visibleCount - 1)) : 0;
+        int contentW = childIsRow ? (totalWidth + gapTotal) : maxChildWidth;
+        return contentW + cStyle.padding.horizontal() + cStyle.border.horizontal();
+    }
+
+    static int estimateIntrinsicHeight(const std::shared_ptr<UINode>& node, const LayoutMetrics& metrics) {
+        if (!node) return 0;
+        const auto& cStyle = node->getStyle();
+        if (cStyle.height.mode == SizeMode::Fixed || cStyle.height.mode == SizeMode::Pixels) {
+            return cStyle.height.value;
+        }
+        bool isPixelsMode = (metrics.unitMode == LayoutUnitMode::DesktopPixels);
+        if (node->getKind() == NodeKind::Text) {
+            auto t = std::static_pointer_cast<TextNode>(node);
+            return metrics.measureText(t->getContent(), cStyle.fontSize).height;
+        }
+        if (node->getKind() == NodeKind::Button) {
+            int padY = isPixelsMode ? (metrics.buttonPaddingY * 2) : 0;
+            return metrics.measureText("", cStyle.fontSize).height + padY;
+        }
+        if (node->getKind() == NodeKind::Input) {
+            return isPixelsMode ? metrics.inputHeightPx : 1;
+        }
+
+        const auto& children = node->getChildren();
+        if (children.empty()) {
+            return isPixelsMode ? metrics.defaultBoxHeightPx : 3;
+        }
+
+        int totalHeight = 0;
+        int maxChildHeight = 0;
+        int visibleCount = 0;
+        bool childIsRow = (cStyle.flexDirection == FlexDirection::Row);
+
+        for (const auto& ch : children) {
+            if (!ch || !ch->isVisible()) continue;
+            visibleCount++;
+            int h = estimateIntrinsicHeight(ch, metrics) + ch->getStyle().margin.vertical();
+            totalHeight += h;
+            maxChildHeight = std::max(maxChildHeight, h);
+        }
+
+        int gapTotal = (visibleCount > 1 && cStyle.gap > 0) ? (cStyle.gap * (visibleCount - 1)) : 0;
+        int contentH = childIsRow ? maxChildHeight : (totalHeight + gapTotal);
+        return contentH + cStyle.padding.vertical() + cStyle.border.vertical();
+    }
+
     static void computeNode(const std::shared_ptr<UINode>& node,
                             Rect available,
                             const LayoutMetrics& metrics,
@@ -140,8 +225,6 @@ private:
             m.flexGrow = cStyle.flexGrow;
             m.flexShrink = std::max(0, cStyle.flexShrink);
 
-            bool isPixelsMode = (metrics.unitMode == LayoutUnitMode::DesktopPixels);
-
             if (isRow) {
                 // Main axis = width, Cross axis = height
                 if (cStyle.width.mode == SizeMode::Fixed || cStyle.width.mode == SizeMode::Pixels) {
@@ -149,21 +232,7 @@ private:
                 } else if (cStyle.width.mode == SizeMode::Percent) {
                     m.baseMainSize = (contentWidth * cStyle.width.value) / 100;
                 } else {
-                    // Auto width: estimate from content or default min size
-                    if (child->getKind() == NodeKind::Text) {
-                        auto t = std::static_pointer_cast<TextNode>(child);
-                        Size textSize = metrics.measureText(t->getContent(), cStyle.fontSize);
-                        m.baseMainSize = textSize.width;
-                    } else if (child->getKind() == NodeKind::Button) {
-                        auto b = std::static_pointer_cast<ButtonNode>(child);
-                        Size textSize = metrics.measureText(b->getLabel(), cStyle.fontSize);
-                        int padX = isPixelsMode ? (metrics.buttonPaddingX * 2) : 2;
-                        m.baseMainSize = textSize.width + padX;
-                    } else if (child->getKind() == NodeKind::Input) {
-                        m.baseMainSize = isPixelsMode ? 140 : 12;
-                    } else {
-                        m.baseMainSize = isPixelsMode ? metrics.defaultBoxWidthPx : 4;
-                    }
+                    m.baseMainSize = estimateIntrinsicWidth(child, metrics);
                 }
 
                 if (cStyle.height.mode == SizeMode::Fixed || cStyle.height.mode == SizeMode::Pixels) {
@@ -171,14 +240,9 @@ private:
                 } else if (cStyle.height.mode == SizeMode::Percent) {
                     m.crossSize = (contentHeight * cStyle.height.value) / 100;
                 } else {
-                    if (child->getKind() == NodeKind::Button && isPixelsMode) {
-                        Size textSize = metrics.measureText("", cStyle.fontSize);
-                        m.crossSize = textSize.height + (metrics.buttonPaddingY * 2);
-                    } else if (child->getKind() == NodeKind::Input && isPixelsMode) {
-                        m.crossSize = metrics.inputHeightPx;
-                    } else {
-                        m.crossSize = (style.alignItems == AlignItems::Stretch) ? contentHeight : (isPixelsMode ? metrics.lineHeightPx : 1);
-                    }
+                    m.crossSize = (style.alignItems == AlignItems::Stretch)
+                                      ? contentHeight
+                                      : estimateIntrinsicHeight(child, metrics);
                 }
             } else {
                 // Main axis = height, Cross axis = width
@@ -187,23 +251,7 @@ private:
                 } else if (cStyle.height.mode == SizeMode::Percent) {
                     m.baseMainSize = (contentHeight * cStyle.height.value) / 100;
                 } else {
-                    // Auto height
-                    if (child->getKind() == NodeKind::Text) {
-                        auto t = std::static_pointer_cast<TextNode>(child);
-                        Size textSize = metrics.measureText(t->getContent(), cStyle.fontSize);
-                        m.baseMainSize = textSize.height;
-                    } else if (child->getKind() == NodeKind::Button) {
-                        if (isPixelsMode) {
-                            Size textSize = metrics.measureText("", cStyle.fontSize);
-                            m.baseMainSize = textSize.height + (metrics.buttonPaddingY * 2);
-                        } else {
-                            m.baseMainSize = 1;
-                        }
-                    } else if (child->getKind() == NodeKind::Input) {
-                        m.baseMainSize = isPixelsMode ? metrics.inputHeightPx : 1;
-                    } else {
-                        m.baseMainSize = isPixelsMode ? metrics.defaultBoxHeightPx : 3;
-                    }
+                    m.baseMainSize = estimateIntrinsicHeight(child, metrics);
                 }
 
                 if (cStyle.width.mode == SizeMode::Fixed || cStyle.width.mode == SizeMode::Pixels) {
@@ -211,7 +259,17 @@ private:
                 } else if (cStyle.width.mode == SizeMode::Percent) {
                     m.crossSize = (contentWidth * cStyle.width.value) / 100;
                 } else {
-                    m.crossSize = (style.alignItems == AlignItems::Stretch) ? contentWidth : contentWidth;
+                    m.crossSize = (style.alignItems == AlignItems::Stretch)
+                                      ? contentWidth
+                                      : estimateIntrinsicWidth(child, metrics);
+                }
+            }
+
+            if (m.flexGrow > 0) {
+                if (isRow && cStyle.width.mode == SizeMode::Auto) {
+                    m.baseMainSize = 0;
+                } else if (!isRow && cStyle.height.mode == SizeMode::Auto) {
+                    m.baseMainSize = 0;
                 }
             }
 
