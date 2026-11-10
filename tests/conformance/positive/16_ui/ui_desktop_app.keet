@@ -1,0 +1,52 @@
+import io;
+import ui;
+
+class CounterApp inherits ui.Component {
+    pub let counter: int = 0;
+    pub let textInput: string = "hello";
+
+    pub fn increment(): void {
+        this.counter += 1;
+    }
+}
+
+fn main(): int {
+    io.println("Running KeetScript Native Desktop UI conformance test...");
+
+    let app: CounterApp = CounterApp();
+    let backend: ui.DesktopBackend = ui.mountDesktop(app, 800, 600);
+
+    if (backend.getWidth() != 800) {
+        return 1;
+    }
+    if (backend.getHeight() != 600) {
+        return 2;
+    }
+
+    // Render frame
+    backend.renderFrame();
+
+    // Resize backend
+    backend.resize(1024, 768);
+    if (backend.getWidth() != 1024) {
+        return 3;
+    }
+    if (backend.getHeight() != 768) {
+        return 4;
+    }
+
+    // Dispatch pointer events and keyboard keys
+    let clicked: bool = backend.dispatchClick(100, 100);
+    backend.dispatchMouseMove(150, 150);
+    backend.dispatchKey("A");
+    backend.dispatchScroll(200, 200, 20);
+
+    // Snapshot hierarchy check
+    let snap: string = backend.snapshot();
+    if (snap.length() == 0) {
+        return 5;
+    }
+
+    io.println("Desktop UI conformance test passed successfully.");
+    return 0;
+}

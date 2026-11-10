@@ -18,26 +18,40 @@
 namespace keet::ui {
 
 /// Mounts a UI component onto a desktop raster backend
-inline std::shared_ptr<DesktopBackend> mountDesktop(std::shared_ptr<Component> root, int width = 800, int height = 600) {
+template <typename T>
+inline DesktopBackend mountDesktop(T&& root, int width = 800, int height = 600) {
+    if constexpr (std::is_convertible_v<T, std::shared_ptr<Component>>) {
+        return DesktopBackend(std::forward<T>(root), width, height);
+    } else if constexpr (std::is_base_of_v<Component, std::decay_t<T>>) {
+        return DesktopBackend(std::make_shared<std::decay_t<T>>(std::forward<T>(root)), width, height);
+    } else {
+        return DesktopBackend(nullptr, width, height);
+    }
+}
+
+/// Mounts a UI component onto a desktop raster backend (heap pointer)
+inline std::shared_ptr<DesktopBackend> mountDesktopPtr(std::shared_ptr<Component> root, int width = 800, int height = 600) {
     return std::make_shared<DesktopBackend>(std::move(root), width, height);
 }
 
 /// Renders a UI component into a native OS window with event loop execution
-inline void renderDesktop(std::shared_ptr<Component> root, const WindowConfig& config = WindowConfig{}) {
-    auto backend = mountDesktop(root, config.width, config.height);
+template <typename T>
+inline void renderDesktop(T&& root, const WindowConfig& config = WindowConfig{}) {
+    auto backend = mountDesktop(std::forward<T>(root), config.width, config.height);
     auto window = NativeWindow::create(config);
     if (!window) return;
-    window->present(backend->getFrameBuffer());
-    window->runEventLoop(*backend);
+    window->present(backend.getFrameBuffer());
+    window->runEventLoop(backend);
 }
 
 /// Renders a UI component into a native OS window by title and dimensions
-inline void renderDesktop(std::shared_ptr<Component> root, const std::string& title, int width = 800, int height = 600) {
+template <typename T>
+inline void renderDesktop(T&& root, const std::string& title, int width = 800, int height = 600) {
     WindowConfig config;
     config.title = title;
     config.width = width;
     config.height = height;
-    renderDesktop(std::move(root), config);
+    renderDesktop(std::forward<T>(root), config);
 }
 
 } // namespace keet::ui

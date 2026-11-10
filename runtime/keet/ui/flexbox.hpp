@@ -177,7 +177,7 @@ private:
                     } else if (child->getKind() == NodeKind::Input && isPixelsMode) {
                         m.crossSize = metrics.inputHeightPx;
                     } else {
-                        m.crossSize = (cStyle.alignItems == AlignItems::Stretch) ? contentHeight : (isPixelsMode ? metrics.lineHeightPx : 1);
+                        m.crossSize = (style.alignItems == AlignItems::Stretch) ? contentHeight : (isPixelsMode ? metrics.lineHeightPx : 1);
                     }
                 }
             } else {

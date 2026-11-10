@@ -335,9 +335,8 @@ TEST_CASE("NativeWindow - WindowConfig Defaults and Headless Driver", "[ui][desk
 TEST_CASE("NativeWindow - Desktop Event Loop and Backend Integration", "[ui][desktop][window]") {
     auto app = std::make_shared<TestDesktopApp>();
     auto backend = mountDesktop(app, 640, 480);
-    REQUIRE(backend != nullptr);
-    CHECK(backend->getWidth() == 640);
-    CHECK(backend->getHeight() == 480);
+    CHECK(backend.getWidth() == 640);
+    CHECK(backend.getHeight() == 480);
 
     WindowConfig config;
     config.title = "Test App";
@@ -349,26 +348,26 @@ TEST_CASE("NativeWindow - Desktop Event Loop and Backend Integration", "[ui][des
     REQUIRE(window != nullptr);
 
     // Initial frame presentation
-    window->present(backend->getFrameBuffer());
+    window->present(backend.getFrameBuffer());
 
     auto* headlessWin = dynamic_cast<HeadlessNativeWindow*>(window.get());
     REQUIRE(headlessWin != nullptr);
     CHECK(headlessWin->getPresentedFrameCount() == 1);
 
     // Event poll on headless window returns open status
-    bool stillOpen = window->pollEvents(*backend);
+    bool stillOpen = window->pollEvents(backend);
     CHECK(stillOpen);
 
     // Interact with backend and present updated frame
-    backend->dispatchClick(30, 60); // Click button
+    backend.dispatchClick(30, 60); // Click button
     CHECK(app->counter == 1);
 
-    window->present(backend->getFrameBuffer());
+    window->present(backend.getFrameBuffer());
     CHECK(headlessWin->getPresentedFrameCount() == 2);
 
     window->close();
     CHECK(!window->isOpen());
-    CHECK(!window->pollEvents(*backend));
+    CHECK(!window->pollEvents(backend));
 }
 
 #if defined(__APPLE__)
@@ -400,3 +399,73 @@ TEST_CASE("NativeWindow - Cocoa Driver Instantiation and Surface", "[ui][desktop
     CHECK(!window->isOpen());
 }
 #endif
+
+TEST_CASE("FlexboxSolver - Desktop Pixel Dual-Unit Flexbox Layout", "[ui][desktop][layout]") {
+    LayoutMetrics metrics;
+    metrics.unitMode = LayoutUnitMode::DesktopPixels;
+    metrics.charWidthPx = 8;
+    metrics.lineHeightPx = 20;
+
+    SECTION("Nested StackNode (Row / Column), gap, padding, margin and flexGrow") {
+        auto root = std::make_shared<StackNode>(FlexDirection::Column);
+        root->getStyle().padding = Edges::All(10);
+        root->getStyle().gap = 12;
+
+        auto header = std::make_shared<BoxNode>();
+        header->getStyle().height = Dimension::Pixels(40);
+        root->appendChild(header);
+
+        auto contentRow = std::make_shared<StackNode>(FlexDirection::Row);
+        contentRow->getStyle().flexGrow = 1.0f;
+        contentRow->getStyle().gap = 8;
+        contentRow->getStyle().alignItems = AlignItems::Stretch;
+
+        auto sidebar = std::make_shared<BoxNode>();
+        sidebar->getStyle().width = Dimension::Pixels(180);
+        contentRow->appendChild(sidebar);
+
+        auto mainFeed = std::make_shared<ScrollNode>();
+        mainFeed->getStyle().flexGrow = 1.0f;
+        mainFeed->getStyle().overflowScrollY = true;
+
+        for (int i = 0; i < 20; ++i) {
+            auto msg = std::make_shared<TextNode>("Message " + std::to_string(i));
+            msg->getStyle().height = Dimension::Pixels(30);
+            mainFeed->appendChild(msg);
+        }
+        contentRow->appendChild(mainFeed);
+        root->appendChild(contentRow);
+
+        FlexboxSolver::computeLayout(root, Rect{0, 0, 800, 600}, metrics);
+
+        // Root is [0, 0, 800, 600]
+        CHECK(root->getBounds() == Rect{0, 0, 800, 600});
+
+        // Header starts at padding (10, 10), height 40, width 800 - 20 = 780
+        CHECK(header->getBounds().x == 10);
+        CHECK(header->getBounds().y == 10);
+        CHECK(header->getBounds().height == 40);
+        CHECK(header->getBounds().width == 780);
+
+        // ContentRow starts at y = 10 + 40 + gap(12) = 62, remaining height = 600 - 20 - 40 - 12 = 528
+        CHECK(contentRow->getBounds().x == 10);
+        CHECK(contentRow->getBounds().y == 62);
+        CHECK(contentRow->getBounds().height == 528);
+        CHECK(contentRow->getBounds().width == 780);
+
+        // Sidebar is width 180, starts at x = 10, y = 62
+        CHECK(sidebar->getBounds().x == 10);
+        CHECK(sidebar->getBounds().y == 62);
+        CHECK(sidebar->getBounds().width == 180);
+        CHECK(sidebar->getBounds().height == 528);
+
+        // MainFeed starts at x = 10 + 180 + gap(8) = 198, width = 780 - 180 - 8 = 592
+        CHECK(mainFeed->getBounds().x == 198);
+        CHECK(mainFeed->getBounds().y == 62);
+        CHECK(mainFeed->getBounds().width == 592);
+        CHECK(mainFeed->getBounds().height == 528);
+
+        // ScrollNode content height: 20 items * 30px = 600px > 528px (overflows!)
+        CHECK(mainFeed->getContentHeight() >= 600);
+    }
+}

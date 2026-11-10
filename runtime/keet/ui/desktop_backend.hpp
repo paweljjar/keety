@@ -73,8 +73,9 @@ public:
                             int height = 600)
         : component_(std::move(rootComponent)),
           fb_(width, height),
-          canvas_(fb_),
           focusMgr_() {
+
+        canvas_ = std::make_unique<Canvas2D>(fb_);
 
         metrics_.unitMode = LayoutUnitMode::DesktopPixels;
         metrics_.charWidthPx = 8;
@@ -87,9 +88,47 @@ public:
             focusMgr_.setRoot(rootNode_);
         }
 
+        if (!rootNode_) {
+            rootNode_ = std::make_shared<BoxNode>();
+            rootNode_->setBounds(Rect{0, 0, width, height});
+        }
+
         relayout();
         renderFrame();
     }
+
+    DesktopBackend(DesktopBackend&& other) noexcept
+        : component_(std::move(other.component_)),
+          rootNode_(std::move(other.rootNode_)),
+          fb_(std::move(other.fb_)),
+          focusMgr_(std::move(other.focusMgr_)),
+          metrics_(other.metrics_),
+          lastMousePos_(other.lastMousePos_),
+          hoveredNodeId_(other.hoveredNodeId_),
+          pressedNodeId_(other.pressedNodeId_) {
+        canvas_ = std::make_unique<Canvas2D>(fb_);
+    }
+
+    DesktopBackend& operator=(DesktopBackend&& other) noexcept {
+        if (this != &other) {
+            component_ = std::move(other.component_);
+            rootNode_ = std::move(other.rootNode_);
+            fb_ = std::move(other.fb_);
+            focusMgr_ = std::move(other.focusMgr_);
+            metrics_ = other.metrics_;
+            lastMousePos_ = other.lastMousePos_;
+            hoveredNodeId_ = other.hoveredNodeId_;
+            pressedNodeId_ = other.pressedNodeId_;
+            canvas_ = std::make_unique<Canvas2D>(fb_);
+        }
+        return *this;
+    }
+
+    DesktopBackend(const DesktopBackend&) = delete;
+    DesktopBackend& operator=(const DesktopBackend&) = delete;
+
+    DesktopBackend* operator->() noexcept { return this; }
+    const DesktopBackend* operator->() const noexcept { return this; }
 
     [[nodiscard]] int getWidth() const noexcept { return fb_.getWidth(); }
     [[nodiscard]] int getHeight() const noexcept { return fb_.getHeight(); }
@@ -110,10 +149,11 @@ public:
     }
 
     void renderFrame() {
-        canvas_.clear(RgbaColor{30, 30, 46, 255}); // Modern dark base theme
+        if (!canvas_) return;
+        canvas_->clear(RgbaColor{30, 30, 46, 255}); // Modern dark base theme
         if (rootNode_) {
             uint32_t focusedId = focusMgr_.getFocusedNodeId().value_or(0);
-            SceneGraphRenderer::render(rootNode_, canvas_, focusedId);
+            SceneGraphRenderer::render(rootNode_, *canvas_, focusedId);
         }
     }
 
@@ -311,7 +351,7 @@ private:
     std::shared_ptr<Component> component_;
     std::shared_ptr<UINode> rootNode_;
     FrameBuffer fb_;
-    Canvas2D canvas_;
+    std::unique_ptr<Canvas2D> canvas_;
     FocusManager focusMgr_;
     LayoutMetrics metrics_;
 
