@@ -144,3 +144,86 @@ TEST_CASE("KML Lowerer - Full Component Synthesis", "[kml][lowerer]") {
     CHECK(code.find("pub fn destroy(): void") != std::string::npos);
 }
 
+TEST_CASE("KML Lowerer - Desktop Layout Tags, Attributes and Input Binding Lowering", "[kml][lowerer][desktop]") {
+    std::string_view docSource = R"kml(
+<script>
+    let mut message = $state("hello");
+    let mut messages = $state([]);
+
+    fn sendMessage(): void {
+        messages = messages + [message];
+        message = "";
+    }
+</script>
+
+<template>
+    <vstack width="800" height="100%" bg="#1e1e2e" padding="16" gap="12">
+        <hstack justify="space-between" align="center" padding="8" bg="#181825" radius="6">
+            <text color="#cdd6f4" font-size="16">KeetChat #general</text>
+        </hstack>
+
+        <scroll grow="1" bg="#11111b" padding="12" radius="8">
+            <vstack gap="8">
+                <box class="msg" padding="6" bg="#313244" radius="4">
+                    <text color="#cdd6f4">{message}</text>
+                </box>
+            </vstack>
+        </scroll>
+
+        <hstack gap="8" align="center">
+            <input $bind.value={message} @keydown.enter={sendMessage} grow="1" height="36" bg="#181825" color="#cdd6f4" radius="6" padding="8" />
+            <button @click={sendMessage} width="100" height="36" bg="#89b4fa" radius="6">
+                <text color="#11111b">Send</text>
+            </button>
+        </hstack>
+    </vstack>
+</template>
+    )kml";
+
+    KmlParser parser(docSource, 1);
+    KmlDocument doc = parser.parseDocument("ChatApp");
+
+    KmlLowerer lowerer(doc);
+    auto res = lowerer.lower();
+
+    CHECK(res.componentName == "ChatApp");
+    const std::string& cpp = res.generatedCppCode;
+
+    // 1. Verify layout tags lowering
+    CHECK(cpp.find("std::make_shared<::keet::ui::StackNode>(::keet::ui::FlexDirection::Column)") != std::string::npos);
+    CHECK(cpp.find("std::make_shared<::keet::ui::StackNode>(::keet::ui::FlexDirection::Row)") != std::string::npos);
+    CHECK(cpp.find("std::make_shared<::keet::ui::ScrollNode>()") != std::string::npos);
+    CHECK(cpp.find("getStyle().overflowScrollY = true") != std::string::npos);
+    CHECK(cpp.find("std::make_shared<::keet::ui::InputNode>()") != std::string::npos);
+
+    // 2. Verify layout attributes lowering
+    CHECK(cpp.find("getStyle().width = ::keet::ui::Dimension::Pixels(800)") != std::string::npos);
+    CHECK(cpp.find("getStyle().height = ::keet::ui::Dimension::Percent(100)") != std::string::npos);
+    CHECK(cpp.find("getStyle().padding = ::keet::ui::Edges::All(16)") != std::string::npos);
+    CHECK(cpp.find("getStyle().gap = 12") != std::string::npos);
+    CHECK(cpp.find("getStyle().justifyContent = ::keet::ui::JustifyContent::SpaceBetween") != std::string::npos);
+    CHECK(cpp.find("getStyle().alignItems = ::keet::ui::AlignItems::Center") != std::string::npos);
+    CHECK(cpp.find("getStyle().flexGrow = 1") != std::string::npos);
+    CHECK(cpp.find("getStyle().borderRadius = 8") != std::string::npos);
+    CHECK(cpp.find("getStyle().fontSize = 16") != std::string::npos);
+    CHECK(cpp.find("getStyle().backgroundColorRgba = ::keet::ui::RgbaColor::parseHex(\"#1e1e2e\")") != std::string::npos);
+    CHECK(cpp.find("getStyle().textColorRgba = ::keet::ui::RgbaColor::parseHex(\"#cdd6f4\")") != std::string::npos);
+
+    // 3. Verify $bind.value lowering
+    CHECK(cpp.find("setValueSilent(::keet::to_string(this->message))") != std::string::npos);
+    CHECK(cpp.find("this->message = val;") != std::string::npos);
+
+    // 4. Verify @keydown.enter lowering
+    CHECK(cpp.find("if (key == \"Enter\")") != std::string::npos);
+    CHECK(cpp.find("this->sendMessage();") != std::string::npos);
+
+    // 5. Verify KeetScript mount lowering for stack and scroll
+    const std::string& ks = res.generatedKeetScript;
+    CHECK(ks.find("new ui.StackNode()") != std::string::npos);
+    CHECK(ks.find("style.flexDirection = ui.FlexDirection.Column") != std::string::npos);
+    CHECK(ks.find("style.flexDirection = ui.FlexDirection.Row") != std::string::npos);
+    CHECK(ks.find("new ui.ScrollNode()") != std::string::npos);
+    CHECK(ks.find("style.overflowScrollY = true") != std::string::npos);
+}
+
+

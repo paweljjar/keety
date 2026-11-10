@@ -129,6 +129,174 @@ std::string buildElementTextCppExpr(const KmlElementNode* elem) {
     return res;
 }
 
+inline void emitDimensionAttr(const std::string& attrName,
+                              const std::string& val,
+                              const std::string& var,
+                              std::stringstream& ss,
+                              const std::string& ind) {
+    std::string trimmed = val;
+    if (trimmed.ends_with("px")) {
+        trimmed = trimmed.substr(0, trimmed.size() - 2);
+    }
+    if (trimmed.ends_with("%")) {
+        int pct = 0;
+        try { pct = std::stoi(trimmed.substr(0, trimmed.size() - 1)); } catch (...) {}
+        ss << ind << var << "->getStyle()." << attrName << " = ::keet::ui::Dimension::Percent(" << pct << ");\n";
+    } else {
+        int px = 0;
+        try { px = std::stoi(trimmed); } catch (...) {}
+        ss << ind << var << "->getStyle()." << attrName << " = ::keet::ui::Dimension::Pixels(" << px << ");\n";
+    }
+}
+
+inline void emitStyleAttributes(const KmlElementNode* elem,
+                                const std::string& var,
+                                std::stringstream& ss,
+                                const std::string& ind) {
+    for (const auto& attr : elem->getAttributes()) {
+        const std::string& name = attr.name;
+        const std::string& val = attr.value;
+
+        if (name == "width") {
+            emitDimensionAttr("width", val, var, ss, ind);
+        } else if (name == "height") {
+            emitDimensionAttr("height", val, var, ss, ind);
+        } else if (name == "padding") {
+            int p = 0;
+            try { p = std::stoi(val); } catch (...) {}
+            ss << ind << var << "->getStyle().padding = ::keet::ui::Edges::All(" << p << ");\n";
+        } else if (name == "margin") {
+            int m = 0;
+            try { m = std::stoi(val); } catch (...) {}
+            ss << ind << var << "->getStyle().margin = ::keet::ui::Edges::All(" << m << ");\n";
+        } else if (name == "gap") {
+            int g = 0;
+            try { g = std::stoi(val); } catch (...) {}
+            ss << ind << var << "->getStyle().gap = " << g << ";\n";
+        } else if (name == "grow" || name == "flex-grow") {
+            int gr = 0;
+            try { gr = std::stoi(val); } catch (...) {}
+            ss << ind << var << "->getStyle().flexGrow = " << gr << ";\n";
+        } else if (name == "shrink" || name == "flex-shrink") {
+            int sh = 1;
+            try { sh = std::stoi(val); } catch (...) {}
+            ss << ind << var << "->getStyle().flexShrink = " << sh << ";\n";
+        } else if (name == "radius" || name == "border-radius") {
+            int r = 0;
+            try { r = std::stoi(val); } catch (...) {}
+            ss << ind << var << "->getStyle().borderRadius = " << r << ";\n";
+        } else if (name == "font-size") {
+            int fs = 14;
+            try { fs = std::stoi(val); } catch (...) {}
+            ss << ind << var << "->getStyle().fontSize = " << fs << ";\n";
+        } else if (name == "bg" || name == "background") {
+            if (val.starts_with("#")) {
+                ss << ind << var << "->getStyle().backgroundColorRgba = ::keet::ui::RgbaColor::parseHex(\"" << val << "\");\n";
+            }
+        } else if (name == "color") {
+            if (val.starts_with("#")) {
+                ss << ind << var << "->getStyle().textColorRgba = ::keet::ui::RgbaColor::parseHex(\"" << val << "\");\n";
+            }
+        } else if (name == "direction" || name == "flex-direction") {
+            if (val == "row") {
+                ss << ind << var << "->getStyle().flexDirection = ::keet::ui::FlexDirection::Row;\n";
+            } else if (val == "column") {
+                ss << ind << var << "->getStyle().flexDirection = ::keet::ui::FlexDirection::Column;\n";
+            }
+        } else if (name == "justify" || name == "justify-content") {
+            if (val == "center") {
+                ss << ind << var << "->getStyle().justifyContent = ::keet::ui::JustifyContent::Center;\n";
+            } else if (val == "flex-end" || val == "end") {
+                ss << ind << var << "->getStyle().justifyContent = ::keet::ui::JustifyContent::FlexEnd;\n";
+            } else if (val == "space-between") {
+                ss << ind << var << "->getStyle().justifyContent = ::keet::ui::JustifyContent::SpaceBetween;\n";
+            } else if (val == "space-around") {
+                ss << ind << var << "->getStyle().justifyContent = ::keet::ui::JustifyContent::SpaceAround;\n";
+            } else if (val == "space-evenly") {
+                ss << ind << var << "->getStyle().justifyContent = ::keet::ui::JustifyContent::SpaceEvenly;\n";
+            } else if (val == "flex-start" || val == "start") {
+                ss << ind << var << "->getStyle().justifyContent = ::keet::ui::FlexStart;\n";
+            }
+        } else if (name == "align" || name == "align-items") {
+            if (val == "center") {
+                ss << ind << var << "->getStyle().alignItems = ::keet::ui::AlignItems::Center;\n";
+            } else if (val == "stretch") {
+                ss << ind << var << "->getStyle().alignItems = ::keet::ui::AlignItems::Stretch;\n";
+            } else if (val == "flex-end" || val == "end") {
+                ss << ind << var << "->getStyle().alignItems = ::keet::ui::AlignItems::FlexEnd;\n";
+            } else if (val == "flex-start" || val == "start") {
+                ss << ind << var << "->getStyle().alignItems = ::keet::ui::AlignItems::FlexStart;\n";
+            }
+        }
+    }
+}
+
+inline void emitDirectivesAndEvents(const KmlElementNode* elem,
+                                    const std::string& var,
+                                    std::stringstream& ss,
+                                    const std::string& ind) {
+    for (const auto& dir : elem->getDirectives()) {
+        if (dir.name == "bind" && (dir.targetProperty == "value" || dir.targetProperty.empty())) {
+            std::string stateVar = dir.expression;
+            size_t start = stateVar.find_first_not_of(" \t\r\n{");
+            size_t end = stateVar.find_last_not_of(" \t\r\n}");
+            if (start != std::string::npos && end != std::string::npos) {
+                stateVar = stateVar.substr(start, end - start + 1);
+            }
+            if (!stateVar.empty()) {
+                ss << ind << var << "->setValueSilent(::keet::to_string(this->" << stateVar << "));\n";
+                ss << ind << var << "->on(\"input\", [this](const std::string& val) {\n"
+                   << ind << "    if (this->" << stateVar << " != val) {\n"
+                   << ind << "        this->" << stateVar << " = val;\n"
+                   << ind << "        this->recomputeDerived();\n"
+                   << ind << "        this->invalidate(0xFFFFFFFF);\n"
+                   << ind << "    }\n"
+                   << ind << "});\n";
+            }
+            continue;
+        }
+
+        bool hasEnterMod = false;
+        for (const auto& m : dir.modifiers) {
+            if (m == "enter") {
+                hasEnterMod = true;
+                break;
+            }
+        }
+
+        std::string expr = dir.expression;
+        size_t ef = expr.find_first_not_of(" \t\r\n");
+        size_t el = expr.find_last_not_of(" \t\r\n");
+        if (ef != std::string::npos) expr = expr.substr(ef, el - ef + 1);
+        if (expr.empty()) continue;
+
+        size_t arrowBrace = expr.find('{');
+        size_t closeBrace = expr.rfind('}');
+        std::string handlerBody;
+        if (arrowBrace != std::string::npos && closeBrace != std::string::npos && closeBrace > arrowBrace) {
+            handlerBody = expr.substr(arrowBrace + 1, closeBrace - arrowBrace - 1);
+        } else {
+            handlerBody = "this->" + expr + "();";
+        }
+
+        if (dir.name == "keydown" && hasEnterMod) {
+            ss << ind << var << "->on(\"keydown\", [this](const std::string& key) {\n"
+               << ind << "    if (key == \"Enter\") {\n"
+               << ind << "        " << handlerBody << "\n"
+               << ind << "        this->recomputeDerived();\n"
+               << ind << "        this->invalidate(0xFFFFFFFF);\n"
+               << ind << "    }\n"
+               << ind << "});\n";
+        } else {
+            ss << ind << var << "->on(\"" << escapeCppString(dir.name) << "\", [this](const std::string&) {\n"
+               << ind << "    " << handlerBody << "\n"
+               << ind << "    this->recomputeDerived();\n"
+               << ind << "    this->invalidate(0xFFFFFFFF);\n"
+               << ind << "});\n";
+        }
+    }
+}
+
 void generateCppTemplateNode(const KmlTemplateNode* node,
                              std::stringstream& ss,
                              int& nodeIndex,
@@ -175,7 +343,9 @@ void generateCppTemplateNode(const KmlTemplateNode* node,
                     ss << ind << var << "->setAttribute(\"" << escapeCppString(attr.name) << "\", ::keet::to_string(" << attr.value << "));\n";
                 }
             }
+            emitStyleAttributes(elem, var, ss, ind);
             ss << ind << var << "->setContent(" << buildElementTextCppExpr(elem) << ");\n";
+            emitDirectivesAndEvents(elem, var, ss, ind);
             if (!parentVar.empty()) {
                 ss << ind << parentVar << "->appendChild(" << var << ");\n";
             } else {
@@ -194,29 +364,9 @@ void generateCppTemplateNode(const KmlTemplateNode* node,
                     ss << ind << var << "->setAttribute(\"" << escapeCppString(attr.name) << "\", ::keet::to_string(" << attr.value << "));\n";
                 }
             }
+            emitStyleAttributes(elem, var, ss, ind);
             ss << ind << var << "->setLabel(" << buildElementTextCppExpr(elem) << ");\n";
-            for (const auto& dir : elem->getDirectives()) {
-                std::string expr = dir.expression;
-                size_t ef = expr.find_first_not_of(" \t\r\n");
-                size_t el = expr.find_last_not_of(" \t\r\n");
-                if (ef != std::string::npos) expr = expr.substr(ef, el - ef + 1);
-                if (!expr.empty()) {
-                    size_t arrowBrace = expr.find('{');
-                    size_t closeBrace = expr.rfind('}');
-                    if (arrowBrace != std::string::npos && closeBrace != std::string::npos && closeBrace > arrowBrace) {
-                        std::string lambdaBody = expr.substr(arrowBrace + 1, closeBrace - arrowBrace - 1);
-                        ss << ind << var << "->on(\"" << escapeCppString(dir.name) << "\", [this](const std::string&) {\n"
-                           << ind << "    " << lambdaBody << "\n"
-                           << ind << "    this->recomputeDerived();\n"
-                           << ind << "    this->invalidate(0xFFFFFFFF);\n"
-                           << ind << "});\n";
-                    } else {
-                        ss << ind << var << "->on(\"" << escapeCppString(dir.name) << "\", [this](const std::string&) {\n"
-                           << ind << "    this->" << expr << "();\n"
-                           << ind << "});\n";
-                    }
-                }
-            }
+            emitDirectivesAndEvents(elem, var, ss, ind);
             if (!parentVar.empty()) {
                 ss << ind << parentVar << "->appendChild(" << var << ");\n";
             } else {
@@ -225,11 +375,19 @@ void generateCppTemplateNode(const KmlTemplateNode* node,
             return;
         }
 
-        std::string cppNodeClass = "BoxNode";
-        if (tag == "input") cppNodeClass = "InputNode";
-        else if (tag == "scroll") cppNodeClass = "ScrollNode";
+        if (tag == "vstack") {
+            ss << ind << "auto " << var << " = std::make_shared<::keet::ui::StackNode>(::keet::ui::FlexDirection::Column);\n";
+        } else if (tag == "hstack") {
+            ss << ind << "auto " << var << " = std::make_shared<::keet::ui::StackNode>(::keet::ui::FlexDirection::Row);\n";
+        } else if (tag == "scroll") {
+            ss << ind << "auto " << var << " = std::make_shared<::keet::ui::ScrollNode>();\n";
+            ss << ind << var << "->getStyle().overflowScrollY = true;\n";
+        } else if (tag == "input") {
+            ss << ind << "auto " << var << " = std::make_shared<::keet::ui::InputNode>();\n";
+        } else {
+            ss << ind << "auto " << var << " = std::make_shared<::keet::ui::BoxNode>();\n";
+        }
 
-        ss << ind << "auto " << var << " = std::make_shared<::keet::ui::" << cppNodeClass << ">();\n";
         ss << ind << var << "->setId(" << id << ");\n";
         for (const auto& attr : elem->getAttributes()) {
             if (!attr.isExpression) {
@@ -238,6 +396,9 @@ void generateCppTemplateNode(const KmlTemplateNode* node,
                 ss << ind << var << "->setAttribute(\"" << escapeCppString(attr.name) << "\", ::keet::to_string(" << attr.value << "));\n";
             }
         }
+        emitStyleAttributes(elem, var, ss, ind);
+        emitDirectivesAndEvents(elem, var, ss, ind);
+
         if (!parentVar.empty()) {
             ss << ind << parentVar << "->appendChild(" << var << ");\n";
         } else {
@@ -378,10 +539,19 @@ void KmlLowerer::generateNodeMountCode(const KmlTemplateNode* node, std::strings
             else if (tag == "button") nodeType = "ButtonNode";
             else if (tag == "input") nodeType = "InputNode";
             else if (tag == "scroll") nodeType = "ScrollNode";
+            else if (tag == "vstack") nodeType = "StackNode";
+            else if (tag == "hstack") nodeType = "StackNode";
             else if (elem->isComponent()) nodeType = tag;
 
             ss << "        let node_" << currentIndex << " = new ui." << nodeType << "();\n";
             ss << "        node_" << currentIndex << ".id = " << currentIndex << ";\n";
+            if (tag == "vstack") {
+                ss << "        node_" << currentIndex << ".style.flexDirection = ui.FlexDirection.Column;\n";
+            } else if (tag == "hstack") {
+                ss << "        node_" << currentIndex << ".style.flexDirection = ui.FlexDirection.Row;\n";
+            } else if (tag == "scroll") {
+                ss << "        node_" << currentIndex << ".style.overflowScrollY = true;\n";
+            }
 
             // Static or dynamic attributes
             for (const auto& attr : elem->getAttributes()) {
@@ -665,6 +835,7 @@ LoweredComponentResult KmlLowerer::lower() {
             << "        void syncNodeValues(const std::shared_ptr<::keet::ui::UINode>& dst,\n"
             << "                            const std::shared_ptr<::keet::ui::UINode>& src) {\n"
             << "            if (!dst || !src) return;\n"
+            << "            dst->getStyle() = src->getStyle();\n"
             << "            if (src->hasAttribute(\"class\")) {\n"
             << "                dst->setAttribute(\"class\", src->getAttribute(\"class\"));\n"
             << "            }\n"
@@ -675,8 +846,16 @@ LoweredComponentResult KmlLowerer::lower() {
             << "                std::static_pointer_cast<::keet::ui::ButtonNode>(dst)->setLabel(\n"
             << "                    std::static_pointer_cast<::keet::ui::ButtonNode>(src)->getLabel());\n"
             << "            } else if (dst->getKind() == ::keet::ui::NodeKind::Input && src->getKind() == ::keet::ui::NodeKind::Input) {\n"
-            << "                std::static_pointer_cast<::keet::ui::InputNode>(dst)->setValue(\n"
-            << "                    std::static_pointer_cast<::keet::ui::InputNode>(src)->getValue());\n"
+            << "                auto dInp = std::static_pointer_cast<::keet::ui::InputNode>(dst);\n"
+            << "                auto sInp = std::static_pointer_cast<::keet::ui::InputNode>(src);\n"
+            << "                if (dInp->getValue() != sInp->getValue()) {\n"
+            << "                    dInp->setValueSilent(sInp->getValue());\n"
+            << "                }\n"
+            << "            } else if (dst->getKind() == ::keet::ui::NodeKind::Scroll && src->getKind() == ::keet::ui::NodeKind::Scroll) {\n"
+            << "                auto dScroll = std::static_pointer_cast<::keet::ui::ScrollNode>(dst);\n"
+            << "                auto sScroll = std::static_pointer_cast<::keet::ui::ScrollNode>(src);\n"
+            << "                dScroll->setContentHeight(sScroll->getContentHeight());\n"
+            << "                dScroll->setContentWidth(sScroll->getContentWidth());\n"
             << "            }\n"
             << "            const auto& dChildren = dst->getChildren();\n"
             << "            const auto& sChildren = src->getChildren();\n"

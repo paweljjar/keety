@@ -222,6 +222,12 @@ public:
         setDirty(true);
         emit("input", value_);
     }
+
+    void setValueSilent(std::string val) {
+        value_ = std::move(val);
+        cursorPos_ = std::min(cursorPos_, static_cast<int>(value_.size()));
+        setDirty(true);
+    }
     [[nodiscard]] const std::string& getValue() const noexcept { return value_; }
 
     void setCursorPos(int pos) noexcept { cursorPos_ = pos; }
