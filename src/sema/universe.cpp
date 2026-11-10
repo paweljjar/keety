@@ -654,6 +654,7 @@ void populateUiModuleScope(Scope& uiScope) {
     makeFn("mountHeadless");
     makeFn("mountDesktop");
     makeFn("renderDesktop");
+    makeFn("loadFont");
     makeFn("renderTui");
     makeFn("serveUi");
 }

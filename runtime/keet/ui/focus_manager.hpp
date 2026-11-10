@@ -52,6 +52,9 @@ public:
         return focusedNodeId_;
     }
 
+    [[nodiscard]] bool isFocusVisible() const noexcept { return focusVisible_; }
+    void setFocusVisible(bool v) noexcept { focusVisible_ = v; }
+
     std::shared_ptr<UINode> getFocusedNode() const {
         if (!focusedNodeId_) return nullptr;
         for (const auto& node : focusableNodes_) {
@@ -61,6 +64,7 @@ public:
     }
 
     void setFocus(uint32_t id) {
+        refreshFocusableList();
         for (const auto& node : focusableNodes_) {
             if (node->getId() == id) {
                 focusedNodeId_ = id;
@@ -71,6 +75,8 @@ public:
 
     /// Advances focus to the next focusable element (Tab)
     void focusNext() {
+        focusVisible_ = true;
+        refreshFocusableList();
         if (focusableNodes_.empty()) return;
         if (!focusedNodeId_) {
             focusedNodeId_ = focusableNodes_[0]->getId();
@@ -84,10 +90,13 @@ public:
                 return;
             }
         }
+        focusedNodeId_ = focusableNodes_[0]->getId();
     }
 
     /// Moves focus to the previous focusable element (Shift-Tab)
     void focusPrevious() {
+        focusVisible_ = true;
+        refreshFocusableList();
         if (focusableNodes_.empty()) return;
         if (!focusedNodeId_) {
             focusedNodeId_ = focusableNodes_.back()->getId();
@@ -101,6 +110,7 @@ public:
                 return;
             }
         }
+        focusedNodeId_ = focusableNodes_.back()->getId();
     }
 
     void setClipboardProvider(std::function<void(const std::string&)> copyFn,
@@ -274,6 +284,7 @@ private:
     std::shared_ptr<UINode> root_;
     std::vector<std::shared_ptr<UINode>> focusableNodes_;
     std::optional<uint32_t> focusedNodeId_{std::nullopt};
+    bool focusVisible_{false};
     std::function<void(const std::string&)> clipboardCopyFn_;
     std::function<std::string()> clipboardPasteFn_;
 };

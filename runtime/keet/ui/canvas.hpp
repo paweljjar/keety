@@ -4,6 +4,8 @@
 #include <keet/ui/geometry.hpp>
 #include <keet/ui/node.hpp>
 #include <keet/ui/types.hpp>
+#include <keet/ui/utf8.hpp>
+#include <keet/ui/font.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -423,7 +425,12 @@ public:
         }
     }
 
-    static Size measureText(std::string_view text, int fontSize = 14) noexcept {
+    static Size measureText(std::string_view text, int fontSize = 14, const std::string& fontFamily = "") noexcept {
+        auto font = FontManager::instance().getFont(fontFamily);
+        if (font && font->isValid()) {
+            return font->measureText(text, fontSize);
+        }
+
         int charW = std::max(1, (8 * fontSize) / 14);
         int lineH = std::max(1, (20 * fontSize) / 14);
         int charCount = 0;
@@ -435,8 +442,85 @@ public:
         return Size{charCount * charW, lineH};
     }
 
-    void drawText(std::string_view text, Point origin, RgbaColor color, int fontSize = 14, FontStyle style = FontStyle::Normal) {
+    static inline uint8_t correctFontAlpha(uint8_t a) noexcept {
+        static const auto lut = []() {
+            std::array<uint8_t, 256> table{};
+            for (int i = 0; i < 256; ++i) {
+                float norm = i / 255.0f;
+                // Gamma ~1.5 contrast enhancement prevents dark-theme font washing/blur
+                float corrected = std::pow(norm, 1.0f / 1.5f);
+                table[i] = static_cast<uint8_t>(std::clamp(std::round(corrected * 255.0f), 0.0f, 255.0f));
+            }
+            return table;
+        }();
+        return lut[a];
+    }
+
+    void drawTrueTypeText(std::string_view text, Point origin, RgbaColor color, int fontSize, FontStyle style, TrueTypeFont& font) {
+        Point off = getCurrentOffset();
+        int baseX = origin.x + off.x;
+        int baseY = origin.y + off.y;
+        Rect clip = clipStack_.back();
+
+        int ascent = font.getAscent(fontSize);
+        int baselineY = baseY + ascent;
+        bool isBold = (style & FontStyle::Bold);
+        bool isUnderline = (style & FontStyle::Underline);
+
+        int curX = baseX;
+        size_t i = 0;
+        uint32_t prevCp = 0;
+
+        while (i < text.size()) {
+            uint32_t cp = decodeUtf8(text, i);
+            if (prevCp != 0) {
+                curX += font.getKernAdvance(prevCp, cp, fontSize);
+            }
+
+            const auto* g = font.getGlyph(cp, fontSize);
+            if (g) {
+                int glyphX = curX + g->xoff;
+                int glyphY = baselineY + g->yoff;
+
+                for (int gy = 0; gy < g->height; ++gy) {
+                    int py = glyphY + gy;
+                    for (int gx = 0; gx < g->width; ++gx) {
+                        int px = glyphX + gx;
+                        uint8_t rawA = g->bitmap[static_cast<size_t>(gy) * static_cast<size_t>(g->width) + static_cast<size_t>(gx)];
+                        if (rawA == 0) continue;
+                        uint8_t a = correctFontAlpha(rawA);
+
+                        if (clip.contains(px, py)) {
+                            RgbaColor pxCol = color;
+                            pxCol.a = static_cast<uint8_t>((static_cast<uint32_t>(color.a) * a) / 255);
+                            fb_.blendPixel(px, py, pxCol);
+                            if (isBold && clip.contains(px + 1, py)) {
+                                fb_.blendPixel(px + 1, py, pxCol);
+                            }
+                        }
+                    }
+                }
+                curX += g->xadvance;
+            } else {
+                curX += std::max(1, (8 * fontSize) / 14);
+            }
+            prevCp = cp;
+        }
+
+        if (isUnderline) {
+            int lineY = baselineY + 2;
+            drawLine(Point{baseX, lineY}, Point{curX, lineY}, color, std::max(1, fontSize / 14));
+        }
+    }
+
+    void drawText(std::string_view text, Point origin, RgbaColor color, int fontSize = 14, FontStyle style = FontStyle::Normal, const std::string& fontFamily = "") {
         if (text.empty()) return;
+
+        auto font = FontManager::instance().getFont(fontFamily);
+        if (font && font->isValid()) {
+            drawTrueTypeText(text, origin, color, fontSize, style, *font);
+            return;
+        }
 
         Point off = getCurrentOffset();
         int baseX = origin.x + off.x;
@@ -508,17 +592,28 @@ private:
 /// Scene Graph Renderer: walks a UINode tree and draws styled widgets to Canvas2D
 class SceneGraphRenderer {
 public:
-    static void render(const std::shared_ptr<UINode>& root, Canvas2D& canvas, uint32_t focusedNodeId = 0) {
+    static void render(const std::shared_ptr<UINode>& root, Canvas2D& canvas, uint32_t focusedNodeId = 0, float dpiScale = 1.0f, bool isFocusVisible = true) {
         if (!root || !root->isVisible()) return;
-        renderNode(root, canvas, focusedNodeId);
+        renderNode(root, canvas, focusedNodeId, "", dpiScale, isFocusVisible);
     }
 
 private:
-    static void renderNode(const std::shared_ptr<UINode>& node, Canvas2D& canvas, uint32_t focusedNodeId) {
+    static void renderNode(const std::shared_ptr<UINode>& node, Canvas2D& canvas, uint32_t focusedNodeId, const std::string& inheritedFontFamily, float dpiScale = 1.0f, bool isFocusVisible = true) {
         if (!node || !node->isVisible()) return;
 
         const auto& style = node->getStyle();
+        std::string effectiveFont = !style.fontFamily.empty() ? style.fontFamily : inheritedFontFamily;
         Rect bounds = node->getBounds();
+
+        auto scaleVal = [dpiScale](int val) {
+            if (dpiScale <= 1.001f && dpiScale >= 0.999f) return val;
+            return static_cast<int>(std::round(val * dpiScale));
+        };
+
+        int scaledFontSize = scaleVal(style.fontSize);
+        int scaledRadius = scaleVal(style.borderRadius);
+        int scaledBorderTop = scaleVal(style.border.top);
+        Edges scaledPadding{scaleVal(style.padding.top), scaleVal(style.padding.right), scaleVal(style.padding.bottom), scaleVal(style.padding.left)};
 
         // 1. Render Background & Borders
         RgbaColor bg = style.backgroundColorRgba.value_or(
@@ -531,18 +626,18 @@ private:
         );
 
         if (bg.a > 0) {
-            if (style.borderRadius > 0) {
-                canvas.fillRoundedRect(bounds, style.borderRadius, bg);
+            if (scaledRadius > 0) {
+                canvas.fillRoundedRect(bounds, scaledRadius, bg);
             } else {
                 canvas.fillRect(bounds, bg);
             }
         }
 
-        if (border.a > 0 && style.border.top > 0) {
-            if (style.borderRadius > 0) {
-                canvas.strokeRoundedRect(bounds, style.borderRadius, border, style.border.top);
+        if (border.a > 0 && scaledBorderTop > 0) {
+            if (scaledRadius > 0) {
+                canvas.strokeRoundedRect(bounds, scaledRadius, border, scaledBorderTop);
             } else {
-                canvas.strokeRect(bounds, border, style.border.top);
+                canvas.strokeRect(bounds, border, scaledBorderTop);
             }
         }
 
@@ -554,32 +649,34 @@ private:
                     style.color != Color::Default ? RgbaColor::fromThemeColor(style.color)
                                                   : RgbaColor{205, 214, 244, 255}
                 );
-                Point textPos{bounds.x + style.padding.left, bounds.y + style.padding.top};
-                canvas.drawText(textNode->getContent(), textPos, textCol, style.fontSize, style.fontStyle);
+                Point textPos{bounds.x + scaledPadding.left, bounds.y + scaledPadding.top};
+                canvas.drawText(textNode->getContent(), textPos, textCol, scaledFontSize, style.fontStyle, effectiveFont);
                 break;
             }
 
             case NodeKind::Button: {
                 auto btnNode = std::static_pointer_cast<ButtonNode>(node);
                 bool isFocused = (node->getId() == focusedNodeId && focusedNodeId != 0);
+                bool showFocusRing = isFocused && isFocusVisible;
 
                 RgbaColor btnBg = style.backgroundColorRgba.value_or(
-                    isFocused ? RgbaColor{69, 71, 90, 255} : RgbaColor{49, 50, 68, 255}
+                    showFocusRing ? RgbaColor{69, 71, 90, 255} : RgbaColor{49, 50, 68, 255}
                 );
-                int radius = style.borderRadius > 0 ? style.borderRadius : 6;
+                int radius = scaledRadius > 0 ? scaledRadius : scaleVal(6);
                 canvas.fillRoundedRect(bounds, radius, btnBg);
 
-                RgbaColor btnBorder = isFocused ? RgbaColor{137, 180, 250, 255}
-                                                : style.borderColorRgba.value_or(RgbaColor{88, 91, 112, 255});
-                canvas.strokeRoundedRect(bounds, radius, btnBorder, isFocused ? 2 : 1);
+                RgbaColor btnBorder = showFocusRing ? RgbaColor{137, 180, 250, 255}
+                                                    : style.borderColorRgba.value_or(RgbaColor{88, 91, 112, 255});
+                int bWidth = showFocusRing ? scaleVal(2) : (scaledBorderTop > 0 ? scaledBorderTop : scaleVal(1));
+                canvas.strokeRoundedRect(bounds, radius, btnBorder, bWidth);
 
                 RgbaColor btnTextCol = style.textColorRgba.value_or(RgbaColor{255, 255, 255, 255});
-                Size textSize = Canvas2D::measureText(btnNode->getLabel(), style.fontSize);
+                Size textSize = Canvas2D::measureText(btnNode->getLabel(), scaledFontSize, effectiveFont);
                 Point textPos{
                     bounds.x + std::max(0, (bounds.width - textSize.width) / 2),
                     bounds.y + std::max(0, (bounds.height - textSize.height) / 2)
                 };
-                canvas.drawText(btnNode->getLabel(), textPos, btnTextCol, style.fontSize, FontStyle::Bold);
+                canvas.drawText(btnNode->getLabel(), textPos, btnTextCol, scaledFontSize, FontStyle::Bold, effectiveFont);
                 break;
             }
 
@@ -588,33 +685,39 @@ private:
                 bool isFocused = (node->getId() == focusedNodeId && focusedNodeId != 0);
 
                 RgbaColor inputBg = style.backgroundColorRgba.value_or(RgbaColor{24, 24, 37, 255});
-                int radius = style.borderRadius > 0 ? style.borderRadius : 4;
+                int radius = scaledRadius > 0 ? scaledRadius : scaleVal(4);
                 canvas.fillRoundedRect(bounds, radius, inputBg);
 
                 RgbaColor inputBorder = isFocused ? RgbaColor{137, 180, 250, 255}
                                                   : style.borderColorRgba.value_or(RgbaColor{69, 71, 90, 255});
-                canvas.strokeRoundedRect(bounds, radius, inputBorder, isFocused ? 2 : 1);
+                canvas.strokeRoundedRect(bounds, radius, inputBorder, isFocused ? scaleVal(2) : scaleVal(1));
 
                 RgbaColor textCol = style.textColorRgba.value_or(RgbaColor{205, 214, 244, 255});
-                Point textPos{bounds.x + 8, bounds.y + std::max(0, (bounds.height - 20) / 2)};
+                Size sampleSize = Canvas2D::measureText("Ag", scaledFontSize, effectiveFont);
+                int textH = sampleSize.height > 0 ? sampleSize.height : scaledFontSize;
+                int textY = bounds.y + std::max(0, (bounds.height - textH) / 2);
+                Point textPos{bounds.x + scaleVal(10), textY};
 
-                // Selection highlight
+                // Selection highlight & caret vertical positioning
+                Size totalTextSize = Canvas2D::measureText(inputNode->getValue(), scaledFontSize, effectiveFont);
+                int caretH = textH + scaleVal(4);
+                int caretY = bounds.y + std::max(0, (bounds.height - caretH) / 2);
+
                 if (isFocused && inputNode->hasSelection()) {
-                    Size totalTextSize = Canvas2D::measureText(inputNode->getValue(), style.fontSize);
-                    Rect selRect{textPos.x, bounds.y + 4, totalTextSize.width + 4, bounds.height - 8};
+                    Rect selRect{textPos.x - scaleVal(1), caretY, totalTextSize.width + scaleVal(4), caretH};
                     canvas.fillRect(selRect, RgbaColor{88, 91, 112, 180});
                 }
 
-                canvas.drawText(inputNode->getValue(), textPos, textCol, style.fontSize);
+                canvas.drawText(inputNode->getValue(), textPos, textCol, scaledFontSize, FontStyle::Normal, effectiveFont);
 
                 // Cursor caret when focused
                 if (isFocused && !inputNode->hasSelection()) {
                     int cursorIndex = std::clamp(inputNode->getCursorPos(), 0, static_cast<int>(inputNode->getValue().size()));
                     std::string_view prefix = std::string_view(inputNode->getValue()).substr(0, cursorIndex);
-                    Size prefixSize = Canvas2D::measureText(prefix, style.fontSize);
-                    Point caretStart{textPos.x + prefixSize.width, bounds.y + 6};
-                    Point caretEnd{textPos.x + prefixSize.width, bounds.y + bounds.height - 6};
-                    canvas.drawLine(caretStart, caretEnd, RgbaColor{245, 224, 220, 255}, 2);
+                    Size prefixSize = Canvas2D::measureText(prefix, scaledFontSize, effectiveFont);
+                    Point caretStart{textPos.x + prefixSize.width, caretY};
+                    Point caretEnd{textPos.x + prefixSize.width, caretY + caretH};
+                    canvas.drawLine(caretStart, caretEnd, RgbaColor{245, 224, 220, 255}, scaleVal(2));
                 }
                 break;
             }
@@ -625,7 +728,7 @@ private:
                 canvas.pushOffset(Point{0, -scrollNode->getScrollOffset()});
 
                 for (const auto& child : node->getChildren()) {
-                    renderNode(child, canvas, focusedNodeId);
+                    renderNode(child, canvas, focusedNodeId, effectiveFont, dpiScale, isFocusVisible);
                 }
 
                 canvas.popOffset();
@@ -633,19 +736,20 @@ private:
 
                 // Draw vertical scrollbar track & thumb if content overflows
                 int contentH = scrollNode->getContentHeight();
-                if (contentH > bounds.height && bounds.height > 20) {
-                    int trackX = bounds.x + bounds.width - 6;
-                    int trackY = bounds.y + 2;
-                    int trackH = bounds.height - 4;
+                int trackW = scaleVal(4);
+                if (contentH > bounds.height && bounds.height > scaleVal(20)) {
+                    int trackX = bounds.x + bounds.width - trackW - scaleVal(2);
+                    int trackY = bounds.y + scaleVal(2);
+                    int trackH = bounds.height - scaleVal(4);
 
                     // Scrollbar track
-                    canvas.fillRoundedRect(Rect{trackX, trackY, 4, trackH}, 2, RgbaColor{49, 50, 68, 180});
+                    canvas.fillRoundedRect(Rect{trackX, trackY, trackW, trackH}, scaleVal(2), RgbaColor{49, 50, 68, 180});
 
                     // Scrollbar thumb
-                    int thumbH = std::max(16, (trackH * bounds.height) / contentH);
+                    int thumbH = std::max(scaleVal(16), (trackH * bounds.height) / contentH);
                     int maxScroll = contentH - bounds.height;
                     int thumbY = trackY + (maxScroll > 0 ? (scrollNode->getScrollOffset() * (trackH - thumbH)) / maxScroll : 0);
-                    canvas.fillRoundedRect(Rect{trackX, thumbY, 4, thumbH}, 2, RgbaColor{147, 153, 178, 220});
+                    canvas.fillRoundedRect(Rect{trackX, thumbY, trackW, thumbH}, scaleVal(2), RgbaColor{147, 153, 178, 220});
                 }
                 return; // Children already rendered inside scroll clipping
             }
@@ -656,7 +760,7 @@ private:
 
         // 3. Render Children for general nodes
         for (const auto& child : node->getChildren()) {
-            renderNode(child, canvas, focusedNodeId);
+            renderNode(child, canvas, focusedNodeId, effectiveFont, dpiScale, isFocusVisible);
         }
     }
 };

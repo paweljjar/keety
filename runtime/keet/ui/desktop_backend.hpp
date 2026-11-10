@@ -38,6 +38,30 @@ public:
         return nullptr;
     }
 
+    /// Finds the deepest visible ScrollNode whose bounds contain point p
+    static std::shared_ptr<ScrollNode> findDeepestScrollAt(const std::shared_ptr<UINode>& node, Point p) {
+        if (!node || !node->isVisible()) return nullptr;
+        if (!node->getBounds().contains(p)) return nullptr;
+
+        bool isScroll = (node->getKind() == NodeKind::Scroll);
+        Point childPoint = p;
+        if (isScroll) {
+            auto scrollNode = std::static_pointer_cast<ScrollNode>(node);
+            childPoint.y += scrollNode->getScrollOffset();
+        }
+
+        const auto& children = node->getChildren();
+        for (auto it = children.rbegin(); it != children.rend(); ++it) {
+            if (auto s = findDeepestScrollAt(*it, childPoint)) {
+                return s;
+            }
+        }
+        if (isScroll) {
+            return std::static_pointer_cast<ScrollNode>(node);
+        }
+        return nullptr;
+    }
+
 private:
     static std::shared_ptr<UINode> hitTestRecursive(const std::shared_ptr<UINode>& node, Point p) {
         if (!node || !node->isVisible()) return nullptr;
@@ -70,16 +94,26 @@ class DesktopBackend {
 public:
     explicit DesktopBackend(std::shared_ptr<Component> rootComponent,
                             int width = 800,
-                            int height = 600)
+                            int height = 600,
+                            float dpiScale = 1.0f)
         : component_(std::move(rootComponent)),
-          fb_(width, height),
+          dpiScale_(dpiScale > 0.0f ? dpiScale : 1.0f),
+          logicalWidth_(width),
+          logicalHeight_(height),
+          fb_(static_cast<int>(std::round(width * (dpiScale > 0.0f ? dpiScale : 1.0f))),
+              static_cast<int>(std::round(height * (dpiScale > 0.0f ? dpiScale : 1.0f))),
+              dpiScale > 0.0f ? dpiScale : 1.0f),
           focusMgr_() {
 
         canvas_ = std::make_unique<Canvas2D>(fb_);
 
         metrics_.unitMode = LayoutUnitMode::DesktopPixels;
+        metrics_.dpiScale = dpiScale_;
         metrics_.charWidthPx = 8;
         metrics_.lineHeightPx = 20;
+        metrics_.textMeasureFn = [](std::string_view text, int fontSize, const std::string& fontFamily) {
+            return Canvas2D::measureText(text, fontSize, fontFamily);
+        };
 
         if (component_) {
             rootNode_ = component_->mount();
@@ -90,7 +124,7 @@ public:
 
         if (!rootNode_) {
             rootNode_ = std::make_shared<BoxNode>();
-            rootNode_->setBounds(Rect{0, 0, width, height});
+            rootNode_->setBounds(Rect{0, 0, fb_.getWidth(), fb_.getHeight()});
         }
 
         relayout();
@@ -100,6 +134,9 @@ public:
     DesktopBackend(DesktopBackend&& other) noexcept
         : component_(std::move(other.component_)),
           rootNode_(std::move(other.rootNode_)),
+          dpiScale_(other.dpiScale_),
+          logicalWidth_(other.logicalWidth_),
+          logicalHeight_(other.logicalHeight_),
           fb_(std::move(other.fb_)),
           focusMgr_(std::move(other.focusMgr_)),
           metrics_(other.metrics_),
@@ -113,6 +150,9 @@ public:
         if (this != &other) {
             component_ = std::move(other.component_);
             rootNode_ = std::move(other.rootNode_);
+            dpiScale_ = other.dpiScale_;
+            logicalWidth_ = other.logicalWidth_;
+            logicalHeight_ = other.logicalHeight_;
             fb_ = std::move(other.fb_);
             focusMgr_ = std::move(other.focusMgr_);
             metrics_ = other.metrics_;
@@ -132,6 +172,9 @@ public:
 
     [[nodiscard]] int getWidth() const noexcept { return fb_.getWidth(); }
     [[nodiscard]] int getHeight() const noexcept { return fb_.getHeight(); }
+    [[nodiscard]] int getLogicalWidth() const noexcept { return logicalWidth_; }
+    [[nodiscard]] int getLogicalHeight() const noexcept { return logicalHeight_; }
+    [[nodiscard]] float getDpiScale() const noexcept { return dpiScale_; }
     [[nodiscard]] FrameBuffer& getFrameBuffer() noexcept { return fb_; }
     [[nodiscard]] const FrameBuffer& getFrameBuffer() const noexcept { return fb_; }
     [[nodiscard]] std::shared_ptr<UINode> getRootNode() const noexcept { return rootNode_; }
@@ -142,8 +185,16 @@ public:
         focusMgr_.setClipboardProvider(std::move(copyFn), std::move(pasteFn));
     }
 
-    void resize(int width, int height) {
-        fb_.resize(width, height);
+    void resize(int logicalWidth, int logicalHeight, float dpiScale = 1.0f) {
+        if (dpiScale > 0.0f) dpiScale_ = dpiScale;
+        logicalWidth_ = logicalWidth;
+        logicalHeight_ = logicalHeight;
+        int pixelW = static_cast<int>(std::round(logicalWidth_ * dpiScale_));
+        int pixelH = static_cast<int>(std::round(logicalHeight_ * dpiScale_));
+
+        fb_.resize(pixelW, pixelH);
+        fb_.setDpiScale(dpiScale_);
+        metrics_.dpiScale = dpiScale_;
         if (canvas_) {
             canvas_->resetClip();
         }
@@ -162,7 +213,8 @@ public:
         canvas_->clear(RgbaColor{30, 30, 46, 255}); // Modern dark base theme
         if (rootNode_) {
             uint32_t focusedId = focusMgr_.getFocusedNodeId().value_or(0);
-            SceneGraphRenderer::render(rootNode_, *canvas_, focusedId);
+            bool isFocusVis = focusMgr_.isFocusVisible();
+            SceneGraphRenderer::render(rootNode_, *canvas_, focusedId, dpiScale_, isFocusVis);
         }
     }
 
@@ -203,10 +255,12 @@ public:
         }
 
         pressedNodeId_ = hit->getId();
+        pressedNode_ = hit;
 
         // Update focus
         if (hit->getKind() == NodeKind::Button || hit->getKind() == NodeKind::Input || hit->hasAttribute("tabindex")) {
             focusMgr_.setFocus(hit->getId());
+            focusMgr_.setFocusVisible(false);
         }
 
         // Input cursor positioning based on click coordinate
@@ -232,7 +286,16 @@ public:
         }
 
         bool clickTriggered = false;
-        if (pressedNodeId_.has_value()) {
+        auto pressed = pressedNode_.lock();
+        pressedNode_.reset();
+
+        if (pressed) {
+            if (hit && (hit == pressed || isAncestor(pressed->getId(), hit))) {
+                pressed->emit("click");
+                clickTriggered = true;
+            }
+            pressedNodeId_ = std::nullopt;
+        } else if (pressedNodeId_.has_value()) {
             uint32_t pId = *pressedNodeId_;
             if (hit && (hit->getId() == pId || isAncestor(pId, hit))) {
                 if (auto target = findNodeById(pId)) {
@@ -255,11 +318,16 @@ public:
     bool dispatchScroll(int x, int y, int deltaY) {
         lastMousePos_ = Point{x, y};
         auto hit = HitTester::hitTest(rootNode_, lastMousePos_);
-        if (!hit) return false;
 
-        std::shared_ptr<ScrollNode> scroll = (hit->getKind() == NodeKind::Scroll)
-                                                 ? std::static_pointer_cast<ScrollNode>(hit)
-                                                 : HitTester::findAncestorScrollNode(hit);
+        std::shared_ptr<ScrollNode> scroll = nullptr;
+        if (hit && hit->getKind() == NodeKind::Scroll) {
+            scroll = std::static_pointer_cast<ScrollNode>(hit);
+        } else if (hit) {
+            scroll = HitTester::findAncestorScrollNode(hit);
+        }
+        if (!scroll) {
+            scroll = HitTester::findDeepestScrollAt(rootNode_, lastMousePos_);
+        }
 
         if (!scroll) return false;
 
@@ -306,8 +374,13 @@ private:
     void flushState() {
         if (component_) {
             component_->flushUpdate();
+            if (component_->getRootNode() && component_->getRootNode() != rootNode_) {
+                rootNode_ = component_->getRootNode();
+                focusMgr_.setRoot(rootNode_);
+            }
         }
         MicrotaskScheduler::instance().tick();
+        focusMgr_.refreshFocusableList();
         relayout();
         renderFrame();
     }
@@ -359,6 +432,9 @@ private:
 
     std::shared_ptr<Component> component_;
     std::shared_ptr<UINode> rootNode_;
+    float dpiScale_{1.0f};
+    int logicalWidth_{800};
+    int logicalHeight_{600};
     FrameBuffer fb_;
     std::unique_ptr<Canvas2D> canvas_;
     FocusManager focusMgr_;
@@ -367,6 +443,7 @@ private:
     Point lastMousePos_{0, 0};
     std::optional<uint32_t> hoveredNodeId_{std::nullopt};
     std::optional<uint32_t> pressedNodeId_{std::nullopt};
+    std::weak_ptr<UINode> pressedNode_;
 };
 
 } // namespace keet::ui

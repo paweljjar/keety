@@ -70,6 +70,9 @@ public:
     virtual void setClipboardText(const std::string& /*text*/) {}
     [[nodiscard]] virtual std::string getClipboardText() const { return ""; }
 
+    /// Returns display backing store scaling factor (e.g. 2.0 for Retina, 1.0 for standard)
+    [[nodiscard]] virtual float getBackingScaleFactor() const { return 1.0f; }
+
     /// Runs a blocking event loop at the specified target framerate (default 60 FPS)
     /// until the window is closed.
     virtual void runEventLoop(DesktopBackend& backend, int targetFps = 60) {
@@ -193,6 +196,14 @@ public:
 
     [[nodiscard]] bool isOpen() const noexcept override { return open_; }
 
+    [[nodiscard]] float getBackingScaleFactor() const override {
+        if (window_) {
+            double scale = detail::callMsg<double>(window_, sel_registerName("backingScaleFactor"));
+            if (scale > 0.0) return static_cast<float>(scale);
+        }
+        return static_cast<float>(currentScale_);
+    }
+
     void close() override {
         if (!open_) return;
         open_ = false;
@@ -276,15 +287,22 @@ public:
             return false;
         }
 
+        double scale = 1.0;
+        if (window_) {
+            scale = detail::callMsg<double>(window_, sel_registerName("backingScaleFactor"));
+            if (scale < 1.0) scale = 1.0;
+        }
+
         // Check if window view size changed before event dispatch
         if (view_) {
             CGRect bounds = detail::callMsg<CGRect>(view_, sel_registerName("bounds"));
             int curW = static_cast<int>(bounds.size.width);
             int curH = static_cast<int>(bounds.size.height);
-            if (curW > 0 && curH > 0 && (curW != width_ || curH != height_)) {
+            if (curW > 0 && curH > 0 && (curW != width_ || curH != height_ || std::abs(scale - currentScale_) > 0.01)) {
                 width_ = curW;
                 height_ = curH;
-                backend.resize(curW, curH);
+                currentScale_ = scale;
+                backend.resize(curW, curH, static_cast<float>(scale));
             }
         }
 
@@ -310,8 +328,8 @@ public:
 
             detail::NSUInteger type = detail::callMsg<detail::NSUInteger>(event, sel_registerName("type"));
             CGPoint loc = detail::callMsg<CGPoint>(event, sel_registerName("locationInWindow"));
-            int mouseX = static_cast<int>(loc.x);
-            int mouseY = static_cast<int>(height_ - loc.y); // Flipped coordinate
+            int mouseX = static_cast<int>(std::round(loc.x * currentScale_));
+            int mouseY = static_cast<int>(std::round((height_ - loc.y) * currentScale_)); // Flipped coordinate in scaled backing units
 
             switch (type) {
                 case 1: { // NSEventTypeLeftMouseDown
@@ -464,10 +482,11 @@ public:
             CGRect bounds = detail::callMsg<CGRect>(view_, sel_registerName("bounds"));
             int curW = static_cast<int>(bounds.size.width);
             int curH = static_cast<int>(bounds.size.height);
-            if (curW > 0 && curH > 0 && (curW != width_ || curH != height_)) {
+            if (curW > 0 && curH > 0 && (curW != width_ || curH != height_ || std::abs(scale - currentScale_) > 0.01)) {
                 width_ = curW;
                 height_ = curH;
-                backend.resize(curW, curH);
+                currentScale_ = scale;
+                backend.resize(curW, curH, static_cast<float>(scale));
             }
         }
 
@@ -516,6 +535,8 @@ public:
 
         if (image) {
             CGContextSaveGState(ctx);
+            // High-quality rendering: 1:1 hardware pixel mapping on Retina screens
+            CGContextSetInterpolationQuality(ctx, kCGInterpolationHigh);
             CGContextTranslateCTM(ctx, 0, curH);
             CGContextScaleCTM(ctx, 1.0, -1.0);
             CGRect destRect = CGRectMake(0, 0, curW, curH);
@@ -710,6 +731,11 @@ private:
         detail::callMsg<void, id>(window_, sel_registerName("makeKeyAndOrderFront:"), nullptr);
         detail::callMsg<void, BOOL>(app, sel_registerName("activateIgnoringOtherApps:"), YES);
 
+        if (window_) {
+            double scale = detail::callMsg<double>(window_, sel_registerName("backingScaleFactor"));
+            if (scale > 0.0) currentScale_ = scale;
+        }
+
         open_ = true;
     }
 
@@ -748,6 +774,7 @@ private:
     WindowConfig config_;
     int width_{800};
     int height_{600};
+    double currentScale_{1.0};
     bool open_{false};
     id window_{nullptr};
     id view_{nullptr};

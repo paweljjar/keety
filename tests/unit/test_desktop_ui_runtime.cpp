@@ -84,8 +84,8 @@ TEST_CASE("Canvas2D - Glyph Font Rendering", "[ui][desktop][canvas]") {
     canvas.clear(RgbaColor{0, 0, 0, 255});
 
     Size sz = Canvas2D::measureText("Hello", 14);
-    CHECK(sz.width == 40);
-    CHECK(sz.height == 20);
+    CHECK(sz.width > 20);
+    CHECK(sz.height >= 12);
 
     canvas.drawText("A", Point{10, 10}, RgbaColor{255, 255, 255, 255}, 14);
 
@@ -271,7 +271,7 @@ TEST_CASE("DesktopBackend - Spatial Hit Testing, Click, Hover, Key and Scroll Di
     backend.dispatchKey("ArrowRight");
     CHECK(app->inputNode_->getCursorPos() == 1);
 
-    // 5. Scroll dispatch on ScrollNode
+    // 5. Scroll dispatch on ScrollNode and directly on its children
     auto scroll = backend.findNodeById(5);
     REQUIRE(scroll != nullptr);
     Rect scrollBounds = scroll->getBounds();
@@ -280,6 +280,31 @@ TEST_CASE("DesktopBackend - Spatial Hit Testing, Click, Hover, Key and Scroll Di
     bool scrolled = backend.dispatchScroll(scrollBounds.x + 10, scrollBounds.y + 10, 40);
     CHECK(scrolled);
     CHECK(app->scrollNode_->getScrollOffset() == 40);
+
+    // Scroll when hovering directly over child item
+    auto childItem = backend.findNodeById(10);
+    REQUIRE(childItem != nullptr);
+    Rect childBounds = childItem->getBounds();
+    bool scrolledOnChild = backend.dispatchScroll(childBounds.x + 5, childBounds.y + 5, 20);
+    CHECK(scrolledOnChild);
+    CHECK(app->scrollNode_->getScrollOffset() == 60);
+
+    // 6. Dynamic element focus navigation
+    auto newBtn = std::make_shared<ButtonNode>();
+    newBtn->setId(999);
+    newBtn->setLabel("Dynamic Button");
+    app->scrollNode_->appendChild(newBtn);
+
+    // Tab through elements to verify newBtn is discovered and focused
+    bool foundNewBtn = false;
+    for (int t = 0; t < 10; ++t) {
+        backend.dispatchKey("Tab");
+        if (backend.getFocusManager().getFocusedNodeId() == 999) {
+            foundNewBtn = true;
+            break;
+        }
+    }
+    CHECK(foundNewBtn);
 
     // Snapshot check
     std::string snap = backend.snapshot();
@@ -540,4 +565,71 @@ TEST_CASE("DesktopBackend - Comprehensive Keyboard Shortcuts, Clipboard & Editin
     // 10. Delete to line start (Cmd+Backspace)
     backend.dispatchKey("Cmd+Backspace");
     CHECK(input->getValue() == "");
+}
+
+TEST_CASE("TrueTypeFont - Load, Kerning, Metrics, and Antialiased Rendering", "[ui][desktop][font]") {
+    // 1. Font registration via ui::loadFont or FontManager
+    bool registered = FontManager::instance().registerFont("Inter", "/Users/pawel/Documents/GitHub/keety-test/assets/Inter.ttf");
+    if (!registered) {
+        registered = FontManager::instance().registerFont("SysFont", "/System/Library/Fonts/Supplemental/Arial.ttf");
+    }
+    REQUIRE(registered);
+
+    auto font = FontManager::instance().getFont("Inter");
+    if (!font) font = FontManager::instance().getFont("SysFont");
+    REQUIRE(font != nullptr);
+    REQUIRE(font->isValid());
+
+    // 2. Proportional metrics & kerning
+    Size szHello = font->measureText("Hello", 16);
+    CHECK(szHello.width > 0);
+    CHECK(szHello.height > 0);
+
+    Size szAV = font->measureText("AV", 24);
+    Size szA = font->measureText("A", 24);
+    Size szV = font->measureText("V", 24);
+    // With kerning, "AV" width should be <= "A" width + "V" width
+    CHECK(szAV.width <= szA.width + szV.width);
+
+    // 3. Antialiased rendering: check sub-pixel intermediate alpha values
+    FrameBuffer fb(100, 60);
+    Canvas2D canvas(fb);
+    canvas.clear(RgbaColor{0, 0, 0, 255});
+    canvas.drawTrueTypeText("O", Point{10, 10}, RgbaColor{255, 255, 255, 255}, 32, FontStyle::Normal, *font);
+
+    // Antialiasing produces intermediate shades (between 0 and 255) along curved edges of 'O'
+    bool foundAntialiasingShade = false;
+    for (int y = 0; y < 60; ++y) {
+        for (int x = 0; x < 100; ++x) {
+            uint8_t r = fb.getPixel(x, y).r;
+            if (r > 10 && r < 240) {
+                foundAntialiasingShade = true;
+                break;
+            }
+        }
+        if (foundAntialiasingShade) break;
+    }
+    CHECK(foundAntialiasingShade);
+
+    // 4. Unicode Checkmark (U+2713) synthesis
+    const auto* checkGlyph = font->getGlyph(0x2713, 14);
+    REQUIRE(checkGlyph != nullptr);
+    CHECK(checkGlyph->width >= 8);
+    CHECK(checkGlyph->height >= 8);
+    CHECK(!checkGlyph->bitmap.empty());
+
+    // Check that checkmark renders antialiased pixels
+    canvas.clear(RgbaColor{0, 0, 0, 255});
+    canvas.drawTrueTypeText("✓", Point{10, 10}, RgbaColor{166, 227, 161, 255}, 14, FontStyle::Normal, *font);
+    bool checkmarkRendered = false;
+    for (int y = 0; y < 60; ++y) {
+        for (int x = 0; x < 100; ++x) {
+            if (fb.getPixel(x, y).g > 50) {
+                checkmarkRendered = true;
+                break;
+            }
+        }
+        if (checkmarkRendered) break;
+    }
+    CHECK(checkmarkRendered);
 }

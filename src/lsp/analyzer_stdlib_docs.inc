@@ -164,6 +164,7 @@
         {"lerp", {"fn lerp(a: float, b: float, t: float): float", "Linear interpolation between a and b by factor t."}},
         {"listDir", {"fn listDir(path: string): array<string>", "Lists the names of entries in the directory."}},
         {"listen", {"fn listen(port: int, host?: string): http.HttpServer", "Binds and starts listening for incoming HTTP connections on host:port."}},
+        {"loadFont", {"fn loadFont(family: string, path: string): bool", "Loads a vector font (.ttf or .otf) from file and registers it under the given family name."}},
         {"log", {"fn log(x: float): float", "Returns the natural logarithm (base e) of x."}},
         {"log10", {"fn log10(x: float): float", "Returns the base-10 logarithm of x."}},
         {"log2", {"fn log2(x: float): float", "Returns the binary (base-2) logarithm of x."}},

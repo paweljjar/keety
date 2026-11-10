@@ -71,6 +71,7 @@ struct NodeStyle {
     int borderRadius{0};
     int fontSize{14};
     int gap{0};
+    std::string fontFamily;
 
     bool overflowScrollY{false};
     bool overflowScrollX{false};
@@ -78,10 +79,15 @@ struct NodeStyle {
 
 using EventCallback = std::function<void(const std::string& arg)>;
 
+inline uint32_t nextUniqueNodeId() noexcept {
+    static std::atomic<uint32_t> s_idCounter{100};
+    return s_idCounter.fetch_add(1, std::memory_order_relaxed);
+}
+
 /// Universal UI Node base class
 class UINode : public std::enable_shared_from_this<UINode> {
 public:
-    explicit UINode(NodeKind kind = NodeKind::Box) : kind_(kind) {}
+    explicit UINode(NodeKind kind = NodeKind::Box) : kind_(kind), id_(nextUniqueNodeId()) {}
     virtual ~UINode() = default;
 
     [[nodiscard]] NodeKind getKind() const noexcept { return kind_; }
@@ -118,6 +124,11 @@ public:
             children_.erase(it, children_.end());
             setDirty(true);
         }
+    }
+
+    void clearChildren() {
+        children_.clear();
+        setDirty(true);
     }
 
     [[nodiscard]] const std::vector<std::shared_ptr<UINode>>& getChildren() const noexcept {

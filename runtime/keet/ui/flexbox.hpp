@@ -20,6 +20,7 @@ enum class LayoutUnitMode : uint8_t {
 /// Metrics and sizing parameters for Flexbox calculation
 struct LayoutMetrics {
     LayoutUnitMode unitMode{LayoutUnitMode::TerminalCells};
+    float dpiScale{1.0f};
 
     // Desktop pixel metrics
     int charWidthPx{8};
@@ -30,12 +31,22 @@ struct LayoutMetrics {
     int defaultBoxWidthPx{80};
     int defaultBoxHeightPx{40};
 
-    using TextMeasureFn = std::function<Size(std::string_view text, int fontSize)>;
+    [[nodiscard]] inline int scale(int val) const noexcept {
+        if (dpiScale <= 1.001f && dpiScale >= 0.999f) return val;
+        return static_cast<int>(std::round(val * dpiScale));
+    }
+
+    [[nodiscard]] inline Edges scaleEdges(const Edges& e) const noexcept {
+        if (dpiScale <= 1.001f && dpiScale >= 0.999f) return e;
+        return Edges{scale(e.top), scale(e.right), scale(e.bottom), scale(e.left)};
+    }
+
+    using TextMeasureFn = std::function<Size(std::string_view text, int fontSize, const std::string& fontFamily)>;
     TextMeasureFn textMeasureFn;
 
-    [[nodiscard]] Size measureText(std::string_view text, int fontSize = 14) const {
+    [[nodiscard]] Size measureText(std::string_view text, int fontSize = 14, const std::string& fontFamily = "") const {
         if (textMeasureFn) {
-            return textMeasureFn(text, fontSize);
+            return textMeasureFn(text, fontSize, fontFamily);
         }
         if (unitMode == LayoutUnitMode::DesktopPixels) {
             // Estimate based on monospace font metrics
@@ -62,29 +73,31 @@ public:
     }
 
 private:
-    static int estimateIntrinsicWidth(const std::shared_ptr<UINode>& node, const LayoutMetrics& metrics) {
+    static int estimateIntrinsicWidth(const std::shared_ptr<UINode>& node, const LayoutMetrics& metrics, const std::string& inheritedFontFamily = "") {
         if (!node) return 0;
         const auto& cStyle = node->getStyle();
+        std::string effectiveFont = !cStyle.fontFamily.empty() ? cStyle.fontFamily : inheritedFontFamily;
         if (cStyle.width.mode == SizeMode::Fixed || cStyle.width.mode == SizeMode::Pixels) {
-            return cStyle.width.value;
+            return metrics.scale(cStyle.width.value);
         }
         bool isPixelsMode = (metrics.unitMode == LayoutUnitMode::DesktopPixels);
+        int scaledFontSize = metrics.scale(cStyle.fontSize);
         if (node->getKind() == NodeKind::Text) {
             auto t = std::static_pointer_cast<TextNode>(node);
-            return metrics.measureText(t->getContent(), cStyle.fontSize).width;
+            return metrics.measureText(t->getContent(), scaledFontSize, effectiveFont).width;
         }
         if (node->getKind() == NodeKind::Button) {
             auto b = std::static_pointer_cast<ButtonNode>(node);
-            int padX = isPixelsMode ? (metrics.buttonPaddingX * 2) : 2;
-            return metrics.measureText(b->getLabel(), cStyle.fontSize).width + padX;
+            int padX = isPixelsMode ? metrics.scale(metrics.buttonPaddingX * 2) : 2;
+            return metrics.measureText(b->getLabel(), scaledFontSize, effectiveFont).width + padX;
         }
         if (node->getKind() == NodeKind::Input) {
-            return isPixelsMode ? 140 : 12;
+            return isPixelsMode ? metrics.scale(140) : 12;
         }
 
         const auto& children = node->getChildren();
         if (children.empty()) {
-            return isPixelsMode ? metrics.defaultBoxWidthPx : 4;
+            return isPixelsMode ? metrics.scale(metrics.defaultBoxWidthPx) : 4;
         }
 
         int totalWidth = 0;
@@ -95,38 +108,40 @@ private:
         for (const auto& ch : children) {
             if (!ch || !ch->isVisible()) continue;
             visibleCount++;
-            int w = estimateIntrinsicWidth(ch, metrics) + ch->getStyle().margin.horizontal();
+            int w = estimateIntrinsicWidth(ch, metrics, effectiveFont) + metrics.scaleEdges(ch->getStyle().margin).horizontal();
             totalWidth += w;
             maxChildWidth = std::max(maxChildWidth, w);
         }
 
-        int gapTotal = (visibleCount > 1 && cStyle.gap > 0) ? (cStyle.gap * (visibleCount - 1)) : 0;
+        int gapTotal = (visibleCount > 1 && cStyle.gap > 0) ? (metrics.scale(cStyle.gap) * (visibleCount - 1)) : 0;
         int contentW = childIsRow ? (totalWidth + gapTotal) : maxChildWidth;
-        return contentW + cStyle.padding.horizontal() + cStyle.border.horizontal();
+        return contentW + metrics.scaleEdges(cStyle.padding).horizontal() + metrics.scaleEdges(cStyle.border).horizontal();
     }
 
-    static int estimateIntrinsicHeight(const std::shared_ptr<UINode>& node, const LayoutMetrics& metrics) {
+    static int estimateIntrinsicHeight(const std::shared_ptr<UINode>& node, const LayoutMetrics& metrics, const std::string& inheritedFontFamily = "") {
         if (!node) return 0;
         const auto& cStyle = node->getStyle();
+        std::string effectiveFont = !cStyle.fontFamily.empty() ? cStyle.fontFamily : inheritedFontFamily;
         if (cStyle.height.mode == SizeMode::Fixed || cStyle.height.mode == SizeMode::Pixels) {
-            return cStyle.height.value;
+            return metrics.scale(cStyle.height.value);
         }
         bool isPixelsMode = (metrics.unitMode == LayoutUnitMode::DesktopPixels);
+        int scaledFontSize = metrics.scale(cStyle.fontSize);
         if (node->getKind() == NodeKind::Text) {
             auto t = std::static_pointer_cast<TextNode>(node);
-            return metrics.measureText(t->getContent(), cStyle.fontSize).height;
+            return metrics.measureText(t->getContent(), scaledFontSize, effectiveFont).height;
         }
         if (node->getKind() == NodeKind::Button) {
-            int padY = isPixelsMode ? (metrics.buttonPaddingY * 2) : 0;
-            return metrics.measureText("", cStyle.fontSize).height + padY;
+            int padY = isPixelsMode ? metrics.scale(metrics.buttonPaddingY * 2) : 0;
+            return metrics.measureText("", scaledFontSize, effectiveFont).height + padY;
         }
         if (node->getKind() == NodeKind::Input) {
-            return isPixelsMode ? metrics.inputHeightPx : 1;
+            return isPixelsMode ? metrics.scale(metrics.inputHeightPx) : 1;
         }
 
         const auto& children = node->getChildren();
         if (children.empty()) {
-            return isPixelsMode ? metrics.defaultBoxHeightPx : 3;
+            return isPixelsMode ? metrics.scale(metrics.defaultBoxHeightPx) : 3;
         }
 
         int totalHeight = 0;
@@ -137,14 +152,14 @@ private:
         for (const auto& ch : children) {
             if (!ch || !ch->isVisible()) continue;
             visibleCount++;
-            int h = estimateIntrinsicHeight(ch, metrics) + ch->getStyle().margin.vertical();
+            int h = estimateIntrinsicHeight(ch, metrics, effectiveFont) + metrics.scaleEdges(ch->getStyle().margin).vertical();
             totalHeight += h;
             maxChildHeight = std::max(maxChildHeight, h);
         }
 
-        int gapTotal = (visibleCount > 1 && cStyle.gap > 0) ? (cStyle.gap * (visibleCount - 1)) : 0;
+        int gapTotal = (visibleCount > 1 && cStyle.gap > 0) ? (metrics.scale(cStyle.gap) * (visibleCount - 1)) : 0;
         int contentH = childIsRow ? maxChildHeight : (totalHeight + gapTotal);
-        return contentH + cStyle.padding.vertical() + cStyle.border.vertical();
+        return contentH + metrics.scaleEdges(cStyle.padding).vertical() + metrics.scaleEdges(cStyle.border).vertical();
     }
 
     static void computeNode(const std::shared_ptr<UINode>& node,
@@ -152,37 +167,41 @@ private:
                             const LayoutMetrics& metrics,
                             bool isRoot = false) {
         const auto& style = node->getStyle();
+        Edges pad = metrics.scaleEdges(style.padding);
+        Edges bord = metrics.scaleEdges(style.border);
+        Edges marg = metrics.scaleEdges(style.margin);
+        int scaledGap = metrics.scale(style.gap);
 
         // 1. Compute node width and height
         int width = 0;
         if (!isRoot) {
             width = available.width;
         } else if (style.width.mode == SizeMode::Fixed || style.width.mode == SizeMode::Pixels) {
-            width = style.width.value;
+            width = metrics.scale(style.width.value);
         } else if (style.width.mode == SizeMode::Percent) {
             width = (available.width * style.width.value) / 100;
         } else {
             // Auto
-            width = available.width - style.margin.horizontal();
+            width = available.width - marg.horizontal();
         }
 
         int height = 0;
         if (!isRoot) {
             height = available.height;
         } else if (style.height.mode == SizeMode::Fixed || style.height.mode == SizeMode::Pixels) {
-            height = style.height.value;
+            height = metrics.scale(style.height.value);
         } else if (style.height.mode == SizeMode::Percent) {
             height = (available.height * style.height.value) / 100;
         } else {
             // Auto
-            height = available.height - style.margin.vertical();
+            height = available.height - marg.vertical();
         }
 
         width = std::max(0, width);
         height = std::max(0, height);
 
-        int nodeX = available.x + (isRoot ? style.margin.left : 0);
-        int nodeY = available.y + (isRoot ? style.margin.top : 0);
+        int nodeX = available.x + (isRoot ? marg.left : 0);
+        int nodeY = available.y + (isRoot ? marg.top : 0);
 
         node->setBounds(Rect{nodeX, nodeY, width, height});
 
@@ -191,10 +210,10 @@ private:
         if (children.empty()) return;
 
         // Content area inside padding + border
-        int contentX = nodeX + style.padding.left + style.border.left;
-        int contentY = nodeY + style.padding.top + style.border.top;
-        int contentWidth = std::max(0, width - style.padding.horizontal() - style.border.horizontal());
-        int contentHeight = std::max(0, height - style.padding.vertical() - style.border.vertical());
+        int contentX = nodeX + pad.left + bord.left;
+        int contentY = nodeY + pad.top + bord.top;
+        int contentWidth = std::max(0, width - pad.horizontal() - bord.horizontal());
+        int contentHeight = std::max(0, height - pad.vertical() - bord.vertical());
 
         bool isRow = (style.flexDirection == FlexDirection::Row);
 
@@ -220,6 +239,7 @@ private:
             if (!child->isVisible()) continue;
             visibleCount++;
             const auto& cStyle = child->getStyle();
+            Edges cMarg = metrics.scaleEdges(cStyle.margin);
             ChildMeasure m;
             m.node = child;
             m.flexGrow = cStyle.flexGrow;
@@ -228,40 +248,40 @@ private:
             if (isRow) {
                 // Main axis = width, Cross axis = height
                 if (cStyle.width.mode == SizeMode::Fixed || cStyle.width.mode == SizeMode::Pixels) {
-                    m.baseMainSize = cStyle.width.value;
+                    m.baseMainSize = metrics.scale(cStyle.width.value);
                 } else if (cStyle.width.mode == SizeMode::Percent) {
                     m.baseMainSize = (contentWidth * cStyle.width.value) / 100;
                 } else {
-                    m.baseMainSize = estimateIntrinsicWidth(child, metrics);
+                    m.baseMainSize = estimateIntrinsicWidth(child, metrics, style.fontFamily);
                 }
 
                 if (cStyle.height.mode == SizeMode::Fixed || cStyle.height.mode == SizeMode::Pixels) {
-                    m.crossSize = cStyle.height.value;
+                    m.crossSize = metrics.scale(cStyle.height.value);
                 } else if (cStyle.height.mode == SizeMode::Percent) {
                     m.crossSize = (contentHeight * cStyle.height.value) / 100;
                 } else {
                     m.crossSize = (style.alignItems == AlignItems::Stretch)
                                       ? contentHeight
-                                      : estimateIntrinsicHeight(child, metrics);
+                                      : estimateIntrinsicHeight(child, metrics, style.fontFamily);
                 }
             } else {
                 // Main axis = height, Cross axis = width
                 if (cStyle.height.mode == SizeMode::Fixed || cStyle.height.mode == SizeMode::Pixels) {
-                    m.baseMainSize = cStyle.height.value;
+                    m.baseMainSize = metrics.scale(cStyle.height.value);
                 } else if (cStyle.height.mode == SizeMode::Percent) {
                     m.baseMainSize = (contentHeight * cStyle.height.value) / 100;
                 } else {
-                    m.baseMainSize = estimateIntrinsicHeight(child, metrics);
+                    m.baseMainSize = estimateIntrinsicHeight(child, metrics, style.fontFamily);
                 }
 
                 if (cStyle.width.mode == SizeMode::Fixed || cStyle.width.mode == SizeMode::Pixels) {
-                    m.crossSize = cStyle.width.value;
+                    m.crossSize = metrics.scale(cStyle.width.value);
                 } else if (cStyle.width.mode == SizeMode::Percent) {
                     m.crossSize = (contentWidth * cStyle.width.value) / 100;
                 } else {
                     m.crossSize = (style.alignItems == AlignItems::Stretch)
                                       ? contentWidth
-                                      : estimateIntrinsicWidth(child, metrics);
+                                      : estimateIntrinsicWidth(child, metrics, style.fontFamily);
                 }
             }
 
@@ -273,7 +293,7 @@ private:
                 }
             }
 
-            m.baseMainSize += isRow ? cStyle.margin.horizontal() : cStyle.margin.vertical();
+            m.baseMainSize += isRow ? cMarg.horizontal() : cMarg.vertical();
             m.finalMainSize = m.baseMainSize;
             totalBaseMain += m.baseMainSize;
             totalGrow += m.flexGrow;
@@ -281,8 +301,8 @@ private:
             measures.push_back(m);
         }
 
-        // Account for style.gap between children
-        int totalGap = (visibleCount > 1 && style.gap > 0) ? (style.gap * (visibleCount - 1)) : 0;
+        // Account for scaledGap between children
+        int totalGap = (visibleCount > 1 && style.gap > 0) ? (scaledGap * (visibleCount - 1)) : 0;
         int totalRequiredMain = totalBaseMain + totalGap;
 
         // 3. Resolve flex grow or shrink
@@ -312,7 +332,7 @@ private:
 
         // 4. Align items & Justify content
         int startOffset = 0;
-        int spaceGap = style.gap;
+        int spaceGap = scaledGap;
 
         if (remainingMain > 0 && totalGrow == 0) {
             switch (style.justifyContent) {
@@ -354,6 +374,7 @@ private:
 
         for (const auto& m : measures) {
             const auto& cStyle = m.node->getStyle();
+            Edges cMarg = metrics.scaleEdges(cStyle.margin);
             Rect childBounds{0, 0, 0, 0};
 
             int crossPos = 0;
@@ -373,20 +394,20 @@ private:
             }
 
             if (isRow) {
-                childBounds.x = contentX + currentPos + cStyle.margin.left;
-                childBounds.y = contentY + crossPos + cStyle.margin.top;
-                childBounds.width = std::max(0, m.finalMainSize - cStyle.margin.horizontal());
+                childBounds.x = contentX + currentPos + cMarg.left;
+                childBounds.y = contentY + crossPos + cMarg.top;
+                childBounds.width = std::max(0, m.finalMainSize - cMarg.horizontal());
                 childBounds.height = (style.alignItems == AlignItems::Stretch)
-                                         ? std::max(0, contentHeight - cStyle.margin.vertical())
+                                         ? std::max(0, contentHeight - cMarg.vertical())
                                          : m.crossSize;
                 currentPos += m.finalMainSize + spaceGap;
             } else {
-                childBounds.x = contentX + crossPos + cStyle.margin.left;
-                childBounds.y = contentY + currentPos + cStyle.margin.top;
+                childBounds.x = contentX + crossPos + cMarg.left;
+                childBounds.y = contentY + currentPos + cMarg.top;
                 childBounds.width = (style.alignItems == AlignItems::Stretch)
-                                         ? std::max(0, contentWidth - cStyle.margin.horizontal())
+                                         ? std::max(0, contentWidth - cMarg.horizontal())
                                          : m.crossSize;
-                childBounds.height = std::max(0, m.finalMainSize - cStyle.margin.vertical());
+                childBounds.height = std::max(0, m.finalMainSize - cMarg.vertical());
                 currentPos += m.finalMainSize + spaceGap;
             }
 
@@ -399,9 +420,11 @@ private:
         // 6. Update ScrollNode content dimensions if applicable
         if (node->getKind() == NodeKind::Scroll) {
             auto scrollNode = std::static_pointer_cast<ScrollNode>(node);
-            scrollNode->setContentHeight(maxChildBottom);
-            scrollNode->setContentWidth(maxChildRight);
-            int maxOffset = std::max(0, maxChildBottom - contentHeight);
+            int totalContentH = maxChildBottom > 0 ? (maxChildBottom + pad.vertical() + bord.vertical()) : 0;
+            int totalContentW = maxChildRight > 0 ? (maxChildRight + pad.horizontal() + bord.horizontal()) : 0;
+            scrollNode->setContentHeight(totalContentH);
+            scrollNode->setContentWidth(totalContentW);
+            int maxOffset = std::max(0, totalContentH - height);
             if (scrollNode->getScrollOffset() > maxOffset) {
                 scrollNode->setScrollOffset(maxOffset);
             }

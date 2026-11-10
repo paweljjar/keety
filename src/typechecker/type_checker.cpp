@@ -85,7 +85,7 @@ const std::vector<std::string> kHttpCandidates = {
 };
 
 const std::vector<std::string> kUiCandidates = {
-    "mountDesktop", "renderDesktop", "mountHeadless", "renderTui", "serveUi",
+    "loadFont", "mountDesktop", "renderDesktop", "mountHeadless", "renderTui", "serveUi",
     "debounce", "withPreventDefault", "withKeyFilter",
     "Component", "UINode", "BoxNode", "StackNode", "TextNode", "ButtonNode", "InputNode", "ScrollNode",
     "DesktopBackend", "WindowConfig", "HeadlessBackend", "TuiBackend", "WebVdomBackend",
@@ -4828,6 +4828,10 @@ TypePtr TypeChecker::checkUiMemberCall(const ast::MemberExpr* member, const ast:
         if (arg.value) inferType(*arg.value, scope);
     }
 
+    if (name == "loadFont") {
+        checkArgCountMinMax(2, 2);
+        return Type::boolType();
+    }
     if (name == "mountDesktop") {
         checkArgCountMinMax(1, 3);
         return std::make_shared<CustomType>("DesktopBackend");
