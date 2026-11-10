@@ -34,6 +34,16 @@ public:
         addDamage(Rect{0, 0, width_, height_});
     }
 
+    void clear(RgbaColor c) noexcept {
+        uint32_t p = (static_cast<uint32_t>(c.a) << 24) |
+                     (static_cast<uint32_t>(c.r) << 16) |
+                     (static_cast<uint32_t>(c.g) << 8)  |
+                     static_cast<uint32_t>(c.b);
+        pixels_.assign(pixels_.size(), p);
+        damagedRegions_.clear();
+        addDamage(Rect{0, 0, width_, height_});
+    }
+
     [[nodiscard]] int getWidth() const noexcept { return width_; }
     [[nodiscard]] int getHeight() const noexcept { return height_; }
     [[nodiscard]] float getDpiScale() const noexcept { return dpiScale_; }
@@ -132,42 +142,49 @@ public:
         clipStack_.push_back(clipped);
     }
 
+    void resetClip() noexcept {
+        clipStack_.clear();
+        clipStack_.push_back(Rect{0, 0, fb_.getWidth(), fb_.getHeight()});
+        offsetStack_.clear();
+        offsetStack_.push_back(Point{0, 0});
+    }
+
     void popClipRect() {
         if (clipStack_.size() > 1) {
             clipStack_.pop_back();
+        } else if (!clipStack_.empty()) {
+            clipStack_[0] = Rect{0, 0, fb_.getWidth(), fb_.getHeight()};
         }
     }
 
     [[nodiscard]] Rect getCurrentClip() const noexcept {
-        return clipStack_.back();
+        return clipStack_.empty() ? Rect{0, 0, fb_.getWidth(), fb_.getHeight()} : clipStack_.back();
     }
 
     // --- Offset Stack (for scrolling containers) ---
 
     void pushOffset(Point delta) {
-        Point cur = offsetStack_.back();
+        Point cur = offsetStack_.empty() ? Point{0, 0} : offsetStack_.back();
         offsetStack_.push_back(Point{cur.x + delta.x, cur.y + delta.y});
     }
 
     void popOffset() {
         if (offsetStack_.size() > 1) {
             offsetStack_.pop_back();
+        } else if (!offsetStack_.empty()) {
+            offsetStack_[0] = Point{0, 0};
         }
     }
 
     [[nodiscard]] Point getCurrentOffset() const noexcept {
-        return offsetStack_.back();
+        return offsetStack_.empty() ? Point{0, 0} : offsetStack_.back();
     }
 
     // --- Drawing Primitives ---
 
     void clear(RgbaColor color) {
-        Rect clip = clipStack_.back();
-        for (int y = clip.y; y < clip.y + clip.height; ++y) {
-            for (int x = clip.x; x < clip.x + clip.width; ++x) {
-                fb_.setPixel(x, y, color);
-            }
-        }
+        resetClip();
+        fb_.clear(color);
     }
 
     void fillRect(Rect rect, RgbaColor color) {
@@ -580,10 +597,18 @@ private:
 
                 RgbaColor textCol = style.textColorRgba.value_or(RgbaColor{205, 214, 244, 255});
                 Point textPos{bounds.x + 8, bounds.y + std::max(0, (bounds.height - 20) / 2)};
+
+                // Selection highlight
+                if (isFocused && inputNode->hasSelection()) {
+                    Size totalTextSize = Canvas2D::measureText(inputNode->getValue(), style.fontSize);
+                    Rect selRect{textPos.x, bounds.y + 4, totalTextSize.width + 4, bounds.height - 8};
+                    canvas.fillRect(selRect, RgbaColor{88, 91, 112, 180});
+                }
+
                 canvas.drawText(inputNode->getValue(), textPos, textCol, style.fontSize);
 
                 // Cursor caret when focused
-                if (isFocused) {
+                if (isFocused && !inputNode->hasSelection()) {
                     int cursorIndex = std::clamp(inputNode->getCursorPos(), 0, static_cast<int>(inputNode->getValue().size()));
                     std::string_view prefix = std::string_view(inputNode->getValue()).substr(0, cursorIndex);
                     Size prefixSize = Canvas2D::measureText(prefix, style.fontSize);

@@ -139,6 +139,9 @@ public:
 
     void resize(int width, int height) {
         fb_.resize(width, height);
+        if (canvas_) {
+            canvas_->resetClip();
+        }
         relayout();
         renderFrame();
     }
@@ -150,6 +153,7 @@ public:
 
     void renderFrame() {
         if (!canvas_) return;
+        canvas_->resetClip();
         canvas_->clear(RgbaColor{30, 30, 46, 255}); // Modern dark base theme
         if (rootNode_) {
             uint32_t focusedId = focusMgr_.getFocusedNodeId().value_or(0);

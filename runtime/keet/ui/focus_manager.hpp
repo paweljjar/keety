@@ -128,6 +128,11 @@ public:
             int cursor = std::clamp(input->getCursorPos(), 0, static_cast<int>(input->getValue().size()));
             std::string val = input->getValue();
 
+            if (key == "SelectAll" || key == "Cmd+A" || key == "Ctrl+A" || key == "Cmd+a" || key == "Ctrl+a") {
+                input->selectAll();
+                node->emit("keydown", key);
+                return true;
+            }
             if (key == "ArrowLeft") {
                 if (cursor > 0) input->setCursorPos(cursor - 1);
                 node->emit("keydown", key);
@@ -148,17 +153,15 @@ public:
                 node->emit("keydown", key);
                 return true;
             }
-            if (key == "Backspace") {
-                if (cursor > 0 && !val.empty()) {
+            if (key == "Backspace" || key == "Delete") {
+                if (input->hasSelection()) {
+                    input->setValue("");
+                    input->clearSelection();
+                } else if (key == "Backspace" && cursor > 0 && !val.empty()) {
                     val.erase(cursor - 1, 1);
                     input->setValue(val);
                     input->setCursorPos(cursor - 1);
-                }
-                node->emit("keydown", key);
-                return true;
-            }
-            if (key == "Delete") {
-                if (cursor < static_cast<int>(val.size())) {
+                } else if (key == "Delete" && cursor < static_cast<int>(val.size())) {
                     val.erase(cursor, 1);
                     input->setValue(val);
                     input->setCursorPos(cursor);
@@ -167,9 +170,15 @@ public:
                 return true;
             }
             if (key.size() == 1 && std::isprint(static_cast<unsigned char>(key[0]))) {
-                val.insert(cursor, key);
-                input->setValue(val);
-                input->setCursorPos(cursor + 1);
+                if (input->hasSelection()) {
+                    input->setValue(key);
+                    input->clearSelection();
+                    input->setCursorPos(1);
+                } else {
+                    val.insert(cursor, key);
+                    input->setValue(val);
+                    input->setCursorPos(cursor + 1);
+                }
                 node->emit("keydown", key);
                 return true;
             }

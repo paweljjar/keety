@@ -255,7 +255,7 @@ public:
         SEL sendEventSel = sel_registerName("sendEvent:");
 
         Class NSStringClass = objc_getClass("NSString");
-        id defaultMode = detail::callClassMsg<id>(NSStringClass, sel_registerName("stringWithUTF8String:"), "kCFRunLoopDefaultMode");
+        id runLoopMode = detail::callClassMsg<id>(NSStringClass, sel_registerName("stringWithUTF8String:"), "kCFRunLoopDefaultMode");
 
         while (true) {
             id event = detail::callMsg<id, detail::NSUInteger, id, id, BOOL>(
@@ -263,7 +263,7 @@ public:
                 nextEventSel,
                 0xFFFFFFFFFFFFFFFFULL, // NSEventMaskAny
                 nullptr,               // non-blocking
-                defaultMode,
+                runLoopMode,
                 YES                    // dequeue: YES
             );
 
@@ -305,6 +305,28 @@ public:
                     break;
                 }
                 case 10: { // NSEventTypeKeyDown
+                    detail::NSUInteger flags = detail::callMsg<detail::NSUInteger>(event, sel_registerName("modifierFlags"));
+                    bool cmdPressed = (flags & (1 << 20)) != 0; // NSEventModifierFlagCommand
+
+                    id charsNoMod = detail::callMsg<id>(event, sel_registerName("charactersIgnoringModifiers"));
+                    const char* noModUtf8 = charsNoMod ? detail::callMsg<const char*>(charsNoMod, sel_registerName("UTF8String")) : nullptr;
+
+                    if (cmdPressed && noModUtf8 && noModUtf8[0] != '\0') {
+                        char c = noModUtf8[0];
+                        if (c == 'q' || c == 'Q') {
+                            close();
+                            return false;
+                        }
+                        if (c == 'w' || c == 'W') {
+                            close();
+                            return false;
+                        }
+                        if (c == 'a' || c == 'A') {
+                            backend.dispatchKey("SelectAll");
+                            break;
+                        }
+                    }
+
                     id charsStr = detail::callMsg<id>(event, sel_registerName("characters"));
                     if (charsStr) {
                         const char* utf8 = detail::callMsg<const char*>(charsStr, sel_registerName("UTF8String"));
@@ -440,6 +462,38 @@ private:
         if (!app) return;
 
         detail::callMsg<void, detail::NSInteger>(app, sel_registerName("setActivationPolicy:"), 0); // Regular app
+
+        // Install standard Application Menu with Quit (Cmd+Q)
+        Class NSMenuClass = objc_getClass("NSMenu");
+        Class NSMenuItemClass = objc_getClass("NSMenuItem");
+        if (NSMenuClass && NSMenuItemClass) {
+            id menubar = detail::callClassMsg<id>(NSMenuClass, sel_registerName("alloc"));
+            menubar = detail::callMsg<id>(menubar, sel_registerName("init"));
+
+            id appMenuItem = detail::callClassMsg<id>(NSMenuItemClass, sel_registerName("alloc"));
+            appMenuItem = detail::callMsg<id>(appMenuItem, sel_registerName("init"));
+            detail::callMsg<void, id>(menubar, sel_registerName("addItem:"), appMenuItem);
+
+            id appMenu = detail::callClassMsg<id>(NSMenuClass, sel_registerName("alloc"));
+            appMenu = detail::callMsg<id>(appMenu, sel_registerName("init"));
+
+            Class NSStringClass = objc_getClass("NSString");
+            id quitTitle = detail::callClassMsg<id>(NSStringClass, sel_registerName("stringWithUTF8String:"), "Quit");
+            id quitKey = detail::callClassMsg<id>(NSStringClass, sel_registerName("stringWithUTF8String:"), "q");
+
+            id quitItem = detail::callClassMsg<id>(NSMenuItemClass, sel_registerName("alloc"));
+            quitItem = detail::callMsg<id, id, SEL, id>(
+                quitItem,
+                sel_registerName("initWithTitle:action:keyEquivalent:"),
+                quitTitle,
+                sel_registerName("terminate:"),
+                quitKey
+            );
+            detail::callMsg<void, id>(appMenu, sel_registerName("addItem:"), quitItem);
+            detail::callMsg<void, id>(appMenuItem, sel_registerName("setSubmenu:"), appMenu);
+            detail::callMsg<void, id>(app, sel_registerName("setMainMenu:"), menubar);
+        }
+
         detail::callMsg<void>(app, sel_registerName("finishLaunching"));
 
         Class NSWindowClass = objc_getClass("NSWindow");

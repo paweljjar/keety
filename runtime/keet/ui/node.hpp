@@ -219,6 +219,7 @@ public:
     void setValue(std::string val) {
         value_ = std::move(val);
         cursorPos_ = std::min(cursorPos_, static_cast<int>(value_.size()));
+        clearSelection();
         setDirty(true);
         emit("input", value_);
     }
@@ -226,16 +227,41 @@ public:
     void setValueSilent(std::string val) {
         value_ = std::move(val);
         cursorPos_ = std::min(cursorPos_, static_cast<int>(value_.size()));
+        clearSelection();
         setDirty(true);
     }
     [[nodiscard]] const std::string& getValue() const noexcept { return value_; }
 
-    void setCursorPos(int pos) noexcept { cursorPos_ = pos; }
+    void setCursorPos(int pos) noexcept {
+        cursorPos_ = pos;
+        clearSelection();
+    }
     [[nodiscard]] int getCursorPos() const noexcept { return cursorPos_; }
+
+    void selectAll() noexcept {
+        selectionStart_ = 0;
+        selectionEnd_ = static_cast<int>(value_.size());
+        cursorPos_ = selectionEnd_;
+        setDirty(true);
+    }
+
+    void clearSelection() noexcept {
+        selectionStart_ = -1;
+        selectionEnd_ = -1;
+    }
+
+    [[nodiscard]] bool hasSelection() const noexcept {
+        return selectionStart_ >= 0 && selectionEnd_ > selectionStart_;
+    }
+
+    [[nodiscard]] int getSelectionStart() const noexcept { return selectionStart_; }
+    [[nodiscard]] int getSelectionEnd() const noexcept { return selectionEnd_; }
 
 private:
     std::string value_;
     int cursorPos_{0};
+    int selectionStart_{-1};
+    int selectionEnd_{-1};
 };
 
 class StackNode : public UINode {
