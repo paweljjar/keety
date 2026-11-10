@@ -4,6 +4,8 @@
 #include <keet/ui/types.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>

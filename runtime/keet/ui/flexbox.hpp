@@ -5,6 +5,7 @@
 #include <keet/ui/types.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <vector>
