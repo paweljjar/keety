@@ -362,8 +362,12 @@ public:
         );
 
         if (image) {
+            CGContextSaveGState(ctx);
+            CGContextTranslateCTM(ctx, 0, height_);
+            CGContextScaleCTM(ctx, 1.0, -1.0);
             CGRect destRect = CGRectMake(0, 0, width_, height_);
             CGContextDrawImage(ctx, destRect, image);
+            CGContextRestoreGState(ctx);
             CGImageRelease(image);
         }
 
