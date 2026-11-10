@@ -11,6 +11,7 @@
 #include <keet/ui/scheduler.hpp>
 #include <keet/ui/component.hpp>
 #include <keet/ui/headless_backend.hpp>
+#include <keet/ui/canvas.hpp>
 
 namespace keet_module_ui {
     using namespace ::keet::ui;
