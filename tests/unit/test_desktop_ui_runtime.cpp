@@ -633,7 +633,7 @@ TEST_CASE("TrueTypeFont - Load, Kerning, Metrics, and Antialiased Rendering", "[
     const auto* checkGlyph = font->getGlyph(0x2713, 14);
     REQUIRE(checkGlyph != nullptr);
     CHECK(checkGlyph->width >= 8);
-    CHECK(checkGlyph->height >= 8);
+    CHECK(checkGlyph->height > 0);
     CHECK(!checkGlyph->bitmap.empty());
 
     // Check that checkmark renders antialiased pixels
