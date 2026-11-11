@@ -23,6 +23,14 @@ public:
     /// respecting lexical scope and shadow boundaries, across all open documents.
     std::vector<Location> findReferences(const Document& doc, Position pos, bool includeDeclaration = true, const DocumentManager* docManager = nullptr);
 
+    /// Prepares symbol renaming by validating that the cursor is on a valid user-defined identifier.
+    /// Returns the symbol range and placeholder string, or nullopt if renaming is not permitted.
+    std::optional<PrepareRenameResult> prepareRename(const Document& doc, Position pos, const DocumentManager* docManager = nullptr);
+
+    /// Renames a symbol across declarations and all references respecting lexical scopes.
+    /// Produces a WorkspaceEdit with file edits, or nullopt if invalid.
+    std::optional<WorkspaceEdit> renameSymbol(const Document& doc, Position pos, const std::string& newName, const DocumentManager* docManager = nullptr);
+
     /// Computes rich hover information and Markdown documentation for the symbol or keyword under position.
     std::optional<Hover> getHover(const Document& doc, Position pos, const DocumentManager* docManager = nullptr);
 

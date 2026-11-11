@@ -268,6 +268,31 @@ struct ReferenceParams {
     static ReferenceParams fromJson(const JsonValue& j);
 };
 
+struct PrepareRenameParams {
+    TextDocumentIdentifier textDocument;
+    Position position;
+
+    JsonValue toJson() const;
+    static PrepareRenameParams fromJson(const JsonValue& j);
+};
+
+struct PrepareRenameResult {
+    Range range;
+    std::string placeholder;
+
+    JsonValue toJson() const;
+    static PrepareRenameResult fromJson(const JsonValue& j);
+};
+
+struct RenameParams {
+    TextDocumentIdentifier textDocument;
+    Position position;
+    std::string newName;
+
+    JsonValue toJson() const;
+    static RenameParams fromJson(const JsonValue& j);
+};
+
 struct PublishDiagnosticsParams {
     std::string uri;
     std::optional<int32_t> version;

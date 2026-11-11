@@ -365,6 +365,74 @@ ReferenceParams ReferenceParams::fromJson(const JsonValue& j) {
     return p;
 }
 
+JsonValue PrepareRenameParams::toJson() const {
+    JsonValue::Object obj;
+    JsonValue::Object docObj;
+    docObj["uri"] = JsonValue(textDocument.uri);
+    obj["textDocument"] = JsonValue(std::move(docObj));
+    obj["position"] = position.toJson();
+    return JsonValue(std::move(obj));
+}
+
+PrepareRenameParams PrepareRenameParams::fromJson(const JsonValue& j) {
+    PrepareRenameParams p;
+    if (auto* obj = asObject(j)) {
+        if (auto* docNode = findField(*obj, "textDocument")) {
+            p.textDocument = TextDocumentIdentifier::fromJson(*docNode);
+        }
+        if (auto* posNode = findField(*obj, "position")) {
+            p.position = Position::fromJson(*posNode);
+        }
+    }
+    return p;
+}
+
+JsonValue PrepareRenameResult::toJson() const {
+    JsonValue::Object obj;
+    obj["range"] = range.toJson();
+    obj["placeholder"] = JsonValue(placeholder);
+    return JsonValue(std::move(obj));
+}
+
+PrepareRenameResult PrepareRenameResult::fromJson(const JsonValue& j) {
+    PrepareRenameResult r;
+    if (auto* obj = asObject(j)) {
+        if (auto* rng = findField(*obj, "range")) {
+            r.range = Range::fromJson(*rng);
+        }
+        if (auto* ph = findField(*obj, "placeholder"); ph && ph->is_string()) {
+            r.placeholder = std::get<std::string>(ph->value);
+        }
+    }
+    return r;
+}
+
+JsonValue RenameParams::toJson() const {
+    JsonValue::Object obj;
+    JsonValue::Object docObj;
+    docObj["uri"] = JsonValue(textDocument.uri);
+    obj["textDocument"] = JsonValue(std::move(docObj));
+    obj["position"] = position.toJson();
+    obj["newName"] = JsonValue(newName);
+    return JsonValue(std::move(obj));
+}
+
+RenameParams RenameParams::fromJson(const JsonValue& j) {
+    RenameParams p;
+    if (auto* obj = asObject(j)) {
+        if (auto* docNode = findField(*obj, "textDocument")) {
+            p.textDocument = TextDocumentIdentifier::fromJson(*docNode);
+        }
+        if (auto* posNode = findField(*obj, "position")) {
+            p.position = Position::fromJson(*posNode);
+        }
+        if (auto* nnNode = findField(*obj, "newName"); nnNode && nnNode->is_string()) {
+            p.newName = std::get<std::string>(nnNode->value);
+        }
+    }
+    return p;
+}
+
 JsonValue PublishDiagnosticsParams::toJson() const {
     JsonValue::Object obj;
     obj["uri"] = JsonValue(uri);

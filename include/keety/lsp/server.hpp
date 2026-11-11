@@ -50,6 +50,8 @@ private:
     // Language feature handlers
     JsonValue handleDefinition(const JsonValue& params);
     JsonValue handleReferences(const JsonValue& params);
+    JsonValue handlePrepareRename(const JsonValue& params);
+    JsonValue handleRename(const JsonValue& params);
     JsonValue handleHover(const JsonValue& params);
     JsonValue handleCompletion(const JsonValue& params);
     JsonValue handleDocumentSymbol(const JsonValue& params);

@@ -566,7 +566,7 @@ std::optional<std::string> getKeywordDoc(lexer::TokenKind kind) {
     }
 }
 
-lexer::TokenKind kwToTokenKind(const std::string& kw) {
+lexer::TokenKind kwToTokenKind(std::string_view kw) {
     using namespace lexer;
     if (kw == "fn") return TokenKind::KwFn;
     if (kw == "let") return TokenKind::KwLet;
@@ -601,6 +601,17 @@ lexer::TokenKind kwToTokenKind(const std::string& kw) {
     if (kw == "errtype") return TokenKind::KwErrtype;
     if (kw == "zonk") return TokenKind::KwZonk;
     return TokenKind::Invalid;
+}
+
+bool isValidIdentifier(std::string_view name) {
+    if (name.empty()) return false;
+    if (kwToTokenKind(name) != lexer::TokenKind::Invalid) return false;
+    if (name == "true" || name == "false" || name == "null") return false;
+    if (!std::isalpha(static_cast<unsigned char>(name[0])) && name[0] != '_') return false;
+    for (size_t i = 1; i < name.size(); ++i) {
+        if (!std::isalnum(static_cast<unsigned char>(name[i])) && name[i] != '_') return false;
+    }
+    return true;
 }
 
 void collectLocalBindings(
@@ -1650,6 +1661,159 @@ std::vector<Location> Analyzer::findReferences(
     }), results.end());
 
     return results;
+}
+
+std::optional<PrepareRenameResult> Analyzer::prepareRename(
+    const Document& doc,
+    Position pos,
+    const DocumentManager* docManager
+) {
+    auto byteOffsetOpt = doc.positionToOffset(pos);
+    if (!byteOffsetOpt.has_value()) {
+        return std::nullopt;
+    }
+    size_t targetOffset = *byteOffsetOpt;
+
+    diag::SourceManager sm;
+    std::string pathStr = uriToPath(doc.uri());
+    diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
+
+    lexer::Lexer lexer(fileId, doc.text());
+    auto tokens = lexer.tokenizeAll();
+
+    const lexer::Token* targetTok = nullptr;
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        if (targetOffset >= tokens[i].span.start.offset && targetOffset < tokens[i].span.end.offset) {
+            targetTok = &tokens[i];
+            break;
+        }
+    }
+    if (!targetTok) {
+        for (size_t i = 0; i < tokens.size(); ++i) {
+            if (targetOffset == tokens[i].span.end.offset && tokens[i].span.length() > 0) {
+                targetTok = &tokens[i];
+                break;
+            }
+        }
+    }
+
+    if (!targetTok || !targetTok->is(lexer::TokenKind::Identifier)) {
+        return std::nullopt;
+    }
+
+    std::string ident = std::string(targetTok->lexeme);
+
+    // Reject keywords and built-in constants/types
+    if (kwToTokenKind(ident) != lexer::TokenKind::Invalid) {
+        return std::nullopt;
+    }
+    if (ident == "true" || ident == "false" || ident == "null" ||
+        ident == "int" || ident == "float" || ident == "string" ||
+        ident == "bool" || ident == "char" || ident == "byte" ||
+        ident == "void" || ident == "any" || ident == "this" ||
+        ident == "inherited" || ident == "print" || ident == "println") {
+        return std::nullopt;
+    }
+
+    // Check if the symbol resolves to user code in workspace
+    auto refs = findReferences(doc, pos, true, docManager);
+    if (refs.empty()) {
+        return std::nullopt;
+    }
+
+    return PrepareRenameResult{
+        spanToRange(doc, targetTok->span),
+        ident
+    };
+}
+
+std::optional<WorkspaceEdit> Analyzer::renameSymbol(
+    const Document& doc,
+    Position pos,
+    const std::string& newName,
+    const DocumentManager* docManager
+) {
+    if (!isValidIdentifier(newName)) {
+        return std::nullopt;
+    }
+
+    auto prep = prepareRename(doc, pos, docManager);
+    if (!prep.has_value()) {
+        return std::nullopt;
+    }
+
+    // Find all occurrences to rename across workspace
+    auto refs = findReferences(doc, pos, true, docManager);
+    if (refs.empty()) {
+        return std::nullopt;
+    }
+
+    // Collision detection in same scope
+    diag::SourceManager sm;
+    std::string pathStr = uriToPath(doc.uri());
+    diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
+    diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+    lexer::Lexer pLexer(fileId, doc.text());
+    parser::Parser parser(pLexer, &emitter);
+    auto ast = parser.parseModule(std::filesystem::path(pathStr).stem().string());
+
+    auto byteOffsetOpt = doc.positionToOffset(pos);
+    size_t targetOffset = byteOffsetOpt.value_or(0);
+
+    bool isLocal = false;
+    for (const auto& decl : ast.declarations) {
+        if (!decl) continue;
+        if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+            if (targetOffset >= fnDecl->getSpan().start.offset && targetOffset <= fnDecl->getSpan().end.offset) {
+                lexer::Lexer tokLexer(fileId, doc.text());
+                auto fnTokens = tokLexer.tokenizeAll();
+                auto fnScope = buildFnScopeTree(doc, fnDecl);
+                if (const auto* declFound = fnScope->findDeclAtOffset(targetOffset)) {
+                    isLocal = true;
+                    const auto* scopeNode = fnScope->findInnermostScope(targetOffset);
+                    for (const auto& d : scopeNode->decls) {
+                        if (d.name == newName && d.nameSpan.start.offset != declFound->nameSpan.start.offset) {
+                            return std::nullopt; // collision in local scope!
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (!isLocal) {
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* fn = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                if (fn->getName() == newName && fn->getName() != prep->placeholder) return std::nullopt;
+            } else if (const auto* vd = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+                if (vd->getName() == newName && vd->getName() != prep->placeholder) return std::nullopt;
+            } else if (const auto* cd = dynamic_cast<const ast::ConstDecl*>(decl.get())) {
+                if (cd->getName() == newName && cd->getName() != prep->placeholder) return std::nullopt;
+            } else if (const auto* cls = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                if (cls->getName() == newName && cls->getName() != prep->placeholder) return std::nullopt;
+            } else if (const auto* ed = dynamic_cast<const ast::EnumDecl*>(decl.get())) {
+                if (ed->getName() == newName && ed->getName() != prep->placeholder) return std::nullopt;
+            }
+        }
+    }
+
+    WorkspaceEdit edit;
+    for (const auto& loc : refs) {
+        edit.changes[loc.uri].push_back(TextEdit{loc.range, newName});
+    }
+
+    for (auto& [uri, edits] : edit.changes) {
+        std::sort(edits.begin(), edits.end(), [](const TextEdit& a, const TextEdit& b) {
+            if (a.range.start.line != b.range.start.line) return a.range.start.line < b.range.start.line;
+            return a.range.start.character < b.range.start.character;
+        });
+        edits.erase(std::unique(edits.begin(), edits.end(), [](const TextEdit& a, const TextEdit& b) {
+            return a.range == b.range;
+        }), edits.end());
+    }
+
+    return edit;
 }
 
 std::optional<Hover> Analyzer::getHover(

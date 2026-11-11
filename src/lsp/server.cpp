@@ -87,6 +87,12 @@ std::optional<std::string> Server::handleRawMessage(const std::string& rawJson) 
             } else if (method == "textDocument/references") {
                 auto res = handleReferences(params);
                 return JsonRpcResponse::makeResult(id, res).serialize();
+            } else if (method == "textDocument/prepareRename") {
+                auto res = handlePrepareRename(params);
+                return JsonRpcResponse::makeResult(id, res).serialize();
+            } else if (method == "textDocument/rename") {
+                auto res = handleRename(params);
+                return JsonRpcResponse::makeResult(id, res).serialize();
             } else if (method == "textDocument/hover") {
                 auto res = handleHover(params);
                 return JsonRpcResponse::makeResult(id, res).serialize();
@@ -195,6 +201,18 @@ void Server::handleRequest(const RequestId& id, const std::string& method, const
         return;
     }
 
+    if (method == "textDocument/prepareRename") {
+        auto res = handlePrepareRename(params);
+        transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
+        return;
+    }
+
+    if (method == "textDocument/rename") {
+        auto res = handleRename(params);
+        transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
+        return;
+    }
+
     if (method == "textDocument/hover") {
         auto res = handleHover(params);
         transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
@@ -267,6 +285,9 @@ JsonValue Server::handleInitialize(const JsonValue& /*params*/) {
 
     caps["definitionProvider"] = JsonValue(true);
     caps["referencesProvider"] = JsonValue(true);
+    JsonValue::Object renameProvider;
+    renameProvider["prepareProvider"] = JsonValue(true);
+    caps["renameProvider"] = JsonValue(std::move(renameProvider));
     caps["hoverProvider"] = JsonValue(true);
 
     JsonValue::Object compProvider;
@@ -378,6 +399,32 @@ JsonValue Server::handleReferences(const JsonValue& params) {
         arr.push_back(loc.toJson());
     }
     return JsonValue(std::move(arr));
+}
+
+JsonValue Server::handlePrepareRename(const JsonValue& params) {
+    auto p = PrepareRenameParams::fromJson(params);
+    auto docOpt = docManager_.getDocument(p.textDocument.uri);
+    if (!docOpt.has_value()) {
+        return JsonValue(std::monostate{});
+    }
+    auto prepOpt = analyzer_.prepareRename(*docOpt, p.position, &docManager_);
+    if (!prepOpt.has_value()) {
+        return JsonValue(std::monostate{});
+    }
+    return prepOpt->toJson();
+}
+
+JsonValue Server::handleRename(const JsonValue& params) {
+    auto p = RenameParams::fromJson(params);
+    auto docOpt = docManager_.getDocument(p.textDocument.uri);
+    if (!docOpt.has_value()) {
+        return JsonValue(std::monostate{});
+    }
+    auto editOpt = analyzer_.renameSymbol(*docOpt, p.position, p.newName, &docManager_);
+    if (!editOpt.has_value()) {
+        return JsonValue(std::monostate{});
+    }
+    return editOpt->toJson();
 }
 
 JsonValue Server::handleHover(const JsonValue& params) {
