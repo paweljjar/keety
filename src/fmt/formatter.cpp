@@ -1231,6 +1231,167 @@ std::string Formatter::format(
     return formatModule(moduleAst, commentMap);
 }
 
+std::vector<LineDiffChunk> Formatter::computeLineDiff(
+    const std::vector<std::string>& orig,
+    const std::vector<std::string>& fmt
+) {
+    size_t n = orig.size();
+    size_t m = fmt.size();
+
+    size_t prefix = 0;
+    while (prefix < n && prefix < m && orig[prefix] == fmt[prefix]) {
+        prefix++;
+    }
+
+    size_t suffix = 0;
+    while (suffix < (n - prefix) && suffix < (m - prefix) &&
+           orig[n - 1 - suffix] == fmt[m - 1 - suffix]) {
+        suffix++;
+    }
+
+    size_t nMid = n - prefix - suffix;
+    size_t mMid = m - prefix - suffix;
+
+    if (nMid == 0 && mMid == 0) {
+        return {};
+    }
+
+    std::vector<std::vector<uint32_t>> dp(nMid + 1, std::vector<uint32_t>(mMid + 1, 0));
+    for (size_t i = 1; i <= nMid; ++i) {
+        for (size_t j = 1; j <= mMid; ++j) {
+            if (orig[prefix + i - 1] == fmt[prefix + j - 1]) {
+                dp[i][j] = dp[i - 1][j - 1] + 1;
+            } else {
+                dp[i][j] = std::max(dp[i - 1][j], dp[i][j - 1]);
+            }
+        }
+    }
+
+    std::vector<std::pair<size_t, size_t>> matches;
+    size_t i = nMid, j = mMid;
+    while (i > 0 && j > 0) {
+        if (orig[prefix + i - 1] == fmt[prefix + j - 1]) {
+            matches.push_back({prefix + i - 1, prefix + j - 1});
+            i--;
+            j--;
+        } else if (dp[i - 1][j] >= dp[i][j - 1]) {
+            i--;
+        } else {
+            j--;
+        }
+    }
+    std::reverse(matches.begin(), matches.end());
+
+    std::vector<LineDiffChunk> chunks;
+    auto addChunk = [&](size_t oStart, size_t oEnd, size_t fStart, size_t fEnd) {
+        if (oStart == oEnd && fStart == fEnd) return;
+        if (oEnd - oStart == fEnd - fStart) {
+            for (size_t k = 0; k < (oEnd - oStart); ++k) {
+                if (orig[oStart + k] != fmt[fStart + k]) {
+                    chunks.push_back(LineDiffChunk{oStart + k, oStart + k + 1, fStart + k, fStart + k + 1});
+                }
+            }
+        } else {
+            chunks.push_back(LineDiffChunk{oStart, oEnd, fStart, fEnd});
+        }
+    };
+
+    size_t curOrig = prefix;
+    size_t curFmt = prefix;
+
+    for (const auto& match : matches) {
+        if (curOrig < match.first || curFmt < match.second) {
+            addChunk(curOrig, match.first, curFmt, match.second);
+        }
+        curOrig = match.first + 1;
+        curFmt = match.second + 1;
+    }
+
+    if (curOrig < n - suffix || curFmt < m - suffix) {
+        addChunk(curOrig, n - suffix, curFmt, m - suffix);
+    }
+
+    return chunks;
+}
+
+std::string Formatter::formatRange(
+    std::string_view source,
+    size_t startLine,
+    size_t endLine,
+    std::string_view filename,
+    diag::DiagnosticEmitter* emitter
+) {
+    if (source.empty() || startLine > endLine) {
+        return std::string(source);
+    }
+
+    std::string formatted = format(source, filename, emitter);
+    if (emitter && emitter->hasErrors()) {
+        return std::string(source);
+    }
+
+    if (formatted == source) {
+        return formatted;
+    }
+
+    auto splitLines = [](std::string_view text) {
+        std::vector<std::string> lines;
+        std::string current;
+        for (char c : text) {
+            if (c == '\r') continue;
+            if (c == '\n') {
+                lines.push_back(std::move(current));
+                current.clear();
+            } else {
+                current += c;
+            }
+        }
+        if (!current.empty() || (!text.empty() && text.back() != '\n')) {
+            lines.push_back(std::move(current));
+        }
+        return lines;
+    };
+
+    std::vector<std::string> origLines = splitLines(source);
+    std::vector<std::string> fmtLines = splitLines(formatted);
+
+    auto chunks = computeLineDiff(origLines, fmtLines);
+
+    std::string result;
+    size_t curOrig = 0;
+
+    for (const auto& chunk : chunks) {
+        while (curOrig < chunk.origStart) {
+            result += origLines[curOrig] + "\n";
+            curOrig++;
+        }
+
+        bool overlaps = (chunk.origStart <= endLine && chunk.origEnd > startLine);
+
+        if (overlaps) {
+            for (size_t f = chunk.fmtStart; f < chunk.fmtEnd; ++f) {
+                result += fmtLines[f] + "\n";
+            }
+        } else {
+            for (size_t o = chunk.origStart; o < chunk.origEnd; ++o) {
+                result += origLines[o] + "\n";
+            }
+        }
+        curOrig = chunk.origEnd;
+    }
+
+    while (curOrig < origLines.size()) {
+        result += origLines[curOrig] + "\n";
+        curOrig++;
+    }
+
+    if (!source.empty() && source.back() != '\n' && !result.empty() && result.back() == '\n') {
+        result.pop_back();
+    }
+
+    return result;
+}
+
 std::string Formatter::formatModule(
     const parser::ModuleAST& moduleAst,
     const CommentMap& commentMap

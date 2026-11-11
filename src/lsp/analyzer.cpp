@@ -3810,6 +3810,92 @@ std::vector<TextEdit> Analyzer::format(const Document& doc, const FormattingOpti
     return {std::move(edit)};
 }
 
+std::vector<TextEdit> Analyzer::formatRange(
+    const Document& doc,
+    Range range,
+    const FormattingOptions& options
+) {
+    if (doc.text().empty()) {
+        return {};
+    }
+
+    uint32_t startLine = range.start.line;
+    uint32_t endLine = range.end.line;
+
+    if (range.end.character == 0 && endLine > startLine) {
+        endLine = endLine - 1;
+    }
+
+    keety::fmt::FormatterOptions fmtOpts;
+    if (options.tabSize > 0) {
+        fmtOpts.indentWidth = options.tabSize;
+    }
+
+    keety::fmt::Formatter formatter(fmtOpts);
+    diag::SourceManager sm;
+    diag::DiagnosticEmitter emitter(sm);
+
+    std::string formatted = formatter.format(doc.text(), doc.uri(), &emitter);
+    if (emitter.hasErrors() || formatted == doc.text()) {
+        return {};
+    }
+
+    auto splitLines = [](std::string_view text) {
+        std::vector<std::string> lines;
+        std::string current;
+        for (char c : text) {
+            if (c == '\r') continue;
+            if (c == '\n') {
+                lines.push_back(std::move(current));
+                current.clear();
+            } else {
+                current += c;
+            }
+        }
+        if (!current.empty() || (!text.empty() && text.back() != '\n')) {
+            lines.push_back(std::move(current));
+        }
+        return lines;
+    };
+
+    std::vector<std::string> origLines = splitLines(doc.text());
+    std::vector<std::string> fmtLines = splitLines(formatted);
+
+    auto chunks = keety::fmt::Formatter::computeLineDiff(origLines, fmtLines);
+    std::vector<TextEdit> edits;
+
+    for (const auto& chunk : chunks) {
+        bool overlaps = (chunk.origStart <= endLine && chunk.origEnd > startLine);
+        if (!overlaps) {
+            continue;
+        }
+
+        TextEdit edit;
+        edit.range.start = Position{static_cast<uint32_t>(chunk.origStart), 0};
+
+        if (chunk.origEnd < origLines.size()) {
+            edit.range.end = Position{static_cast<uint32_t>(chunk.origEnd), 0};
+        } else {
+            edit.range.end = doc.offsetToPosition(doc.text().size());
+        }
+
+        std::string replacement;
+        for (size_t f = chunk.fmtStart; f < chunk.fmtEnd; ++f) {
+            replacement += fmtLines[f] + "\n";
+        }
+
+        if (chunk.origEnd >= origLines.size() && !doc.text().empty() && doc.text().back() != '\n' &&
+            !replacement.empty() && replacement.back() == '\n') {
+            replacement.pop_back();
+        }
+
+        edit.newText = std::move(replacement);
+        edits.push_back(std::move(edit));
+    }
+
+    return edits;
+}
+
 std::vector<CodeAction> Analyzer::getCodeActions(
     const Document& doc,
     Range range,

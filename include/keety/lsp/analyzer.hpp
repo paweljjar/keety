@@ -50,6 +50,10 @@ public:
     /// Returns a list of TextEdits (empty if already formatted or on syntax errors).
     std::vector<TextEdit> format(const Document& doc, const FormattingOptions& options = {});
 
+    /// Formats a specific range of lines in the document.
+    /// Returns a list of TextEdits representing the formatted range replacement.
+    std::vector<TextEdit> formatRange(const Document& doc, Range range, const FormattingOptions& options = {});
+
     /// Computes Code Actions (Quick Fixes) for the given range in the document.
     std::vector<CodeAction> getCodeActions(const Document& doc, Range range, const std::vector<Diagnostic>& contextDiagnostics = {});
 };

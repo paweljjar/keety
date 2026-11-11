@@ -58,6 +58,7 @@ private:
     JsonValue handleDocumentSymbol(const JsonValue& params);
     JsonValue handleSemanticTokensFull(const JsonValue& params);
     JsonValue handleFormatting(const JsonValue& params);
+    JsonValue handleRangeFormatting(const JsonValue& params);
     JsonValue handleCodeAction(const JsonValue& params);
 
     void publishDiagnostics(const std::string& uri, int32_t version);

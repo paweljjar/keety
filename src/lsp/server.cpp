@@ -111,6 +111,9 @@ std::optional<std::string> Server::handleRawMessage(const std::string& rawJson) 
             } else if (method == "textDocument/formatting") {
                 auto res = handleFormatting(params);
                 return JsonRpcResponse::makeResult(id, res).serialize();
+            } else if (method == "textDocument/rangeFormatting") {
+                auto res = handleRangeFormatting(params);
+                return JsonRpcResponse::makeResult(id, res).serialize();
             } else if (method == "textDocument/codeAction") {
                 auto res = handleCodeAction(params);
                 return JsonRpcResponse::makeResult(id, res).serialize();
@@ -255,6 +258,12 @@ void Server::handleRequest(const RequestId& id, const std::string& method, const
         return;
     }
 
+    if (method == "textDocument/rangeFormatting") {
+        auto res = handleRangeFormatting(params);
+        transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
+        return;
+    }
+
     if (method == "textDocument/codeAction") {
         auto res = handleCodeAction(params);
         transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
@@ -333,6 +342,7 @@ JsonValue Server::handleInitialize(const JsonValue& /*params*/) {
     caps["semanticTokensProvider"] = JsonValue(std::move(semProvider));
 
     caps["documentFormattingProvider"] = JsonValue(true);
+    caps["documentRangeFormattingProvider"] = JsonValue(true);
     caps["codeActionProvider"] = JsonValue(true);
 
     JsonValue::Object serverInfo;
@@ -529,6 +539,21 @@ JsonValue Server::handleFormatting(const JsonValue& params) {
         return JsonValue(std::move(emptyArr));
     }
     auto edits = analyzer_.format(*docOpt, p.options);
+    JsonValue::Array arr;
+    for (const auto& edit : edits) {
+        arr.push_back(edit.toJson());
+    }
+    return JsonValue(std::move(arr));
+}
+
+JsonValue Server::handleRangeFormatting(const JsonValue& params) {
+    auto p = DocumentRangeFormattingParams::fromJson(params);
+    auto docOpt = docManager_.getDocument(p.textDocument.uri);
+    if (!docOpt.has_value()) {
+        JsonValue::Array emptyArr;
+        return JsonValue(std::move(emptyArr));
+    }
+    auto edits = analyzer_.formatRange(*docOpt, p.range, p.options);
     JsonValue::Array arr;
     for (const auto& edit : edits) {
         arr.push_back(edit.toJson());

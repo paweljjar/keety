@@ -15,6 +15,14 @@
 
 namespace keety::fmt {
 
+/// Represents a range of differing lines between original and formatted source code.
+struct LineDiffChunk {
+    size_t origStart = 0;
+    size_t origEnd = 0; // [origStart, origEnd)
+    size_t fmtStart = 0;
+    size_t fmtEnd = 0;  // [fmtStart, fmtEnd)
+};
+
 class Formatter {
 public:
     explicit Formatter(FormatterOptions options = {}) : options_(options) {}
@@ -24,6 +32,21 @@ public:
         std::string_view source,
         std::string_view filename = "<input>",
         diag::DiagnosticEmitter* emitter = nullptr
+    );
+
+    /// Formats a specific range of lines in source code, applying formatted changes only within [startLine, endLine].
+    [[nodiscard]] std::string formatRange(
+        std::string_view source,
+        size_t startLine,
+        size_t endLine,
+        std::string_view filename = "<input>",
+        diag::DiagnosticEmitter* emitter = nullptr
+    );
+
+    /// Computes line-level diff chunks between original and formatted lines using LCS.
+    [[nodiscard]] static std::vector<LineDiffChunk> computeLineDiff(
+        const std::vector<std::string>& orig,
+        const std::vector<std::string>& fmt
     );
 
     /// Formats a parsed ModuleAST with its associated CommentMap into canonical formatted code.

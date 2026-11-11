@@ -734,6 +734,38 @@ DocumentFormattingParams DocumentFormattingParams::fromJson(const JsonValue& j) 
     return p;
 }
 
+JsonValue DocumentRangeFormattingParams::toJson() const {
+    JsonValue::Object obj;
+    JsonValue::Object docObj;
+    docObj["uri"] = JsonValue(textDocument.uri);
+    obj["textDocument"] = JsonValue(std::move(docObj));
+    obj["range"] = range.toJson();
+    JsonValue::Object optObj;
+    optObj["tabSize"] = JsonValue(int64_t(options.tabSize));
+    optObj["insertSpaces"] = JsonValue(options.insertSpaces);
+    optObj["trimTrailingWhitespace"] = JsonValue(options.trimTrailingWhitespace);
+    optObj["insertFinalNewline"] = JsonValue(options.insertFinalNewline);
+    optObj["trimFinalNewlines"] = JsonValue(options.trimFinalNewlines);
+    obj["options"] = JsonValue(std::move(optObj));
+    return JsonValue(std::move(obj));
+}
+
+DocumentRangeFormattingParams DocumentRangeFormattingParams::fromJson(const JsonValue& j) {
+    DocumentRangeFormattingParams p;
+    if (auto* obj = asObject(j)) {
+        if (auto* td = findField(*obj, "textDocument")) {
+            p.textDocument = TextDocumentIdentifier::fromJson(*td);
+        }
+        if (auto* r = findField(*obj, "range")) {
+            p.range = Range::fromJson(*r);
+        }
+        if (auto* o = findField(*obj, "options")) {
+            p.options = FormattingOptions::fromJson(*o);
+        }
+    }
+    return p;
+}
+
 JsonValue TextEdit::toJson() const {
     JsonValue::Object obj;
     obj["range"] = range.toJson();

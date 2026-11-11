@@ -377,6 +377,15 @@ struct DocumentFormattingParams {
     static DocumentFormattingParams fromJson(const JsonValue& j);
 };
 
+struct DocumentRangeFormattingParams {
+    TextDocumentIdentifier textDocument;
+    Range range;
+    FormattingOptions options;
+
+    JsonValue toJson() const;
+    static DocumentRangeFormattingParams fromJson(const JsonValue& j);
+};
+
 struct TextEdit {
     Range range;
     std::string newText;
