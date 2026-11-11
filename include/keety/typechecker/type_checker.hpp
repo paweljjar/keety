@@ -96,6 +96,21 @@ public:
         diag::SourceSpan span,
         std::string_view contextDesc = "");
 
+    // --- Explicit Cast Soundness (E3010) ---
+    [[nodiscard]] bool isValidTypeCast(const TypePtr& source, const TypePtr& target, const sema::Scope& scope) const;
+
+    [[nodiscard]] static diag::Diagnostic createInvalidTypeCastDiagnostic(
+        TypePtr sourceType,
+        TypePtr targetType,
+        diag::SourceSpan span);
+
+    // --- Member Access Validation (E3011) ---
+    [[nodiscard]] static diag::Diagnostic createInvalidMemberAccessDiagnostic(
+        std::string_view targetDesc,
+        std::string_view memberName,
+        diag::SourceSpan span,
+        std::string_view helpSuggestion = "");
+
     // --- Control-Flow Analysis (CFA) & Type Narrowing ---
 
     struct NarrowingFact {
