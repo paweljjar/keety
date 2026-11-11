@@ -102,6 +102,48 @@ TEST_CASE("Server lifecycle and document sync", "[lsp][server]") {
         }
     }
 
+    SECTION("Opening and analyzing main.keet and App.kml simultaneously does not crash") {
+        (void)server.handleRawMessage("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}");
+
+        DocumentManager docMgr;
+        std::string keetCode =
+            "from io import println;\n"
+            "import \"./App.kml\";\n"
+            "fn main(): void {\n"
+            "    let app: App = App();\n"
+            "    println(\"hello\");\n"
+            "}\n";
+        std::string kmlCode =
+            "<script>\n"
+            "let title: string = \"Test\";\n"
+            "</script>\n"
+            "<template>\n"
+            "  <vstack><text>{title}</text></vstack>\n"
+            "</template>\n";
+
+        docMgr.openDocument(TextDocumentItem{"file:///test/main.keet", "keet", 1, keetCode});
+        docMgr.openDocument(TextDocumentItem{"file:///test/App.kml", "kml", 1, kmlCode});
+
+        auto mainDoc = docMgr.getDocument("file:///test/main.keet").value();
+        auto kmlDoc = docMgr.getDocument("file:///test/App.kml").value();
+
+        Analyzer analyzer;
+        // Hover over `app` at line 3 col 8
+        auto hoverApp = analyzer.getHover(mainDoc, Position{3, 8}, &docMgr);
+        CHECK(hoverApp.has_value());
+        if (hoverApp.has_value()) {
+            CHECK(hoverApp->contents.value.find("let app") != std::string::npos);
+            CHECK(hoverApp->contents.value.find("Express-style") == std::string::npos);
+        }
+
+        // Cross-doc references and signature help should not crash
+        (void)analyzer.findReferences(mainDoc, Position{3, 8}, true, &docMgr);
+        (void)analyzer.getSignatureHelp(mainDoc, Position{3, 20}, &docMgr);
+        (void)analyzer.getCodeActions(kmlDoc, Range{Position{0, 0}, Position{2, 0}}, {});
+        (void)analyzer.getHover(kmlDoc, Position{1, 5}, &docMgr);
+        (void)analyzer.getCompletions(kmlDoc, Position{5, 4}, &docMgr);
+    }
+
     SECTION("textDocument didOpen, didChange, and didClose") {
         // Initialize server first
         (void)server.handleRawMessage("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}");

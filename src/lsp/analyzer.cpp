@@ -1429,7 +1429,7 @@ std::vector<Location> Analyzer::findReferences(
                                 std::string uStem = std::filesystem::path(uriToPath(u)).stem().string();
                                 if (uStem == impStem || u.find(impStem) != std::string::npos) {
                                     auto destDoc = docManager->getDocument(u);
-                                    if (destDoc.has_value()) {
+                                    if (destDoc.has_value() && !isKmlDocument(*destDoc)) {
                                         diag::SourceManager dSm;
                                         diag::FileId dFid = dSm.addBuffer(uriToPath(destDoc->uri()), destDoc->text());
                                         diag::DiagnosticEmitter dEmitter(dSm, diag::ColorMode::Never);
@@ -1533,7 +1533,7 @@ std::vector<Location> Analyzer::findReferences(
             for (const auto& u : docManager->openUris()) {
                 if (u != doc.uri()) {
                     auto oDoc = docManager->getDocument(u);
-                    if (oDoc.has_value()) {
+                    if (oDoc.has_value() && !isKmlDocument(*oDoc)) {
                         scanDocForMember(*oDoc);
                     }
                 }
@@ -1590,7 +1590,7 @@ std::vector<Location> Analyzer::findReferences(
             for (const auto& openUri : docManager->openUris()) {
                 if (openUri == doc.uri()) continue;
                 auto otherDocOpt = docManager->getDocument(openUri);
-                if (!otherDocOpt.has_value()) continue;
+                if (!otherDocOpt.has_value() || isKmlDocument(*otherDocOpt)) continue;
                 const auto& otherDoc = *otherDocOpt;
 
                 std::string otherPathStr = uriToPath(otherDoc.uri());
@@ -2181,7 +2181,7 @@ std::optional<SignatureHelp> Analyzer::getSignatureHelp(
                                 std::string uStem = std::filesystem::path(uriToPath(u)).stem().string();
                                 if (uStem == impStem || u.find(impStem) != std::string::npos) {
                                     auto destDoc = docManager->getDocument(u);
-                                    if (destDoc.has_value()) {
+                                    if (destDoc.has_value() && !isKmlDocument(*destDoc)) {
                                         diag::SourceManager dSm;
                                         diag::FileId dFid = dSm.addBuffer(uriToPath(destDoc->uri()), destDoc->text());
                                         diag::DiagnosticEmitter dEmitter(dSm, diag::ColorMode::Never);
@@ -4089,6 +4089,10 @@ std::vector<CodeAction> Analyzer::getCodeActions(
     Range range,
     const std::vector<Diagnostic>& /*contextDiagnostics*/
 ) {
+    if (isKmlDocument(doc)) {
+        return {};
+    }
+
     std::vector<CodeAction> actions;
 
     diag::SourceManager sm;
