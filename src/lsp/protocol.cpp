@@ -433,6 +433,140 @@ RenameParams RenameParams::fromJson(const JsonValue& j) {
     return p;
 }
 
+JsonValue ParameterInformation::toJson() const {
+    JsonValue::Object obj;
+    obj["label"] = JsonValue(label);
+    if (documentation.has_value()) {
+        obj["documentation"] = documentation->toJson();
+    }
+    return JsonValue(std::move(obj));
+}
+
+ParameterInformation ParameterInformation::fromJson(const JsonValue& j) {
+    ParameterInformation pi;
+    if (auto* obj = asObject(j)) {
+        if (auto* l = findField(*obj, "label"); l && l->is_string()) {
+            pi.label = std::get<std::string>(l->value);
+        }
+        if (auto* d = findField(*obj, "documentation")) {
+            if (d->is_string()) {
+                pi.documentation = MarkupContent{"markdown", std::get<std::string>(d->value)};
+            } else if (d->is_object()) {
+                pi.documentation = MarkupContent::fromJson(*d);
+            }
+        }
+    }
+    return pi;
+}
+
+JsonValue SignatureInformation::toJson() const {
+    JsonValue::Object obj;
+    obj["label"] = JsonValue(label);
+    if (documentation.has_value()) {
+        obj["documentation"] = documentation->toJson();
+    }
+    JsonValue::Array paramsArr;
+    paramsArr.reserve(parameters.size());
+    for (const auto& p : parameters) {
+        paramsArr.push_back(p.toJson());
+    }
+    obj["parameters"] = JsonValue(std::move(paramsArr));
+    if (activeParameter.has_value()) {
+        obj["activeParameter"] = JsonValue(int64_t(*activeParameter));
+    }
+    return JsonValue(std::move(obj));
+}
+
+SignatureInformation SignatureInformation::fromJson(const JsonValue& j) {
+    SignatureInformation si;
+    if (auto* obj = asObject(j)) {
+        if (auto* l = findField(*obj, "label"); l && l->is_string()) {
+            si.label = std::get<std::string>(l->value);
+        }
+        if (auto* d = findField(*obj, "documentation")) {
+            if (d->is_string()) {
+                si.documentation = MarkupContent{"markdown", std::get<std::string>(d->value)};
+            } else if (d->is_object()) {
+                si.documentation = MarkupContent::fromJson(*d);
+            }
+        }
+        if (auto* p = findField(*obj, "parameters"); p && p->is_array()) {
+            for (const auto& item : std::get<JsonValue::Array>(p->value)) {
+                si.parameters.push_back(ParameterInformation::fromJson(item));
+            }
+        }
+        if (auto* ap = findField(*obj, "activeParameter")) {
+            if (ap->is_int()) {
+                si.activeParameter = static_cast<uint32_t>(std::get<int64_t>(ap->value));
+            } else if (ap->is_number()) {
+                si.activeParameter = static_cast<uint32_t>(std::get<double>(ap->value));
+            }
+        }
+    }
+    return si;
+}
+
+JsonValue SignatureHelp::toJson() const {
+    JsonValue::Object obj;
+    JsonValue::Array sigsArr;
+    sigsArr.reserve(signatures.size());
+    for (const auto& s : signatures) {
+        sigsArr.push_back(s.toJson());
+    }
+    obj["signatures"] = JsonValue(std::move(sigsArr));
+    obj["activeSignature"] = JsonValue(int64_t(activeSignature));
+    obj["activeParameter"] = JsonValue(int64_t(activeParameter));
+    return JsonValue(std::move(obj));
+}
+
+SignatureHelp SignatureHelp::fromJson(const JsonValue& j) {
+    SignatureHelp sh;
+    if (auto* obj = asObject(j)) {
+        if (auto* s = findField(*obj, "signatures"); s && s->is_array()) {
+            for (const auto& item : std::get<JsonValue::Array>(s->value)) {
+                sh.signatures.push_back(SignatureInformation::fromJson(item));
+            }
+        }
+        if (auto* as = findField(*obj, "activeSignature")) {
+            if (as->is_int()) {
+                sh.activeSignature = static_cast<uint32_t>(std::get<int64_t>(as->value));
+            } else if (as->is_number()) {
+                sh.activeSignature = static_cast<uint32_t>(std::get<double>(as->value));
+            }
+        }
+        if (auto* ap = findField(*obj, "activeParameter")) {
+            if (ap->is_int()) {
+                sh.activeParameter = static_cast<uint32_t>(std::get<int64_t>(ap->value));
+            } else if (ap->is_number()) {
+                sh.activeParameter = static_cast<uint32_t>(std::get<double>(ap->value));
+            }
+        }
+    }
+    return sh;
+}
+
+JsonValue SignatureHelpParams::toJson() const {
+    JsonValue::Object obj;
+    JsonValue::Object docObj;
+    docObj["uri"] = JsonValue(textDocument.uri);
+    obj["textDocument"] = JsonValue(std::move(docObj));
+    obj["position"] = position.toJson();
+    return JsonValue(std::move(obj));
+}
+
+SignatureHelpParams SignatureHelpParams::fromJson(const JsonValue& j) {
+    SignatureHelpParams p;
+    if (auto* obj = asObject(j)) {
+        if (auto* docNode = findField(*obj, "textDocument")) {
+            p.textDocument = TextDocumentIdentifier::fromJson(*docNode);
+        }
+        if (auto* posNode = findField(*obj, "position")) {
+            p.position = Position::fromJson(*posNode);
+        }
+    }
+    return p;
+}
+
 JsonValue PublishDiagnosticsParams::toJson() const {
     JsonValue::Object obj;
     obj["uri"] = JsonValue(uri);

@@ -293,6 +293,41 @@ struct RenameParams {
     static RenameParams fromJson(const JsonValue& j);
 };
 
+struct ParameterInformation {
+    std::string label;
+    std::optional<MarkupContent> documentation;
+
+    JsonValue toJson() const;
+    static ParameterInformation fromJson(const JsonValue& j);
+};
+
+struct SignatureInformation {
+    std::string label;
+    std::optional<MarkupContent> documentation;
+    std::vector<ParameterInformation> parameters;
+    std::optional<uint32_t> activeParameter;
+
+    JsonValue toJson() const;
+    static SignatureInformation fromJson(const JsonValue& j);
+};
+
+struct SignatureHelp {
+    std::vector<SignatureInformation> signatures;
+    uint32_t activeSignature = 0;
+    uint32_t activeParameter = 0;
+
+    JsonValue toJson() const;
+    static SignatureHelp fromJson(const JsonValue& j);
+};
+
+struct SignatureHelpParams {
+    TextDocumentIdentifier textDocument;
+    Position position;
+
+    JsonValue toJson() const;
+    static SignatureHelpParams fromJson(const JsonValue& j);
+};
+
 struct PublishDiagnosticsParams {
     std::string uri;
     std::optional<int32_t> version;

@@ -1816,6 +1816,371 @@ std::optional<WorkspaceEdit> Analyzer::renameSymbol(
     return edit;
 }
 
+static std::string trimWhitespace(std::string_view s) {
+    size_t start = 0;
+    while (start < s.size() && (s[start] == ' ' || s[start] == '\t' || s[start] == '\r' || s[start] == '\n')) {
+        start++;
+    }
+    size_t end = s.size();
+    while (end > start && (s[end - 1] == ' ' || s[end - 1] == '\t' || s[end - 1] == '\r' || s[end - 1] == '\n')) {
+        end--;
+    }
+    return std::string(s.substr(start, end - start));
+}
+
+static SignatureInformation buildFnSignatureInfo(const ast::FnDecl* fnDecl, const std::string& source) {
+    SignatureInformation sig;
+    std::string sigStr = (fnDecl->isExported() ? "export " : "");
+    if (fnDecl->isAsync()) sigStr += "async ";
+    sigStr += "fn " + fnDecl->getName() + "(";
+    for (size_t i = 0; i < fnDecl->getParams().size(); ++i) {
+        if (i > 0) sigStr += ", ";
+        const auto& p = fnDecl->getParams()[i];
+        std::string pStr = (p.isMut ? "mut " : "") + p.name + ": " + formatType(p.type.get(), "any");
+        sigStr += pStr;
+        ParameterInformation pi;
+        pi.label = pStr;
+        sig.parameters.push_back(std::move(pi));
+    }
+    sigStr += "): " + formatType(fnDecl->getReturnType(), "void");
+    sig.label = std::move(sigStr);
+
+    std::string doc = extractDocComments(source, fnDecl->getSpan().start.offset);
+    if (!doc.empty()) {
+        sig.documentation = MarkupContent{"markdown", std::move(doc)};
+    }
+    return sig;
+}
+
+static SignatureInformation buildClassConstructorSignatureInfo(const ast::ClassDecl* cd, const std::string& source) {
+    SignatureInformation sig;
+    std::string sigStr = (cd->isExported() ? "export " : "");
+    sigStr += cd->getName() + "(";
+    for (size_t i = 0; i < cd->getFields().size(); ++i) {
+        if (i > 0) sigStr += ", ";
+        const auto& f = cd->getFields()[i];
+        std::string pStr = f.name + ": " + formatType(f.type.get(), "any");
+        sigStr += pStr;
+        ParameterInformation pi;
+        pi.label = pStr;
+        sig.parameters.push_back(std::move(pi));
+    }
+    sigStr += ")";
+    sig.label = std::move(sigStr);
+
+    std::string doc = extractDocComments(source, cd->getSpan().start.offset);
+    if (!doc.empty()) {
+        sig.documentation = MarkupContent{"markdown", std::move(doc)};
+    } else {
+        sig.documentation = MarkupContent{"markdown", "Constructor for class `" + cd->getName() + "`"};
+    }
+    return sig;
+}
+
+static std::optional<SignatureInformation> parseStdlibSignatureInfo(const StdlibDoc& stdDoc) {
+    size_t openParen = stdDoc.signature.find('(');
+    if (openParen == std::string::npos) {
+        return std::nullopt;
+    }
+    size_t closeParen = stdDoc.signature.rfind(')');
+    if (closeParen == std::string::npos || closeParen <= openParen) {
+        return std::nullopt;
+    }
+
+    SignatureInformation sig;
+    sig.label = stdDoc.signature;
+    if (!stdDoc.doc.empty()) {
+        sig.documentation = MarkupContent{"markdown", stdDoc.doc};
+    }
+
+    std::string cur;
+    int depth = 0;
+    for (size_t i = openParen + 1; i < closeParen; ++i) {
+        char c = stdDoc.signature[i];
+        if (c == '<' || c == '(' || c == '[' || c == '{') {
+            depth++;
+            cur += c;
+        } else if (c == '>' || c == ')' || c == ']' || c == '}') {
+            depth--;
+            cur += c;
+        } else if (c == ',' && depth == 0) {
+            std::string trimmed = trimWhitespace(cur);
+            if (!trimmed.empty()) {
+                sig.parameters.push_back(ParameterInformation{std::move(trimmed), std::nullopt});
+            }
+            cur.clear();
+        } else {
+            cur += c;
+        }
+    }
+    std::string trimmed = trimWhitespace(cur);
+    if (!trimmed.empty()) {
+        sig.parameters.push_back(ParameterInformation{std::move(trimmed), std::nullopt});
+    }
+
+    return sig;
+}
+
+std::optional<SignatureHelp> Analyzer::getSignatureHelp(
+    const Document& doc,
+    Position pos,
+    const DocumentManager* docManager
+) {
+    auto byteOffsetOpt = doc.positionToOffset(pos);
+    if (!byteOffsetOpt.has_value()) {
+        return std::nullopt;
+    }
+    size_t targetOffset = *byteOffsetOpt;
+
+    diag::SourceManager sm;
+    std::string pathStr = uriToPath(doc.uri());
+    diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
+
+    lexer::Lexer lexer(fileId, doc.text());
+    auto tokens = lexer.tokenizeAll();
+
+    struct DelimEntry {
+        lexer::TokenKind kind;
+        bool isCall = false;
+        std::string callee;
+        std::string receiver;
+        uint32_t commaCount = 0;
+    };
+
+    std::vector<DelimEntry> stack;
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        const auto& tok = tokens[i];
+        if (tok.span.start.offset >= targetOffset) {
+            break;
+        }
+
+        if (tok.is(lexer::TokenKind::LParen)) {
+            bool isCall = false;
+            std::string callee;
+            std::string receiver;
+
+            if (i > 0 && tokens[i - 1].is(lexer::TokenKind::Identifier)) {
+                bool isDef = false;
+                if (i >= 2 && tokens[i - 2].is(lexer::TokenKind::KwFn)) {
+                    isDef = true;
+                }
+                if (!isDef) {
+                    isCall = true;
+                    callee = std::string(tokens[i - 1].lexeme);
+                    if (i >= 3 && tokens[i - 2].is(lexer::TokenKind::Dot)) {
+                        if (tokens[i - 3].is(lexer::TokenKind::Identifier)) {
+                            receiver = std::string(tokens[i - 3].lexeme);
+                        } else if (tokens[i - 3].is(lexer::TokenKind::KwThis)) {
+                            receiver = "this";
+                        }
+                    }
+                }
+            }
+            stack.push_back(DelimEntry{tok.kind, isCall, std::move(callee), std::move(receiver), 0});
+        } else if (tok.is(lexer::TokenKind::LBracket) || tok.is(lexer::TokenKind::LBrace)) {
+            stack.push_back(DelimEntry{tok.kind, false, "", "", 0});
+        } else if (tok.is(lexer::TokenKind::RParen)) {
+            while (!stack.empty() && stack.back().kind != lexer::TokenKind::LParen) {
+                stack.pop_back();
+            }
+            if (!stack.empty() && stack.back().kind == lexer::TokenKind::LParen) {
+                stack.pop_back();
+            }
+        } else if (tok.is(lexer::TokenKind::RBracket)) {
+            while (!stack.empty() && stack.back().kind != lexer::TokenKind::LBracket) {
+                stack.pop_back();
+            }
+            if (!stack.empty() && stack.back().kind == lexer::TokenKind::LBracket) {
+                stack.pop_back();
+            }
+        } else if (tok.is(lexer::TokenKind::RBrace)) {
+            while (!stack.empty() && stack.back().kind != lexer::TokenKind::LBrace) {
+                stack.pop_back();
+            }
+            if (!stack.empty() && stack.back().kind == lexer::TokenKind::LBrace) {
+                stack.pop_back();
+            }
+        } else if (tok.is(lexer::TokenKind::Comma)) {
+            if (!stack.empty()) {
+                stack.back().commaCount++;
+            }
+        }
+    }
+
+    const DelimEntry* activeCall = nullptr;
+    for (auto it = stack.rbegin(); it != stack.rend(); ++it) {
+        if (it->isCall) {
+            activeCall = &(*it);
+            break;
+        }
+    }
+    if (!activeCall) {
+        return std::nullopt;
+    }
+
+    uint32_t activeParamIdx = activeCall->commaCount;
+    const std::string& calleeName = activeCall->callee;
+    const std::string& receiverName = activeCall->receiver;
+
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+
+    diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+    lexer::Lexer pLexer(fileId, doc.text());
+    parser::Parser parser(pLexer, &emitter);
+    auto ast = parser.parseModule(moduleName);
+
+    std::optional<SignatureInformation> foundSig;
+
+    // 1. If receiver is specified:
+    if (!receiverName.empty()) {
+        if (receiverName == "this") {
+            for (const auto& decl : ast.declarations) {
+                if (!decl) continue;
+                if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                    if (targetOffset >= cd->getSpan().start.offset && targetOffset <= cd->getSpan().end.offset) {
+                        for (const auto& method : cd->getMethods()) {
+                            if (method && method->getName() == calleeName) {
+                                foundSig = buildFnSignatureInfo(method.get(), doc.text());
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (foundSig.has_value()) break;
+            }
+        } else {
+            std::string className = findReceiverClassName(ast, receiverName, targetOffset);
+            if (!className.empty()) {
+                for (const auto& decl : ast.declarations) {
+                    if (!decl) continue;
+                    if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                        if (cd->getName() == className) {
+                            for (const auto& method : cd->getMethods()) {
+                                if (method && method->getName() == calleeName) {
+                                    foundSig = buildFnSignatureInfo(method.get(), doc.text());
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (foundSig.has_value()) break;
+                }
+            }
+
+            // Check if receiver is stdlib module or member e.g. "fs.readFile" or just "readFile"
+            if (!foundSig.has_value()) {
+                if (auto stdDoc = getStdlibMemberDoc(receiverName + "." + calleeName); stdDoc.has_value()) {
+                    foundSig = parseStdlibSignatureInfo(*stdDoc);
+                } else if (auto stdDoc2 = getStdlibMemberDoc(calleeName); stdDoc2.has_value()) {
+                    foundSig = parseStdlibSignatureInfo(*stdDoc2);
+                }
+            }
+        }
+    } else {
+        // Receiver is empty.
+        // A. Check enclosing class method if cursor is inside a class
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                if (targetOffset >= cd->getSpan().start.offset && targetOffset <= cd->getSpan().end.offset) {
+                    for (const auto& method : cd->getMethods()) {
+                        if (method && method->getName() == calleeName) {
+                            foundSig = buildFnSignatureInfo(method.get(), doc.text());
+                            break;
+                        }
+                    }
+                }
+            }
+            if (foundSig.has_value()) break;
+        }
+
+        // B. Check top-level functions and class constructors
+        if (!foundSig.has_value()) {
+            for (const auto& decl : ast.declarations) {
+                if (!decl) continue;
+                if (const auto* fn = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                    if (fn->getName() == calleeName) {
+                        foundSig = buildFnSignatureInfo(fn, doc.text());
+                        break;
+                    }
+                } else if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                    if (cd->getName() == calleeName) {
+                        foundSig = buildClassConstructorSignatureInfo(cd, doc.text());
+                        break;
+                    }
+                }
+            }
+        }
+
+        // C. Check imported symbols across documents
+        if (!foundSig.has_value() && docManager) {
+            for (const auto& decl : ast.declarations) {
+                if (!decl) continue;
+                if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+                    for (const auto& sym : imp->getSymbols()) {
+                        if (sym.getEffectiveName() == calleeName) {
+                            std::string impPath = imp->getModulePath();
+                            std::string impStem = std::filesystem::path(impPath).stem().string();
+                            for (const auto& u : docManager->openUris()) {
+                                if (u == doc.uri()) continue;
+                                std::string uStem = std::filesystem::path(uriToPath(u)).stem().string();
+                                if (uStem == impStem || u.find(impStem) != std::string::npos) {
+                                    auto destDoc = docManager->getDocument(u);
+                                    if (destDoc.has_value()) {
+                                        diag::SourceManager dSm;
+                                        diag::FileId dFid = dSm.addBuffer(uriToPath(destDoc->uri()), destDoc->text());
+                                        diag::DiagnosticEmitter dEmitter(dSm, diag::ColorMode::Never);
+                                        lexer::Lexer dLexer(dFid, destDoc->text());
+                                        parser::Parser dParser(dLexer, &dEmitter);
+                                        auto dAst = dParser.parseModule(uStem);
+                                        for (const auto& dDecl : dAst.declarations) {
+                                            if (!dDecl) continue;
+                                            if (const auto* fn = dynamic_cast<const ast::FnDecl*>(dDecl.get())) {
+                                                if (fn->getName() == sym.originalName) {
+                                                    foundSig = buildFnSignatureInfo(fn, destDoc->text());
+                                                    break;
+                                                }
+                                            } else if (const auto* cls = dynamic_cast<const ast::ClassDecl*>(dDecl.get())) {
+                                                if (cls->getName() == sym.originalName) {
+                                                    foundSig = buildClassConstructorSignatureInfo(cls, destDoc->text());
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                if (foundSig.has_value()) break;
+                            }
+                        }
+                        if (foundSig.has_value()) break;
+                    }
+                }
+                if (foundSig.has_value()) break;
+            }
+        }
+
+        // D. Check standard library built-in functions
+        if (!foundSig.has_value()) {
+            if (auto stdDoc = getStdlibMemberDoc(calleeName); stdDoc.has_value()) {
+                foundSig = parseStdlibSignatureInfo(*stdDoc);
+            }
+        }
+    }
+
+    if (!foundSig.has_value()) {
+        return std::nullopt;
+    }
+
+    foundSig->activeParameter = activeParamIdx;
+
+    SignatureHelp help;
+    help.activeSignature = 0;
+    help.activeParameter = activeParamIdx;
+    help.signatures.push_back(std::move(*foundSig));
+    return help;
+}
+
 std::optional<Hover> Analyzer::getHover(
     const Document& doc,
     Position pos,
