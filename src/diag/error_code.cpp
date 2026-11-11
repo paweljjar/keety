@@ -76,6 +76,11 @@ ErrorCodeInfo getErrorCodeInfo(ErrorCode code) noexcept {
     KEETY_ERROR_ENTRY(ExternSymbolNotFound, 6001, "E6001", "extern symbol not found", "Could not locate the declared extern symbol in linked libraries.")
     KEETY_ERROR_ENTRY(IncompatibleFFIType, 6002, "E6002", "incompatible FFI type", "The specified type cannot be safely passed across the native C ABI.")
     KEETY_ERROR_ENTRY(InvalidLinkageSpecification, 6003, "E6003", "invalid linkage specification", "The extern linkage convention is unsupported or malformed.")
+
+    // E7000 - E7999: Backend & Toolchain Diagnostics
+    KEETY_ERROR_ENTRY(BackendCompilationError, 7001, "E7001", "backend compilation failed", "Host C++ toolchain reported a compilation error while compiling generated code.")
+    KEETY_ERROR_ENTRY(BackendTemplateInstantiation, 7002, "E7002", "template instantiation failed", "Host C++ toolchain failed while instantiating standard library or runtime templates.")
+    KEETY_ERROR_ENTRY(BackendCodegenConstraint, 7003, "E7003", "codegen constraint violation", "Generated native code violated backend platform or compiler constraints.")
     }
 
     return ErrorCodeInfo{"E9999", "unknown error", "An unrecognized compiler error occurred."};
