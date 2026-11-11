@@ -42,6 +42,7 @@ flowchart TD
             B1_7["Multi-User Server-Push & Shared Store (std::ui)"]
             B1_8["Input & Scrollable Containers (.kml)"]
             B1_9["Mobile App Build Support (Android & iOS)"]
+            B1_10["KeetScript-Native Error Diagnostics"]
         end
         subgraph B2["B2: Mid-Term"]
             B2_1["Debug Adapter Protocol (keet-dap)"]
@@ -238,6 +239,12 @@ Active development backlog organized by implementation priority and time horizon
   - Mobile runtime lifecycle binding (Android `NativeActivity` / JNI bridge and iOS `UIApplicationDelegate` / `UIWindow`).
   - Touch input & multi-touch gestures, screen orientation, DPI display scaling, and safe area insets integration with `std::ui` and `.kml`.
   - One-command deployment and log streaming to connected mobile devices and simulators/emulators (`keety run --target=ios|android`).
+
+- **KeetScript-Native Error Diagnostics & Backend Compiler Error Remapping**
+  - Comprehensive front-end validation ensuring 100% of user errors are caught at sema/typecheck phase to eliminate unexpected C++ backend failures.
+  - Diagnostic remapping layer translating raw host C++ compiler and linker diagnostics back to originating `.keet` source lines, symbols, and spans via `#line` maps.
+  - Consistent KeetScript error formatting (source squiggles, error codes, actionable fix suggestions) while suppressing internal C++ STL templates and macro backtraces.
+  - Elimination of the generic `"Run with '--verbose-cpp' or '--verbose' to view raw backend compiler backtrace"` prompt during standard compile failures.
 
 ---
 
