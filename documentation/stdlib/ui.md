@@ -26,8 +26,20 @@ from "ui" import Component, HeadlessBackend, TuiBackend, WebVdomBackend;
 
 ### Importing `.kml` Single-File Components
 
-A `.kml` component file (e.g., `Counter.kml`) compiles into an exported class matching the file's stem (`Counter`) that inherits from `ui.Component`. You can import `.kml` components directly using a relative path import:
+A `.kml` component file (e.g., `App.kml` or `Counter.kml`) compiles into an exported class matching the file's stem (`App`, `Counter`) that inherits from `ui.Component`. You can import `.kml` components directly using relative path imports and run them either as a **native desktop OS application** or as an **HTTP LiveView web application**:
 
+#### 1. Native Desktop GUI Application:
+```keet
+import "./App.kml";
+from ui import renderDesktop;
+
+fn main(): void {
+    let app: App = App();
+    renderDesktop(app, "KeetScript Desktop App", 800, 600);
+}
+```
+
+#### 2. Web LiveView Application (`http.serveUi`):
 ```keet
 import "./Counter.kml";
 import http;
@@ -242,7 +254,51 @@ Base class for all compiled `.kml` components and custom components.
 
 ## 7. Multi-Target Rendering Backends
 
-### 7.1 Web Virtual DOM & HTTP LiveView (`ui.WebVdomBackend` & `server.serveUi`)
+### 7.1 Native Desktop GUI Application (`ui.renderDesktop` & `ui.mountDesktop`)
+
+KeetScript features a native, zero-dependency desktop GUI rendering engine. Rather than embedding Chromium, WebViews, or Electron, `ui` compiles directly into native C++20 code that creates operating system windows and renders the component hierarchy via an antialiased 2D software rasterizer onto an RGBA framebuffer.
+
+```keet
+from io import println;
+from ui import renderDesktop;
+import "./App.kml";
+
+fn main(): void {
+    println("Launching native desktop GUI application...");
+    let app: App = App();
+    renderDesktop(app, "KeetScript Desktop Application", 800, 600);
+}
+```
+
+#### Key Architecture & Capabilities:
+- **Direct Native OS Windowing:**
+  - **macOS:** Pure Cocoa window and view management via direct Objective-C runtime bindings (`NSApplication`, `NSWindow`, `NSView`, and CoreGraphics backing context).
+  - **Windows:** Native Win32 API (`CreateWindowEx`, GDI DIB sections, message pump).
+  - **Linux:** X11 / Wayland integration via dynamic loader.
+- **High-DPI & Retina Scaling:** Automatically detects the display's backing scale factor (e.g. `2.0x` scaling on Apple Retina displays) and scales drawing buffers, geometry calculations, and rasterization coordinates with subpixel clarity.
+- **Custom Vector Font Engine (`ui.loadFont`):**
+  ```keet
+  ui.loadFont("Inter", "./fonts/Inter-Regular.ttf");
+  ```
+  Registers TrueType/OpenType vector fonts for crisp typography rendering across UI elements.
+- **Spatial Hit-Testing Engine:** Traverses the component scene graph in reverse Z-order to dispatch mouse click, hover, and movement events to the exact target node.
+- **Smooth Viewport Scrolling (`<scroll>`):** Interactive mouse-wheel events automatically scroll content within `<scroll>` containers with boundary clamping and clipping.
+- **Focus & Keyboard Navigation:**
+  - Interactive `<input>` elements support text typing, backspace, and cursor navigation.
+  - Tab cycling across focusable nodes.
+  - Keyboard shortcuts (e.g., `Cmd+Q` / `Alt+F4` to exit, `Enter` / `Space` on active buttons).
+- **Reactive Event Loop:** Mutations to reactive `$state(...)` variables trigger surgical bitmask-driven updates and immediately re-render dirty regions without flickering.
+
+#### API Reference:
+| Function | Signature | Description |
+| :--- | :--- | :--- |
+| `ui.renderDesktop` | `renderDesktop(root: Component, title?: string, width?: int, height?: int): void` | Mounts the root component into a native OS window and runs the interactive desktop event loop until the window is closed |
+| `ui.mountDesktop` | `mountDesktop(root: Component, width?: int, height?: int, dpiScale?: float): DesktopBackend` | Mounts the root component onto a desktop raster backend without showing a window (ideal for offscreen rendering or custom loops) |
+| `ui.loadFont` | `loadFont(family: string, path: string): bool` | Loads a TTF/OTF vector font and registers it under the given font family name |
+
+---
+
+### 7.2 Web Virtual DOM & HTTP LiveView (`ui.WebVdomBackend` & `server.serveUi`)
 
 The `ui` engine integrates directly with the `http` server module via `server.serveUi(route, factory, title?, scopedCss?)`. Each connected browser tab receives:
 1. Server-Side Rendered (SSR) initial HTML (`WebVdomBackend::renderDocument`).
@@ -265,14 +321,14 @@ fn main(): int {
 }
 ```
 
-### 7.2 Terminal User Interface (`ui.TuiBackend`)
+### 7.3 Terminal User Interface (`ui.TuiBackend`)
 
 Renders a `Component` or `UINode` scene graph directly to an interactive ANSI/VT100 terminal screen using a double-buffered Unicode character grid, Constraint/Flexbox layout solver (`FlexboxEngine`), and keyboard/mouse input parser (`TuiInputParser`):
 
 - **`TuiBackend(width: int, height: int)`**: Creates a TUI renderer for the given terminal dimensions.
 - **`backend.renderFrame(root: UINode): string`**: Computes Flexbox layout, rasterizes box-drawing borders and text cells into the back buffer, diffs against the front buffer, and returns the minimal ANSI escape sequence diff string.
 
-### 7.3 Headless Test Backend (`ui.HeadlessBackend`)
+### 7.4 Headless Test Backend (`ui.HeadlessBackend`)
 
 Provides a deterministic, zero-display test harness for unit testing `.kml` components in `test` suites:
 

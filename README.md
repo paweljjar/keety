@@ -18,6 +18,7 @@ KeetScript bridges the gap between high-level scripting ergonomics and raw syste
 - **First-Class Union Types & Flow Narrowing:** Algebraic union types (`int | string | null`) with canonical normalization and control-flow type narrowing (`typeof(x) == "int"`, `x != null`) guarded by a mutation watcher.
 - **Ergonomic Error Recovery (`zonk`):** Handle fallible operations inline with fallback expressions (`expr zonk fallback`) or scoped recovery blocks (`expr zonk (err) { ... }`).
 - **Strict Soundness Guarantees:** Mandatory explicit type annotations on declarations, zero implicit numeric/truthy coercion, strict no-shadowing enforcement, and deterministic 64-bit two's-complement arithmetic.
+- **Native Desktop GUI & Multi-Target UI:** Build reactive `.kml` Single-File Components that compile to zero-dependency native desktop OS windows (Cocoa on macOS, Win32 on Windows, X11 on Linux) with sub-millisecond software rasterization, HiDPI Retina support, and zero Electron/WebView bloat. Also targets Web VDOM LiveView and ANSI terminals.
 - **6-Stage Optimizing Pipeline:** Includes Tarjan SCC circular dependency detection, topological module initialization, liveness analysis, automatic last-use `std::move` insertion, and recursive union boxing.
 - **IDE-Grade Diagnostics & Tooling:** Rich, colored, multi-line terminal diagnostics in the style of Rust and Elm, with source spans, Levenshtein "Did you mean?" suggestions and Quick Fix hints; machine-readable JSON output (`--json-diagnostics`); and an official Visual Studio Code extension.
 
@@ -237,7 +238,7 @@ from "io" import print;
 | **`sys`** | `import sys;` | Command-line arguments (`args`), environment variables (`getEnv`, `getEnvOr`, `setEnv`, `unsetEnv`, `hasEnv`), process exit, and platform metadata |
 | **`test`** | `import test;` | Unit testing suites (`suite`), test cases (`case`), deep equality assertions (`assertEq`), and exception assertions (`assertZonks`) |
 | **`time`** | `import time;` | Monotonic high-resolution timers (`nowNs`, `nowMs`), wall-clock timestamps, calendar formatting, and thread sleep (`sleepMs`) |
-| **`ui`** | `import ui;` | Compile-time reactive UI engine for `.kml` Single-File Components (`$state`, `$derived`, `$effect`), Scene Graph nodes, TUI, Web VDOM, and Headless backends |
+| **`ui`** | `import ui;` | Compile-time reactive UI engine for `.kml` Single-File Components (`$state`, `$derived`, `$effect`), Native Desktop OS Windows (Cocoa/Win32/X11), Web VDOM LiveView, TUI, and Headless backends |
 
 ---
 
