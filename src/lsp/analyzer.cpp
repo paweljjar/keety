@@ -20,6 +20,7 @@
 #include <keety/lint/lint_engine.hpp>
 #include <keety/typechecker/type_checker.hpp>
 
+#include <iostream>
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -43,6 +44,16 @@ std::string uriToPath(const std::string& uri) {
         return path;
     }
     return uri;
+}
+
+bool isKmlDocument(const Document& doc) {
+    std::string pathStr = uriToPath(doc.uri());
+    std::filesystem::path fsPath(pathStr);
+    return fsPath.extension() == ".kml" || doc.languageId() == "kml";
+}
+
+std::string pathToUri(const std::filesystem::path& p) {
+    return "file://" + p.generic_string();
 }
 
 Range spanToRange(const Document& doc, const diag::SourceSpan& span) {
@@ -1006,6 +1017,10 @@ std::optional<Location> Analyzer::findDefinition(
     }
     size_t targetOffset = *byteOffsetOpt;
 
+    if (isKmlDocument(doc)) {
+        return findKmlDefinition(doc, pos, targetOffset, docManager);
+    }
+
     diag::SourceManager sm;
     std::string pathStr = uriToPath(doc.uri());
     diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
@@ -1191,6 +1206,10 @@ std::vector<Location> Analyzer::findReferences(
     bool includeDeclaration,
     const DocumentManager* docManager
 ) {
+    if (isKmlDocument(doc)) {
+        return {};
+    }
+
     auto byteOffsetOpt = doc.positionToOffset(pos);
     if (!byteOffsetOpt.has_value()) {
         return {};
@@ -1678,6 +1697,10 @@ std::optional<PrepareRenameResult> Analyzer::prepareRename(
     Position pos,
     const DocumentManager* docManager
 ) {
+    if (isKmlDocument(doc)) {
+        return std::nullopt;
+    }
+
     auto byteOffsetOpt = doc.positionToOffset(pos);
     if (!byteOffsetOpt.has_value()) {
         return std::nullopt;
@@ -1936,6 +1959,10 @@ std::optional<SignatureHelp> Analyzer::getSignatureHelp(
     Position pos,
     const DocumentManager* docManager
 ) {
+    if (isKmlDocument(doc)) {
+        return std::nullopt;
+    }
+
     auto byteOffsetOpt = doc.positionToOffset(pos);
     if (!byteOffsetOpt.has_value()) {
         return std::nullopt;
@@ -2211,13 +2238,17 @@ std::optional<SignatureHelp> Analyzer::getSignatureHelp(
 std::optional<Hover> Analyzer::getHover(
     const Document& doc,
     Position pos,
-    const DocumentManager* /*docManager*/
+    const DocumentManager* docManager
 ) {
     auto byteOffsetOpt = doc.positionToOffset(pos);
     if (!byteOffsetOpt.has_value()) {
         return std::nullopt;
     }
     size_t targetOffset = *byteOffsetOpt;
+
+    if (isKmlDocument(doc)) {
+        return getKmlHover(doc, pos, targetOffset, docManager);
+    }
 
     diag::SourceManager sm;
     std::string pathStr = uriToPath(doc.uri());
@@ -2505,9 +2536,82 @@ std::optional<Hover> Analyzer::getHover(
     }
 
     // 3e. Standard Library Built-in Functions/Constants
-    if (auto stdDoc = getStdlibMemberDoc(ident); stdDoc.has_value()) {
-        std::string content = "```keet\n" + stdDoc->signature + "\n```\n" + stdDoc->doc;
-        return Hover{MarkupContent{"markdown", std::move(content)}, tokRange};
+    // Check if ident is part of member access (receiver.ident)
+    std::string receiverName;
+    for (size_t i = 1; i < tokens.size(); ++i) {
+        if (&tokens[i] == targetTok && tokens[i - 1].is(lexer::TokenKind::Dot) && i >= 2 && tokens[i - 2].is(lexer::TokenKind::Identifier)) {
+            receiverName = std::string(tokens[i - 2].lexeme);
+            break;
+        }
+    }
+
+    if (!receiverName.empty()) {
+        if (sema::isStdlibModule(receiverName)) {
+            auto scope = sema::createStdlibModuleScope(receiverName);
+            if (scope && scope->lookup(ident)) {
+                if (auto stdDoc = getStdlibMemberDoc(receiverName + "." + ident); stdDoc.has_value()) {
+                    std::string content = "```keet\n" + stdDoc->signature + "\n```\n" + stdDoc->doc +
+                                          "\n\n*Exported member of standard library module `" + receiverName + "`*";
+                    return Hover{MarkupContent{"markdown", std::move(content)}, tokRange};
+                } else if (auto stdDoc2 = getStdlibMemberDoc(ident); stdDoc2.has_value()) {
+                    std::string content = "```keet\n" + stdDoc2->signature + "\n```\n" + stdDoc2->doc +
+                                          "\n\n*Exported member of standard library module `" + receiverName + "`*";
+                    return Hover{MarkupContent{"markdown", std::move(content)}, tokRange};
+                }
+            }
+        }
+    } else {
+        // Bare identifier: ONLY match stdlib if explicitly imported or predeclared universe builtin
+        bool isImportedSymbol = false;
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+                for (const auto& sym : imp->getSymbols()) {
+                    if (sym.getEffectiveName() == ident) {
+                        isImportedSymbol = true;
+                        break;
+                    }
+                }
+            }
+            if (isImportedSymbol) break;
+        }
+
+        bool isUniverseBuiltin = (ident == "println" || ident == "print" || ident == "eprint" ||
+                                  ident == "eprintln" || ident == "panic" || ident == "assert" ||
+                                  ident == "len" || ident == "typeof" || ident == "readln" ||
+                                  ident == "readLine");
+
+        if (isImportedSymbol || isUniverseBuiltin) {
+            if (auto stdDoc = getStdlibMemberDoc(ident); stdDoc.has_value()) {
+                std::string content = "```keet\n" + stdDoc->signature + "\n```\n" + stdDoc->doc;
+                return Hover{MarkupContent{"markdown", std::move(content)}, tokRange};
+            }
+        }
+
+        // Syntactic fallback: search document lines for local variable declaration when AST parse failed due to incomplete syntax
+        std::string patternLet = "let " + ident;
+        std::string patternMut = "mut " + ident;
+        std::string patternConst = "const " + ident;
+        std::istringstream stream(doc.text());
+        std::string line;
+        while (std::getline(stream, line)) {
+            size_t pLet = line.find(patternLet);
+            size_t pMut = line.find(patternMut);
+            size_t pConst = line.find(patternConst);
+            size_t matchPos = (pLet != std::string::npos) ? pLet : (pMut != std::string::npos ? pMut : pConst);
+            if (matchPos != std::string::npos) {
+                size_t afterIdent = matchPos + (pLet != std::string::npos ? patternLet.size() : (pMut != std::string::npos ? patternMut.size() : patternConst.size()));
+                if (afterIdent < line.size() && (std::isalnum(static_cast<unsigned char>(line[afterIdent])) || line[afterIdent] == '_')) {
+                    continue;
+                }
+                size_t semi = line.find(';', matchPos);
+                std::string declStr = (semi != std::string::npos) ? line.substr(matchPos, semi - matchPos) : line.substr(matchPos);
+                size_t eqPos = declStr.find('=');
+                std::string sig = (eqPos != std::string::npos) ? declStr.substr(0, eqPos) : declStr;
+                while (!sig.empty() && (sig.back() == ' ' || sig.back() == '\t')) sig.pop_back();
+                return Hover{MarkupContent{"markdown", "```keet\n" + sig + "\n```\n*Local variable declaration*"}, tokRange};
+            }
+        }
     }
 
     return std::nullopt;
@@ -2529,6 +2633,10 @@ CompletionList Analyzer::getCompletions(
     const std::string& text = doc.text();
     if (targetOffset > text.size()) {
         targetOffset = text.size();
+    }
+
+    if (isKmlDocument(doc)) {
+        return getKmlCompletions(doc, pos, targetOffset, docManager);
     }
 
     std::string pathStr = uriToPath(doc.uri());
@@ -3258,6 +3366,10 @@ CompletionList Analyzer::getCompletions(
 }
 
 std::vector<DocumentSymbol> Analyzer::getDocumentSymbols(const Document& doc) {
+    if (isKmlDocument(doc)) {
+        return getKmlDocumentSymbols(doc);
+    }
+
     std::vector<DocumentSymbol> symbols;
 
     std::string pathStr = uriToPath(doc.uri());
@@ -3496,6 +3608,9 @@ void addSemanticSpanToken(
 } // namespace
 
 SemanticTokens Analyzer::getSemanticTokens(const Document& doc) {
+    if (isKmlDocument(doc)) {
+        return getKmlSemanticTokens(doc);
+    }
     diag::SourceManager sm;
     std::string pathStr = uriToPath(doc.uri());
     diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
@@ -3848,6 +3963,10 @@ SemanticTokens Analyzer::getSemanticTokens(const Document& doc) {
 }
 
 std::vector<TextEdit> Analyzer::format(const Document& doc, const FormattingOptions& options) {
+    if (isKmlDocument(doc)) {
+        return {};
+    }
+
     keety::fmt::FormatterOptions fmtOpts;
     if (options.tabSize > 0) {
         fmtOpts.indentWidth = options.tabSize;
@@ -3880,6 +3999,10 @@ std::vector<TextEdit> Analyzer::formatRange(
     Range range,
     const FormattingOptions& options
 ) {
+    if (isKmlDocument(doc)) {
+        return {};
+    }
+
     if (doc.text().empty()) {
         return {};
     }
@@ -4079,6 +4202,783 @@ std::vector<CodeAction> Analyzer::getCodeActions(
     }
 
     return actions;
+}
+
+std::optional<Hover> Analyzer::getKmlHover(
+    const Document& doc,
+    Position /*pos*/,
+    size_t targetOffset,
+    const DocumentManager* /*docManager*/
+) {
+    diag::SourceManager sm;
+    std::string pathStr = uriToPath(doc.uri());
+    diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
+    diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+
+    const std::string& text = doc.text();
+
+    // Extract word under cursor (supporting runes like $state and directives like @click, $bind.value)
+    size_t wordStart = targetOffset;
+    while (wordStart > 0) {
+        char prev = text[wordStart - 1];
+        if (std::isalnum(static_cast<unsigned char>(prev)) || prev == '_' || prev == '$' || prev == '@' || prev == '.') {
+            wordStart--;
+        } else {
+            break;
+        }
+    }
+    size_t wordEnd = targetOffset;
+    while (wordEnd < text.size()) {
+        char next = text[wordEnd];
+        if (std::isalnum(static_cast<unsigned char>(next)) || next == '_' || next == '$' || next == '@' || next == '.') {
+            wordEnd++;
+        } else {
+            break;
+        }
+    }
+    std::string word = text.substr(wordStart, wordEnd - wordStart);
+    Range wordRange = {
+        doc.offsetToPosition(wordStart),
+        doc.offsetToPosition(wordEnd)
+    };
+
+    kml::KmlParser kmlParser(text, fileId, &sm, &emitter);
+    auto kmlDoc = kmlParser.parseDocument(moduleName);
+
+    // 1. Is cursor inside <script> block?
+    bool inScript = false;
+    if (kmlDoc.script.has_value()) {
+        if (targetOffset >= kmlDoc.script->span.start.offset && targetOffset <= kmlDoc.script->span.end.offset) {
+            inScript = true;
+        }
+    }
+
+    if (inScript && kmlDoc.script.has_value()) {
+        // A. Runes: $state, $derived, $effect, $props, $bind
+        if (word == "$state") {
+            return Hover{MarkupContent{"markdown", "```keet\n$state(initialValue)\n```\n**KML State Rune**\n\nDeclares reactive local state for the component. Mutating this variable triggers reactive DOM/TUI re-renders."}, wordRange};
+        }
+        if (word == "$derived") {
+            return Hover{MarkupContent{"markdown", "```keet\n$derived(expression)\n```\n**KML Derived Rune**\n\nDeclares computed reactive state derived from other reactive state or properties."}, wordRange};
+        }
+        if (word == "$effect") {
+            return Hover{MarkupContent{"markdown", "```keet\n$effect(() => { ... })\n```\n**KML Effect Rune**\n\nRegisters a reactive side-effect that automatically re-executes whenever its dependencies change."}, wordRange};
+        }
+        if (word == "$props") {
+            return Hover{MarkupContent{"markdown", "```keet\n$props()\n```\n**KML Props Rune**\n\nDeclares component properties received from parent components."}, wordRange};
+        }
+
+        // B. State runes defined in this script
+        for (const auto& rune : kmlDoc.script->runes) {
+            if (rune.variableName == word) {
+                std::string kindStr = (rune.kind == kml::KmlStateRune::Kind::State) ? "$state" : "$derived";
+                std::string md = "```keet\nlet mut " + rune.variableName + " = " + kindStr + "(" + rune.initExpr + ")\n```\n*Reactive state rune in `<script>`.*";
+                return Hover{MarkupContent{"markdown", std::move(md)}, wordRange};
+            }
+        }
+
+        // C. Props defined in this script
+        for (const auto& prop : kmlDoc.script->props) {
+            if (prop.name == word) {
+                std::string md = "```keet\n(prop) " + prop.name + ": " + prop.type;
+                if (!prop.defaultValueExpr.empty()) {
+                    md += " = " + prop.defaultValueExpr;
+                }
+                md += "\n```\n*Component property in `<script>`.*";
+                return Hover{MarkupContent{"markdown", std::move(md)}, wordRange};
+            }
+        }
+
+        // D. Declarations inside script (functions, variables, imports)
+        for (const auto& decl : kmlDoc.script->declarations) {
+            if (!decl) continue;
+            if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                if (fnDecl->getName() == word) {
+                    std::string sig = (fnDecl->isExported() ? "export fn " : "fn ") + fnDecl->getName() + "(";
+                    for (size_t i = 0; i < fnDecl->getParams().size(); ++i) {
+                        if (i > 0) sig += ", ";
+                        const auto& p = fnDecl->getParams()[i];
+                        if (p.isMut) sig += "mut ";
+                        sig += p.name + ": " + formatType(p.type.get(), "any");
+                    }
+                    sig += "): " + formatType(fnDecl->getReturnType(), "void");
+                    std::string md = "```keet\n" + sig + "\n```";
+                    return Hover{MarkupContent{"markdown", std::move(md)}, wordRange};
+                }
+            } else if (const auto* varDecl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+                if (varDecl->getName() == word) {
+                    std::string sig = "let " + varDecl->getName();
+                    if (varDecl->getType()) {
+                        sig += ": " + formatType(varDecl->getType());
+                    }
+                    return Hover{MarkupContent{"markdown", "```keet\n" + sig + "\n```"}, wordRange};
+                }
+            } else if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+                std::filesystem::path p(imp->getModulePath());
+                if (p.extension() == ".kml" && p.stem().string() == word) {
+                    std::string md = "```keet\ncomponent " + word + "\n```\n*KML UI Component imported from `" + imp->getModulePath() + "`.*";
+                    return Hover{MarkupContent{"markdown", std::move(md)}, wordRange};
+                }
+            }
+        }
+
+        // E. Check stdlib member access if preceded by a module receiver (e.g. math.sin)
+        size_t dotPos = word.rfind('.');
+        if (dotPos != std::string::npos) {
+            std::string receiver = word.substr(0, dotPos);
+            std::string member = word.substr(dotPos + 1);
+            if (sema::isStdlibModule(receiver)) {
+                if (auto stdDoc = getStdlibMemberDoc(member); stdDoc.has_value()) {
+                    std::string content = "```keet\n" + stdDoc->signature + "\n```\n" + stdDoc->doc +
+                                          "\n\n*Exported member of standard library module `" + receiver + "`*";
+                    return Hover{MarkupContent{"markdown", std::move(content)}, wordRange};
+                }
+            }
+        } else {
+            // Check if preceded by dot in text (e.g. math.sin with cursor on sin)
+            size_t beforeWord = wordStart;
+            while (beforeWord > 0 && (text[beforeWord - 1] == ' ' || text[beforeWord - 1] == '\t')) beforeWord--;
+            if (beforeWord > 0 && text[beforeWord - 1] == '.') {
+                size_t dot = beforeWord - 1;
+                size_t rEnd = dot;
+                while (rEnd > 0 && (text[rEnd - 1] == ' ' || text[rEnd - 1] == '\t')) rEnd--;
+                size_t rStart = rEnd;
+                while (rStart > 0 && (std::isalnum(static_cast<unsigned char>(text[rStart - 1])) || text[rStart - 1] == '_')) rStart--;
+                std::string receiver = text.substr(rStart, rEnd - rStart);
+                if (sema::isStdlibModule(receiver)) {
+                    if (auto stdDoc = getStdlibMemberDoc(word); stdDoc.has_value()) {
+                        std::string content = "```keet\n" + stdDoc->signature + "\n```\n" + stdDoc->doc +
+                                              "\n\n*Exported member of standard library module `" + receiver + "`*";
+                        return Hover{MarkupContent{"markdown", std::move(content)}, wordRange};
+                    }
+                }
+            }
+        }
+
+        // F. Stdlib module directly (e.g. hovering on 'math' in 'import math;')
+        if (word == "math") {
+            return Hover{MarkupContent{"markdown", "```keet\nimport math;\n```\n**Standard Library Module: `math`**\n\nMathematical constants and standard functions."}, wordRange};
+        }
+        if (word == "io") {
+            return Hover{MarkupContent{"markdown", "```keet\nimport io;\n```\n**Standard Library Module: `io`**\n\nInput and output operations, terminal formatting, and standard streams."}, wordRange};
+        }
+        if (word == "fs") {
+            return Hover{MarkupContent{"markdown", "```keet\nimport fs;\n```\n**Standard Library Module: `fs`**\n\nFile system operations."}, wordRange};
+        }
+        if (word == "ui") {
+            return Hover{MarkupContent{"markdown", "```keet\nimport ui;\n```\n**Standard Library Module: `ui`**\n\nReactive UI mounting and rendering runtime."}, wordRange};
+        }
+
+        // G. Fallback text scan for local declarations inside script
+        std::string patternLet = "let " + word;
+        std::string patternMut = "mut " + word;
+        std::istringstream stream(kmlDoc.script->rawCode);
+        std::string line;
+        while (std::getline(stream, line)) {
+            size_t pLet = line.find(patternLet);
+            size_t pMut = line.find(patternMut);
+            size_t matchPos = (pLet != std::string::npos) ? pLet : pMut;
+            if (matchPos != std::string::npos) {
+                size_t semi = line.find(';', matchPos);
+                std::string declStr = (semi != std::string::npos) ? line.substr(matchPos, semi - matchPos) : line.substr(matchPos);
+                size_t eqPos = declStr.find('=');
+                std::string sig = (eqPos != std::string::npos) ? declStr.substr(0, eqPos) : declStr;
+                while (!sig.empty() && (sig.back() == ' ' || sig.back() == '\t')) sig.pop_back();
+                return Hover{MarkupContent{"markdown", "```keet\n" + sig + "\n```\n*Script local variable*"}, wordRange};
+            }
+        }
+
+        return std::nullopt;
+    }
+
+    // 2. Cursor is in Template Block
+    // A. KML Layout Primitives
+    if (word == "vstack") {
+        return Hover{MarkupContent{"markdown", "```kml\n<vstack gap={...} padding={...}>\n```\n**Vertical Stack Layout Container**\n\nArranges children vertically with configurable alignment, padding, and gap spacing."}, wordRange};
+    }
+    if (word == "hstack") {
+        return Hover{MarkupContent{"markdown", "```kml\n<hstack gap={...} padding={...}>\n```\n**Horizontal Stack Layout Container**\n\nArranges children horizontally with configurable alignment, padding, and gap spacing."}, wordRange};
+    }
+    if (word == "scroll") {
+        return Hover{MarkupContent{"markdown", "```kml\n<scroll width={...} height={...}>\n```\n**Scrollable Viewport Container**\n\nEnables smooth vertical and horizontal scrolling for overflowing child content."}, wordRange};
+    }
+    if (word == "button") {
+        return Hover{MarkupContent{"markdown", "```kml\n<button @click={...} bg={...}>\n```\n**Interactive Button Element**\n\nTriggers actions when clicked. Supports styles, active states, and keyboard focus."}, wordRange};
+    }
+    if (word == "input") {
+        return Hover{MarkupContent{"markdown", "```kml\n<input $bind.value={...} placeholder={...} />\n```\n**Text Input Field**\n\nCaptures user text input. Supports two-way binding via `$bind.value`."}, wordRange};
+    }
+    if (word == "text") {
+        return Hover{MarkupContent{"markdown", "```kml\n<text color={...} font-size={...}>\n```\n**Text Rendering Element**\n\nDisplays styled text content, labels, or interpolated string values."}, wordRange};
+    }
+    if (word == "box") {
+        return Hover{MarkupContent{"markdown", "```kml\n<box width={...} height={...} bg={...}>\n```\n**Container Box Layout Node**\n\nBasic box container with customizable dimensions, borders, and background."}, wordRange};
+    }
+    if (word == "slot") {
+        return Hover{MarkupContent{"markdown", "```kml\n<slot name=\"...\" />\n```\n**Component Projection Slot**\n\nDefines insertion points for child content passed from parent components."}, wordRange};
+    }
+
+    // B. Directives
+    if (word.rfind("@click", 0) == 0 || word.rfind("@keydown", 0) == 0 || word.rfind("@submit", 0) == 0 || word.rfind("@change", 0) == 0) {
+        return Hover{MarkupContent{"markdown", "```kml\n" + word + "={handler}\n```\n**KML Event Directive**\n\nListens for user interaction events and invokes the specified script handler function."}, wordRange};
+    }
+    if (word.rfind("$bind", 0) == 0) {
+        return Hover{MarkupContent{"markdown", "```kml\n$bind.value={stateVariable}\n```\n**KML Two-Way Binding Directive**\n\nEstablishes bidirectional synchronization between UI input values and reactive script state."}, wordRange};
+    }
+    if (word == "if" || word == "#if") {
+        return Hover{MarkupContent{"markdown", "```kml\n{#if condition} ... {:else} ... {/if}\n```\n**KML Conditional Block**\n\nConditionally renders template branches based on truthiness of the condition expression."}, wordRange};
+    }
+    if (word == "for" || word == "#for") {
+        return Hover{MarkupContent{"markdown", "```kml\n{#for item in items [key expr]} ... {/for}\n```\n**KML Loop Block**\n\nIterates over an array or collection, rendering the body for each item with optional keyed reconciliation."}, wordRange};
+    }
+
+    // C. Custom Component Check (e.g. <Task ... />)
+    if (!word.empty() && std::isupper(static_cast<unsigned char>(word[0]))) {
+        std::string importPath;
+        if (kmlDoc.script.has_value()) {
+            for (const auto& decl : kmlDoc.script->declarations) {
+                if (!decl) continue;
+                if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+                    std::filesystem::path p(imp->getModulePath());
+                    if (p.extension() == ".kml" && p.stem().string() == word) {
+                        importPath = imp->getModulePath();
+                        break;
+                    }
+                }
+            }
+        }
+        if (importPath.empty()) {
+            std::filesystem::path adj = fsPath.parent_path() / (word + ".kml");
+            if (std::filesystem::exists(adj)) {
+                importPath = "./" + word + ".kml";
+            }
+        }
+        if (!importPath.empty()) {
+            std::string md = "```kml\ncomponent " + word + "\n```\n*Custom KML UI Component imported from `" + importPath + "`.*";
+            return Hover{MarkupContent{"markdown", std::move(md)}, wordRange};
+        }
+    }
+
+    // D. Script variables/functions referenced inside template bindings {var}
+    if (kmlDoc.script.has_value()) {
+        for (const auto& rune : kmlDoc.script->runes) {
+            if (rune.variableName == word) {
+                std::string kindStr = (rune.kind == kml::KmlStateRune::Kind::State) ? "$state" : "$derived";
+                std::string md = "```keet\nlet mut " + rune.variableName + " = " + kindStr + "(" + rune.initExpr + ")\n```\n*Reactive state variable referenced in template.*";
+                return Hover{MarkupContent{"markdown", std::move(md)}, wordRange};
+            }
+        }
+        for (const auto& decl : kmlDoc.script->declarations) {
+            if (!decl) continue;
+            if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                if (fnDecl->getName() == word) {
+                    std::string sig = "fn " + fnDecl->getName() + "(): " + formatType(fnDecl->getReturnType(), "void");
+                    std::string md = "```keet\n" + sig + "\n```\n*Script function referenced in template.*";
+                    return Hover{MarkupContent{"markdown", std::move(md)}, wordRange};
+                }
+            } else if (const auto* varDecl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+                if (varDecl->getName() == word) {
+                    std::string sig = "let " + varDecl->getName();
+                    if (varDecl->getType()) {
+                        sig += ": " + formatType(varDecl->getType());
+                    }
+                    return Hover{MarkupContent{"markdown", "```keet\n" + sig + "\n```\n*Script variable referenced in template.*"}, wordRange};
+                }
+            }
+        }
+    }
+
+    // E. Layout attributes
+    static const std::unordered_map<std::string, std::pair<std::string, std::string>> layoutAttrs = {
+        {"width", {"int | string", "Sets explicit node width in pixels or percentage (\"100%\")."}},
+        {"height", {"int | string", "Sets explicit node height in pixels or percentage (\"100%\")."}},
+        {"bg", {"string", "Background color hex string (e.g. \"#ffffff\") or CSS color name."}},
+        {"color", {"string", "Text foreground color hex string (e.g. \"#333333\") or CSS color."}},
+        {"padding", {"int", "Inner spacing padding in pixels applied to all edges."}},
+        {"gap", {"int", "Gap spacing in pixels between child nodes in stacks."}},
+        {"grow", {"int | bool", "Flex grow factor (1 to expand and fill available viewport space)."}},
+        {"radius", {"int", "Corner radius in pixels for rounded container box edges."}},
+        {"font-size", {"int", "Font point size for rendered text nodes."}},
+        {"placeholder", {"string", "Hint text displayed inside an empty input field."}},
+        {"disabled", {"bool", "Disables interactivity and dims visual appearance."}},
+        {"checked", {"bool", "State indicating whether a checkbox or toggle is currently checked."}}
+    };
+    auto attrIt = layoutAttrs.find(word);
+    if (attrIt != layoutAttrs.end()) {
+        std::string md = "```kml\n" + attrIt->first + ": " + attrIt->second.first + "\n```\n**Layout Attribute**\n\n" + attrIt->second.second;
+        return Hover{MarkupContent{"markdown", std::move(md)}, wordRange};
+    }
+
+    return std::nullopt;
+}
+
+std::optional<Location> Analyzer::findKmlDefinition(
+    const Document& doc,
+    Position /*pos*/,
+    size_t targetOffset,
+    const DocumentManager* /*docManager*/
+) {
+    diag::SourceManager sm;
+    std::string pathStr = uriToPath(doc.uri());
+    diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
+    diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+
+    const std::string& text = doc.text();
+
+    // Check if cursor is on a string literal (e.g. import path "./Task.kml")
+    size_t lineStart = targetOffset;
+    while (lineStart > 0 && text[lineStart - 1] != '\n') lineStart--;
+    size_t lineEnd = targetOffset;
+    while (lineEnd < text.size() && text[lineEnd] != '\n') lineEnd++;
+    std::string line = text.substr(lineStart, lineEnd - lineStart);
+
+    size_t quoteStart = line.find('"');
+    if (quoteStart != std::string::npos) {
+        size_t quoteEnd = line.find('"', quoteStart + 1);
+        if (quoteEnd != std::string::npos) {
+            size_t absQuoteStart = lineStart + quoteStart;
+            size_t absQuoteEnd = lineStart + quoteEnd + 1;
+            if (targetOffset >= absQuoteStart && targetOffset <= absQuoteEnd) {
+                std::string rawPath = line.substr(quoteStart + 1, quoteEnd - quoteStart - 1);
+                std::filesystem::path target = fsPath.parent_path() / rawPath;
+                if (std::filesystem::exists(target)) {
+                    return Location{pathToUri(std::filesystem::canonical(target)), Range{Position{0, 0}, Position{0, 0}}};
+                }
+            }
+        }
+    }
+
+    // Extract word under cursor
+    size_t wordStart = targetOffset;
+    while (wordStart > 0 && (std::isalnum(static_cast<unsigned char>(text[wordStart - 1])) || text[wordStart - 1] == '_' || text[wordStart - 1] == '$')) {
+        wordStart--;
+    }
+    size_t wordEnd = targetOffset;
+    while (wordEnd < text.size() && (std::isalnum(static_cast<unsigned char>(text[wordEnd])) || text[wordEnd] == '_' || text[wordEnd] == '$')) {
+        wordEnd++;
+    }
+    std::string word = text.substr(wordStart, wordEnd - wordStart);
+    if (word.empty()) return std::nullopt;
+
+    kml::KmlParser kmlParser(text, fileId, &sm, &emitter);
+    auto kmlDoc = kmlParser.parseDocument(moduleName);
+
+    // 1. If word is custom component (e.g. <Task ...>)
+    if (std::isupper(static_cast<unsigned char>(word[0]))) {
+        // A. Check script imports
+        if (kmlDoc.script.has_value()) {
+            for (const auto& decl : kmlDoc.script->declarations) {
+                if (!decl) continue;
+                if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+                    std::filesystem::path p(imp->getModulePath());
+                    if (p.extension() == ".kml" && p.stem().string() == word) {
+                        std::filesystem::path target = fsPath.parent_path() / imp->getModulePath();
+                        if (std::filesystem::exists(target)) {
+                            return Location{pathToUri(std::filesystem::canonical(target)), Range{Position{0, 0}, Position{0, 0}}};
+                        }
+                    }
+                }
+            }
+        }
+        // B. Check adjacent file (./<Word>.kml)
+        std::filesystem::path adj = fsPath.parent_path() / (word + ".kml");
+        if (std::filesystem::exists(adj)) {
+            return Location{pathToUri(std::filesystem::canonical(adj)), Range{Position{0, 0}, Position{0, 0}}};
+        }
+    }
+
+    // 2. If word is a function or variable declared in script
+    if (kmlDoc.script.has_value()) {
+        for (const auto& decl : kmlDoc.script->declarations) {
+            if (!decl) continue;
+            if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                if (fnDecl->getName() == word) {
+                    size_t p = text.find(word, kmlDoc.script->span.start.offset);
+                    if (p != std::string::npos) {
+                        Position defPos = doc.offsetToPosition(p);
+                        return Location{doc.uri(), Range{defPos, Position{defPos.line, defPos.character + static_cast<uint32_t>(word.size())}}};
+                    }
+                }
+            } else if (const auto* varDecl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+                if (varDecl->getName() == word) {
+                    size_t p = text.find(word, kmlDoc.script->span.start.offset);
+                    if (p != std::string::npos) {
+                        Position defPos = doc.offsetToPosition(p);
+                        return Location{doc.uri(), Range{defPos, Position{defPos.line, defPos.character + static_cast<uint32_t>(word.size())}}};
+                    }
+                }
+            }
+        }
+        for (const auto& rune : kmlDoc.script->runes) {
+            if (rune.variableName == word) {
+                size_t p = text.find(word, kmlDoc.script->span.start.offset);
+                if (p != std::string::npos) {
+                    Position defPos = doc.offsetToPosition(p);
+                    return Location{doc.uri(), Range{defPos, Position{defPos.line, defPos.character + static_cast<uint32_t>(word.size())}}};
+                }
+            }
+        }
+    }
+
+    return std::nullopt;
+}
+
+CompletionList Analyzer::getKmlCompletions(
+    const Document& doc,
+    Position /*pos*/,
+    size_t targetOffset,
+    const DocumentManager* /*docManager*/
+) {
+    CompletionList list;
+    list.isIncomplete = false;
+
+    const std::string& text = doc.text();
+    std::string pathStr = uriToPath(doc.uri());
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+
+    diag::SourceManager sm;
+    diag::FileId fileId = sm.addBuffer(pathStr, text);
+    diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+    kml::KmlParser kmlParser(text, fileId, &sm, &emitter);
+    auto kmlDoc = kmlParser.parseDocument(moduleName);
+
+    // Layout primitives are always available in KML
+    static const std::vector<std::string> primitives = {
+        "box", "vstack", "hstack", "scroll", "button", "input", "text", "slot"
+    };
+    for (const auto& tag : primitives) {
+        CompletionItem item;
+        item.label = tag;
+        item.kind = CompletionItemKind::Class;
+        item.detail = "KML Layout Primitive";
+        list.items.push_back(std::move(item));
+    }
+
+    // Line prefix up to cursor
+    size_t lineStart = targetOffset;
+    while (lineStart > 0 && text[lineStart - 1] != '\n') lineStart--;
+    std::string linePrefix = text.substr(lineStart, targetOffset - lineStart);
+
+    bool inScript = false;
+    if (kmlDoc.script.has_value()) {
+        if (targetOffset >= kmlDoc.script->span.start.offset && targetOffset <= kmlDoc.script->span.end.offset) {
+            inScript = true;
+        }
+    }
+
+    // 1. Check if user is typing inside <script>
+    if (inScript) {
+        // Check for Dot-completion (e.g. math., io., fs., ui.)
+        size_t p = targetOffset;
+        while (p > 0 && (std::isalnum(static_cast<unsigned char>(text[p - 1])) || text[p - 1] == '_')) p--;
+        while (p > 0 && (text[p - 1] == ' ' || text[p - 1] == '\t')) p--;
+        if (p > 0 && text[p - 1] == '.') {
+            p--;
+            while (p > 0 && (text[p - 1] == ' ' || text[p - 1] == '\t')) p--;
+            size_t rEnd = p;
+            while (p > 0 && (std::isalnum(static_cast<unsigned char>(text[p - 1])) || text[p - 1] == '_')) p--;
+            std::string receiver = text.substr(p, rEnd - p);
+
+            if (sema::isStdlibModule(receiver)) {
+                auto scope = sema::createStdlibModuleScope(receiver);
+                if (scope) {
+                    for (const auto& [name, sym] : scope->getSymbols()) {
+                        CompletionItem item;
+                        item.label = name;
+                        item.kind = (sym->getKind() == sema::SymbolKind::Function) ? CompletionItemKind::Function :
+                                    (sym->getKind() == sema::SymbolKind::Constant) ? CompletionItemKind::Constant :
+                                    (sym->getKind() == sema::SymbolKind::Enum) ? CompletionItemKind::Enum : CompletionItemKind::Field;
+                        if (auto docOpt = getStdlibMemberDoc(name)) {
+                            item.detail = docOpt->signature;
+                            item.documentation = docOpt->doc;
+                        } else {
+                            item.detail = receiver + "." + name;
+                        }
+                        list.items.push_back(std::move(item));
+                    }
+                    std::sort(list.items.begin(), list.items.end(), [](const CompletionItem& a, const CompletionItem& b) {
+                        return a.label < b.label;
+                    });
+                    return list;
+                }
+            }
+        }
+
+        // General Script Completions: Runes, keywords, stdlib modules, script declarations
+        static const std::vector<std::pair<std::string, std::string>> runes = {
+            {"$state", "KML State Rune: creates reactive local state"},
+            {"$derived", "KML Derived Rune: creates computed reactive state"},
+            {"$effect", "KML Effect Rune: registers a reactive side-effect"},
+            {"$props", "KML Props Rune: declares component properties"}
+        };
+        for (const auto& [rune, docStr] : runes) {
+            CompletionItem item;
+            item.label = rune;
+            item.kind = CompletionItemKind::Keyword;
+            item.detail = "KML Rune";
+            item.documentation = docStr;
+            list.items.push_back(std::move(item));
+        }
+
+        static const std::vector<std::string> kw = {
+            "let", "mut", "const", "fn", "import", "export", "return", "if", "else", "for", "while"
+        };
+        for (const auto& k : kw) {
+            CompletionItem item;
+            item.label = k;
+            item.kind = CompletionItemKind::Keyword;
+            item.detail = "Keyword";
+            list.items.push_back(std::move(item));
+        }
+
+        static const std::vector<std::string> mods = {
+            "math", "io", "fs", "sys", "time", "json", "net", "ui"
+        };
+        for (const auto& m : mods) {
+            CompletionItem item;
+            item.label = m;
+            item.kind = CompletionItemKind::Module;
+            item.detail = "Standard Library Module";
+            list.items.push_back(std::move(item));
+        }
+
+        if (kmlDoc.script.has_value()) {
+            for (const auto& rune : kmlDoc.script->runes) {
+                CompletionItem item;
+                item.label = rune.variableName;
+                item.kind = CompletionItemKind::Variable;
+                item.detail = "Reactive state variable";
+                list.items.push_back(std::move(item));
+            }
+            for (const auto& decl : kmlDoc.script->declarations) {
+                if (!decl) continue;
+                if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                    CompletionItem item;
+                    item.label = fnDecl->getName();
+                    item.kind = CompletionItemKind::Function;
+                    item.detail = "fn " + fnDecl->getName() + "()";
+                    list.items.push_back(std::move(item));
+                }
+            }
+        }
+
+        return list;
+    }
+
+    // 2. Cursor is in Template Block
+    // A. Check if typing dynamic expression inside `{...}`
+    size_t lastOpenBrace = linePrefix.rfind('{');
+    size_t lastCloseBrace = linePrefix.rfind('}');
+    if (lastOpenBrace != std::string::npos && (lastCloseBrace == std::string::npos || lastCloseBrace < lastOpenBrace)) {
+        if (kmlDoc.script.has_value()) {
+            for (const auto& rune : kmlDoc.script->runes) {
+                CompletionItem item;
+                item.label = rune.variableName;
+                item.kind = CompletionItemKind::Variable;
+                item.detail = "Reactive state variable";
+                list.items.push_back(std::move(item));
+            }
+            for (const auto& prop : kmlDoc.script->props) {
+                CompletionItem item;
+                item.label = prop.name;
+                item.kind = CompletionItemKind::Property;
+                item.detail = "prop " + prop.name + ": " + prop.type;
+                list.items.push_back(std::move(item));
+            }
+            for (const auto& decl : kmlDoc.script->declarations) {
+                if (!decl) continue;
+                if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                    CompletionItem item;
+                    item.label = fnDecl->getName();
+                    item.kind = CompletionItemKind::Function;
+                    item.detail = "fn " + fnDecl->getName() + "()";
+                    list.items.push_back(std::move(item));
+                }
+            }
+        }
+        return list;
+    }
+
+    // B. Check if typing `<` (tags and components)
+    size_t lastLess = linePrefix.rfind('<');
+    size_t lastGreater = linePrefix.rfind('>');
+    if (lastLess != std::string::npos && (lastGreater == std::string::npos || lastGreater < lastLess)) {
+        std::string tagPrefix = linePrefix.substr(lastLess + 1);
+        if (tagPrefix.find(' ') == std::string::npos && tagPrefix.find('\t') == std::string::npos) {
+            if (kmlDoc.script.has_value()) {
+                for (const auto& decl : kmlDoc.script->declarations) {
+                    if (!decl) continue;
+                    if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+                        std::filesystem::path p(imp->getModulePath());
+                        if (p.extension() == ".kml") {
+                            CompletionItem item;
+                            item.label = p.stem().string();
+                            item.kind = CompletionItemKind::Class;
+                            item.detail = "Custom Component (" + imp->getModulePath() + ")";
+                            list.items.push_back(std::move(item));
+                        }
+                    }
+                }
+            }
+
+            if (std::filesystem::exists(fsPath.parent_path())) {
+                for (const auto& entry : std::filesystem::directory_iterator(fsPath.parent_path())) {
+                    if (entry.path().extension() == ".kml" && entry.path().stem().string() != moduleName) {
+                        std::string cName = entry.path().stem().string();
+                        bool alreadyAdded = false;
+                        for (const auto& existing : list.items) {
+                            if (existing.label == cName) { alreadyAdded = true; break; }
+                        }
+                        if (!alreadyAdded) {
+                            CompletionItem item;
+                            item.label = cName;
+                            item.kind = CompletionItemKind::Class;
+                            item.detail = "Custom Component (" + entry.path().filename().string() + ")";
+                            list.items.push_back(std::move(item));
+                        }
+                    }
+                }
+            }
+
+            return list;
+        }
+
+        // Inside tag attributes
+        static const std::vector<std::pair<std::string, std::string>> attrs = {
+            {"width", "int | string - Width in pixels or percentage"},
+            {"height", "int | string - Height in pixels or percentage"},
+            {"bg", "string - Background color hex or name"},
+            {"color", "string - Text foreground color hex or name"},
+            {"padding", "int - Inner padding in pixels"},
+            {"gap", "int - Gap spacing between child nodes in pixels"},
+            {"grow", "int - Flex grow factor"},
+            {"radius", "int - Corner radius in pixels"},
+            {"font-size", "int - Font point size"},
+            {"placeholder", "string - Text input placeholder"},
+            {"disabled", "bool - Disabled state"},
+            {"checked", "bool - Checked state"}
+        };
+        for (const auto& [attr, desc] : attrs) {
+            CompletionItem item;
+            item.label = attr;
+            item.kind = CompletionItemKind::Property;
+            item.detail = desc;
+            item.insertText = attr + "=\"$1\"";
+            list.items.push_back(std::move(item));
+        }
+
+        static const std::vector<std::pair<std::string, std::string>> dirs = {
+            {"@click", "Event directive: triggers handler on click"},
+            {"@keydown", "Event directive: triggers handler on keydown"},
+            {"@keydown.enter", "Event directive: triggers handler on Enter key"},
+            {"@submit", "Event directive: triggers handler on form submit"},
+            {"$bind.value", "Binding directive: two-way value binding"}
+        };
+        for (const auto& [dir, desc] : dirs) {
+            CompletionItem item;
+            item.label = dir;
+            item.kind = CompletionItemKind::Event;
+            item.detail = desc;
+            item.insertText = dir + "={$1}";
+            list.items.push_back(std::move(item));
+        }
+
+        return list;
+    }
+
+    // C. Control Blocks: `{#`
+    size_t lastHash = linePrefix.rfind("{#");
+    if (lastHash != std::string::npos) {
+        CompletionItem itemIf;
+        itemIf.label = "if";
+        itemIf.kind = CompletionItemKind::Snippet;
+        itemIf.detail = "KML Conditional Block";
+        itemIf.insertText = "if ${1:condition}}\n\t$0\n{/if}";
+        list.items.push_back(std::move(itemIf));
+
+        CompletionItem itemFor;
+        itemFor.label = "for";
+        itemFor.kind = CompletionItemKind::Snippet;
+        itemFor.detail = "KML Loop Block";
+        itemFor.insertText = "for ${1:item} in ${2:items}}\n\t$0\n{/for}";
+        list.items.push_back(std::move(itemFor));
+
+        return list;
+    }
+
+    return list;
+}
+
+std::vector<DocumentSymbol> Analyzer::getKmlDocumentSymbols(const Document& doc) {
+    std::vector<DocumentSymbol> symbols;
+
+    std::string pathStr = uriToPath(doc.uri());
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+
+    diag::SourceManager sm;
+    diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
+    diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+    kml::KmlParser kmlParser(doc.text(), fileId, &sm, &emitter);
+    auto kmlDoc = kmlParser.parseDocument(moduleName);
+
+    DocumentSymbol compSym;
+    compSym.name = moduleName;
+    compSym.kind = SymbolKind::Class;
+    compSym.detail = "KML Component";
+    compSym.range = Range{Position{0, 0}, doc.offsetToPosition(doc.text().size())};
+    compSym.selectionRange = Range{Position{0, 0}, Position{0, static_cast<uint32_t>(moduleName.size())}};
+
+    if (kmlDoc.script.has_value()) {
+        for (const auto& prop : kmlDoc.script->props) {
+            DocumentSymbol pSym;
+            pSym.name = prop.name;
+            pSym.kind = SymbolKind::Property;
+            pSym.detail = prop.type;
+            pSym.range = spanToRange(doc, prop.span);
+            pSym.selectionRange = pSym.range;
+            compSym.children.push_back(std::move(pSym));
+        }
+
+        for (const auto& rune : kmlDoc.script->runes) {
+            DocumentSymbol rSym;
+            rSym.name = rune.variableName;
+            rSym.kind = SymbolKind::Variable;
+            rSym.detail = (rune.kind == kml::KmlStateRune::Kind::State) ? "$state" : "$derived";
+            rSym.range = spanToRange(doc, rune.span);
+            rSym.selectionRange = rSym.range;
+            compSym.children.push_back(std::move(rSym));
+        }
+
+        for (const auto& decl : kmlDoc.script->declarations) {
+            if (!decl) continue;
+            if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                DocumentSymbol fSym;
+                fSym.name = fnDecl->getName();
+                fSym.kind = SymbolKind::Function;
+                fSym.detail = "fn " + fnDecl->getName() + "()";
+                size_t p = doc.text().find(fnDecl->getName(), kmlDoc.script->span.start.offset);
+                if (p != std::string::npos) {
+                    Position pos = doc.offsetToPosition(p);
+                    fSym.range = Range{pos, Position{pos.line, pos.character + static_cast<uint32_t>(fnDecl->getName().size())}};
+                    fSym.selectionRange = fSym.range;
+                }
+                compSym.children.push_back(std::move(fSym));
+            }
+        }
+    }
+
+    symbols.push_back(std::move(compSym));
+    return symbols;
+}
+
+SemanticTokens Analyzer::getKmlSemanticTokens(const Document& /*doc*/) {
+    return SemanticTokens{};
 }
 
 } // namespace keety::lsp

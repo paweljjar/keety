@@ -56,6 +56,13 @@ public:
 
     /// Computes Code Actions (Quick Fixes) for the given range in the document.
     std::vector<CodeAction> getCodeActions(const Document& doc, Range range, const std::vector<Diagnostic>& contextDiagnostics = {});
+
+private:
+    std::optional<Hover> getKmlHover(const Document& doc, Position pos, size_t targetOffset, const DocumentManager* docManager);
+    std::optional<Location> findKmlDefinition(const Document& doc, Position pos, size_t targetOffset, const DocumentManager* docManager);
+    CompletionList getKmlCompletions(const Document& doc, Position pos, size_t targetOffset, const DocumentManager* docManager);
+    std::vector<DocumentSymbol> getKmlDocumentSymbols(const Document& doc);
+    SemanticTokens getKmlSemanticTokens(const Document& doc);
 };
 
 } // namespace keety::lsp

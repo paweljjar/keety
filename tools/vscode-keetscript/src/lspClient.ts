@@ -53,10 +53,15 @@ export class LspClientManager implements vscode.Disposable {
     }
 
     // 3. Extension-relative build directories
+    const homeDir = process.env.HOME || '';
     const extCandidates = [
       path.resolve(__dirname, '..', '..', '..', 'build', 'src', 'keet-lsp'),
       path.resolve(__dirname, '..', '..', '..', 'build', 'keet-lsp'),
-      path.resolve(__dirname, '..', '..', '..', 'bin', 'keet-lsp')
+      path.resolve(__dirname, '..', '..', '..', 'bin', 'keet-lsp'),
+      path.join(homeDir, '.keety', 'bin', 'keet-lsp'),
+      path.join(homeDir, 'Documents', 'GitHub', 'keety', 'build', 'src', 'keet-lsp'),
+      '/usr/local/bin/keet-lsp',
+      '/opt/homebrew/bin/keet-lsp'
     ];
     for (const cand of extCandidates) {
       if (fs.existsSync(cand)) {

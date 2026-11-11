@@ -330,6 +330,11 @@ JsonValue Server::handleInitialize(const JsonValue& /*params*/) {
     trigChars.push_back(JsonValue(std::string(".")));
     trigChars.push_back(JsonValue(std::string("\"")));
     trigChars.push_back(JsonValue(std::string("/")));
+    trigChars.push_back(JsonValue(std::string("<")));
+    trigChars.push_back(JsonValue(std::string("$")));
+    trigChars.push_back(JsonValue(std::string("@")));
+    trigChars.push_back(JsonValue(std::string("{")));
+    trigChars.push_back(JsonValue(std::string(":")));
     compProvider["triggerCharacters"] = JsonValue(std::move(trigChars));
     caps["completionProvider"] = JsonValue(std::move(compProvider));
 

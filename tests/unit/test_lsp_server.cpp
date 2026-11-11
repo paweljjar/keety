@@ -80,6 +80,28 @@ TEST_CASE("Server lifecycle and document sync", "[lsp][server]") {
         REQUIRE(server.isInitialized());
     }
 
+    SECTION("Opening and analyzing App.kml does not crash") {
+        (void)server.handleRawMessage("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}");
+
+        // Read real App.kml content
+        std::ifstream f("/Users/pawel/Documents/GitHub/keety-test/src/App.kml");
+        std::string actualKml((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+
+        Document doc("file:///Users/pawel/Documents/GitHub/keety-test/src/App.kml", "kml", 1, actualKml);
+        Analyzer analyzer;
+        auto diags = analyzer.analyze(doc);
+        auto syms = analyzer.getDocumentSymbols(doc);
+        auto sToks = analyzer.getSemanticTokens(doc);
+
+        for (uint32_t line = 0; line < 50; ++line) {
+            for (uint32_t col = 0; col < 30; col += 5) {
+                (void)analyzer.getHover(doc, Position{line, col});
+                (void)analyzer.findDefinition(doc, Position{line, col});
+                (void)analyzer.getCompletions(doc, Position{line, col});
+            }
+        }
+    }
+
     SECTION("textDocument didOpen, didChange, and didClose") {
         // Initialize server first
         (void)server.handleRawMessage("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}");
