@@ -335,3 +335,40 @@ TEST_CASE("Standard library crypto module scope population", "[sema][universe][c
     CHECK(cryptoScope->lookupCurrent("unknown_crypto") == nullptr);
 }
 
+TEST_CASE("Stdlib UI module scope symbols inspection", "[sema][universe][ui]") {
+    CHECK(isStdlibModule("ui"));
+
+    auto uiScope = createStdlibModuleScope("ui");
+    REQUIRE(uiScope != nullptr);
+
+    const std::vector<std::string> expectedFunctions = {
+        "debounce", "withPreventDefault", "withKeyFilter",
+        "mountHeadless", "mountDesktop", "renderDesktop", "renderTui", "serveUi"
+    };
+
+    for (const auto& fnName : expectedFunctions) {
+        auto sym = uiScope->lookupCurrent(fnName);
+        REQUIRE(sym != nullptr);
+        CHECK(sym->getName() == fnName);
+        CHECK(sym->getKind() == SymbolKind::Function);
+        CHECK(sym->isExported());
+    }
+
+    const std::vector<std::string> expectedTypes = {
+        "Component", "UINode", "BoxNode", "StackNode", "TextNode", "ButtonNode",
+        "InputNode", "ScrollNode", "VNode", "HeadlessBackend", "TuiBackend",
+        "DesktopBackend", "WindowConfig", "Canvas2D", "FrameBuffer", "RgbaColor",
+        "WebVdomBackend", "MicrotaskScheduler"
+    };
+
+    for (const auto& typeName : expectedTypes) {
+        auto sym = uiScope->lookupCurrent(typeName);
+        REQUIRE(sym != nullptr);
+        CHECK(sym->getName() == typeName);
+        CHECK(sym->getKind() == SymbolKind::Class);
+        CHECK(sym->isType());
+        CHECK(sym->isExported());
+    }
+}
+
+

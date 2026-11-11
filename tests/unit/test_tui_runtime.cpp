@@ -52,6 +52,94 @@ TEST_CASE("TUI Runtime - Integer Flexbox Layout Solver", "[ui][tui][flexbox]") {
     CHECK(btn2->getBounds().width == 10);
 }
 
+TEST_CASE("Desktop Flexbox Layout Solver - Pixels, Gap, FlexShrink & ScrollNode", "[ui][desktop][flexbox]") {
+    LayoutMetrics metrics;
+    metrics.unitMode = LayoutUnitMode::DesktopPixels;
+    metrics.charWidthPx = 8;
+    metrics.lineHeightPx = 20;
+
+    // 1. Row layout with gap and explicit pixel sizes
+    auto root = std::make_shared<BoxNode>();
+    root->setId(1);
+    root->getStyle().flexDirection = FlexDirection::Row;
+    root->getStyle().padding = Edges::All(10);
+    root->getStyle().gap = 15;
+
+    auto colA = std::make_shared<BoxNode>();
+    colA->setId(2);
+    colA->getStyle().width = Dimension::Pixels(200);
+    colA->getStyle().height = Dimension::Pixels(100);
+    root->appendChild(colA);
+
+    auto colB = std::make_shared<BoxNode>();
+    colB->setId(3);
+    colB->getStyle().width = Dimension::Pixels(300);
+    colB->getStyle().height = Dimension::Pixels(100);
+    root->appendChild(colB);
+
+    Rect screenBounds{0, 0, 800, 600};
+    FlexboxSolver::computeLayout(root, screenBounds, metrics);
+
+    CHECK(root->getBounds().width == 800);
+    CHECK(root->getBounds().height == 600);
+
+    // colA starts at padding 10
+    CHECK(colA->getBounds().x == 10);
+    CHECK(colA->getBounds().y == 10);
+    CHECK(colA->getBounds().width == 200);
+
+    // colB starts after colA + gap (10 + 200 + 15 = 225)
+    CHECK(colB->getBounds().x == 225);
+    CHECK(colB->getBounds().y == 10);
+    CHECK(colB->getBounds().width == 300);
+
+    // 2. Proportional flex-shrink under constrained space
+    auto shrinkContainer = std::make_shared<BoxNode>();
+    shrinkContainer->setId(10);
+    shrinkContainer->getStyle().flexDirection = FlexDirection::Row;
+    shrinkContainer->getStyle().width = Dimension::Pixels(400);
+
+    auto item1 = std::make_shared<BoxNode>();
+    item1->setId(11);
+    item1->getStyle().width = Dimension::Pixels(300);
+    item1->getStyle().flexShrink = 1;
+    shrinkContainer->appendChild(item1);
+
+    auto item2 = std::make_shared<BoxNode>();
+    item2->setId(12);
+    item2->getStyle().width = Dimension::Pixels(300);
+    item2->getStyle().flexShrink = 1;
+    shrinkContainer->appendChild(item2);
+
+    FlexboxSolver::computeLayout(shrinkContainer, Rect{0, 0, 400, 200}, metrics);
+    // Total required = 600, available = 400, debt = 200. Each item shrinks by 100 -> width 200
+    CHECK(item1->getBounds().width == 200);
+    CHECK(item2->getBounds().width == 200);
+
+    // 3. ScrollNode computes contentHeight and clamps scrollOffset
+    auto scroll = std::make_shared<ScrollNode>();
+    scroll->setId(20);
+    scroll->getStyle().width = Dimension::Pixels(400);
+    scroll->getStyle().height = Dimension::Pixels(300);
+    scroll->getStyle().flexDirection = FlexDirection::Column;
+    scroll->getStyle().gap = 10;
+
+    for (int i = 0; i < 5; ++i) {
+        auto card = std::make_shared<BoxNode>();
+        card->setId(21 + i);
+        card->getStyle().height = Dimension::Pixels(100);
+        scroll->appendChild(card);
+    }
+
+    scroll->setScrollOffset(1000); // Intentionally out of bounds
+    FlexboxSolver::computeLayout(scroll, Rect{0, 0, 400, 300}, metrics);
+
+    // 5 cards * 100 + 4 gaps * 10 = 540 contentHeight
+    CHECK(scroll->getContentHeight() == 540);
+    // Max offset = 540 - 300 = 240. Scroll offset should be clamped to 240
+    CHECK(scroll->getScrollOffset() == 240);
+}
+
 TEST_CASE("TUI Runtime - Focus Manager Tab Navigation", "[ui][tui][focus]") {
     auto root = std::make_shared<BoxNode>();
     root->setId(1);

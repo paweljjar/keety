@@ -238,6 +238,8 @@ private:
     TypePtr checkCryptoDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope);
     TypePtr checkHttpMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope);
     TypePtr checkHttpDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope);
+    TypePtr checkUiMemberCall(const ast::MemberExpr* member, const ast::CallExpr* call, sema::Scope& scope);
+    TypePtr checkUiDirectCall(const ast::IdentExpr* callee, const ast::CallExpr* call, sema::Scope& scope);
 };
 
 } // namespace keety::typechecker

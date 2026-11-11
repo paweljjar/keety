@@ -160,6 +160,19 @@ TEST_CASE("Analyzer getCompletions produces context-aware suggestions", "[lsp][c
         REQUIRE(containsLabel(listColor, "Green"));
         REQUIRE(containsLabel(listColor, "Blue"));
         REQUIRE(containsLabel(listColor, "Default"));
+
+        // 5. ui.
+        std::string codeUi = "import ui;\nfn test(): void {\n    ui.\n}\n";
+        Document docUi("file:///ui_test.keet", "keet", 1, codeUi);
+        auto listUi = analyzer.getCompletions(docUi, Position{2, 7});
+
+        REQUIRE(containsLabel(listUi, "mountDesktop"));
+        REQUIRE(containsLabel(listUi, "renderDesktop"));
+        REQUIRE(containsLabel(listUi, "mountHeadless"));
+        REQUIRE(containsLabel(listUi, "renderTui"));
+        REQUIRE(containsLabel(listUi, "DesktopBackend"));
+        REQUIRE(containsLabel(listUi, "WindowConfig"));
+        REQUIRE(containsLabel(listUi, "StackNode"));
     }
 
     SECTION("Class 'this.' and instance member dot-completion") {
@@ -261,6 +274,30 @@ TEST_CASE("Analyzer getCompletions produces context-aware suggestions", "[lsp][c
         REQUIRE(itemListen->kind == CompletionItemKind::Method);
         REQUIRE(itemListen->detail.find("listen") != std::string::npos);
         REQUIRE(itemListen->documentation.find("listening") != std::string::npos);
+
+        std::string codeDesktop =
+            "import ui;\n"
+            "fn main(): void {\n"
+            "    let backend: ui.DesktopBackend = ui.mountDesktop();\n"
+            "    backend.\n"
+            "}\n";
+        Document docDesktop("file:///desktop_inst.keet", "keet", 1, codeDesktop);
+
+        // backend. on line 3, col 12
+        auto listDesktop = analyzer.getCompletions(docDesktop, Position{3, 12});
+        REQUIRE(containsLabel(listDesktop, "renderFrame"));
+        REQUIRE(containsLabel(listDesktop, "dispatchClick"));
+        REQUIRE(containsLabel(listDesktop, "getWidth"));
+        REQUIRE(containsLabel(listDesktop, "getHeight"));
+        REQUIRE(containsLabel(listDesktop, "snapshot"));
+        REQUIRE(containsLabel(listDesktop, "resize"));
+        REQUIRE(containsLabel(listDesktop, "relayout"));
+        REQUIRE(containsLabel(listDesktop, "dispatchMouseMove"));
+
+        auto itemSnapshot = findItem(listDesktop, "snapshot");
+        REQUIRE(itemSnapshot != nullptr);
+        REQUIRE(itemSnapshot->kind == CompletionItemKind::Method);
+        REQUIRE(itemSnapshot->detail.find("snapshot") != std::string::npos);
     }
 
     SECTION("Enum dot-completion") {

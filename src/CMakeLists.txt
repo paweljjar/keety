@@ -58,7 +58,12 @@ target_include_directories(keety_core PUBLIC
 target_link_libraries(keety_core PUBLIC
     keety_warnings
     $<$<PLATFORM_ID:Windows>:ws2_32>
+    $<$<PLATFORM_ID:Linux>:${CMAKE_DL_LIBS}>
 )
+
+if(APPLE)
+    target_link_libraries(keety_core PUBLIC "-framework Cocoa" "-framework CoreGraphics")
+endif()
 
 target_compile_definitions(keety_core PRIVATE
     KEETY_DEFAULT_RUNTIME_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../runtime"

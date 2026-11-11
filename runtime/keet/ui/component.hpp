@@ -25,7 +25,10 @@ public:
     virtual void onDestroy() {}
 
     /// Core component lifecycle implementation
-    virtual std::shared_ptr<UINode> mount() { return rootNode_; }
+    virtual std::shared_ptr<UINode> mount() {
+        dirtyMask_ = 0;
+        return rootNode_;
+    }
     virtual void update([[maybe_unused]] uint32_t dirtyMask) {}
     virtual void destroy() {
         onDestroy();
@@ -53,10 +56,13 @@ public:
     void flushUpdate() {
         if (dirtyMask_ != 0) {
             uint32_t currentMask = dirtyMask_;
+            dirtyMask_ = 0;
             beforeUpdate(currentMask);
             update(currentMask);
             afterUpdate(currentMask);
-            dirtyMask_ = 0;
+        }
+        for (auto& [id, child] : children_) {
+            if (child) child->flushUpdate();
         }
     }
 

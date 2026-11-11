@@ -878,6 +878,9 @@ int CliDriver::execute_check(const CliOptions& options, std::ostream& out, std::
                        edge.rawImportPath == "net.http" || edge.rawImportPath == "http") {
                 auto httpModSym = std::make_shared<sema::Symbol>("http", sema::SymbolKind::Module, edge.importSpan);
                 module_scope->define(httpModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/ui" || edge.rawImportPath == "ui") {
+                auto uiModSym = std::make_shared<sema::Symbol>("ui", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(uiModSym, false);
             }
             if (edge.toCanonicalPath.rfind("<stdlib>/", 0) != 0) {
                 auto it = module_scopes.find(edge.toCanonicalPath);
@@ -1057,6 +1060,9 @@ int CliDriver::execute_emit(const CliOptions& options, std::ostream& out, std::o
                        edge.rawImportPath == "net.http" || edge.rawImportPath == "http") {
                 auto httpModSym = std::make_shared<sema::Symbol>("http", sema::SymbolKind::Module, edge.importSpan);
                 module_scope->define(httpModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/ui" || edge.rawImportPath == "ui") {
+                auto uiModSym = std::make_shared<sema::Symbol>("ui", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(uiModSym, false);
             }
             if (edge.toCanonicalPath.rfind("<stdlib>/", 0) != 0) {
                 auto it = module_scopes.find(edge.toCanonicalPath);
@@ -1312,6 +1318,9 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
                        edge.rawImportPath == "net.http" || edge.rawImportPath == "http") {
                 auto httpModSym = std::make_shared<sema::Symbol>("http", sema::SymbolKind::Module, edge.importSpan);
                 module_scope->define(httpModSym, false);
+            } else if (edge.toCanonicalPath == "<stdlib>/ui" || edge.rawImportPath == "ui") {
+                auto uiModSym = std::make_shared<sema::Symbol>("ui", sema::SymbolKind::Module, edge.importSpan);
+                module_scope->define(uiModSym, false);
             }
             if (edge.toCanonicalPath.rfind("<stdlib>/", 0) != 0) {
                 auto it = module_scopes.find(edge.toCanonicalPath);
@@ -1530,9 +1539,18 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     LinkOptions link_opts;
     link_opts.kind = BinaryKind::Executable;
     link_opts.debug_symbols = comp_opts.debug_symbols;
-#if defined(_WIN32)
+#if defined(__APPLE__)
+    link_opts.extra_linker_flags.push_back("-framework");
+    link_opts.extra_linker_flags.push_back("Cocoa");
+    link_opts.extra_linker_flags.push_back("-framework");
+    link_opts.extra_linker_flags.push_back("CoreGraphics");
+#elif defined(_WIN32)
     link_opts.libraries.push_back("ws2_32");
     link_opts.libraries.push_back("bcrypt");
+    link_opts.libraries.push_back("user32");
+    link_opts.libraries.push_back("gdi32");
+#elif defined(__linux__)
+    link_opts.libraries.push_back("dl");
 #endif
     if (options.verbose) {
         out << "[verbose] Linking " << object_files.size() << " object file(s) into "

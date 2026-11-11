@@ -342,20 +342,23 @@ std::string HeaderEmitter::to_cpp_type(const ast::TypeAnnotation* type, const st
               cust->getName() == "Schema" || cust->getName() == "SchemaValidator")) ||
             (!cust->isQualified() &&
              (cust->getName() == "Request" || cust->getName() == "Response" || cust->getName() == "WebSocket" ||
-              cust->getName() == "HttpServer" || cust->getName() == "App" || cust->getName() == "Server" ||
-              cust->getName() == "Schema" || cust->getName() == "SchemaValidator"))) {
+              cust->getName() == "HttpServer" || cust->getName() == "Schema" || cust->getName() == "SchemaValidator"))) {
             return "::keet::net::http::" + cust->getName();
         }
         if ((cust->isQualified() && cust->getModuleQualifier() == "ui" &&
              (cust->getName() == "Component" || cust->getName() == "Node" || cust->getName() == "BoxNode" ||
-              cust->getName() == "TextNode" || cust->getName() == "ButtonNode" || cust->getName() == "InputNode" ||
-              cust->getName() == "ScrollNode" || cust->getName() == "VNode" || cust->getName() == "HeadlessBackend" ||
-              cust->getName() == "TuiBackend" || cust->getName() == "WebVdomBackend")) ||
+              cust->getName() == "StackNode" || cust->getName() == "TextNode" || cust->getName() == "ButtonNode" ||
+              cust->getName() == "InputNode" || cust->getName() == "ScrollNode" || cust->getName() == "VNode" ||
+              cust->getName() == "HeadlessBackend" || cust->getName() == "TuiBackend" || cust->getName() == "DesktopBackend" ||
+              cust->getName() == "WindowConfig" || cust->getName() == "Canvas2D" || cust->getName() == "FrameBuffer" ||
+              cust->getName() == "RgbaColor" || cust->getName() == "WebVdomBackend")) ||
             (!cust->isQualified() &&
              (cust->getName() == "Component" || cust->getName() == "Node" || cust->getName() == "BoxNode" ||
-              cust->getName() == "TextNode" || cust->getName() == "ButtonNode" || cust->getName() == "InputNode" ||
-              cust->getName() == "ScrollNode" || cust->getName() == "VNode" || cust->getName() == "HeadlessBackend" ||
-              cust->getName() == "TuiBackend" || cust->getName() == "WebVdomBackend"))) {
+              cust->getName() == "StackNode" || cust->getName() == "TextNode" || cust->getName() == "ButtonNode" ||
+              cust->getName() == "InputNode" || cust->getName() == "ScrollNode" || cust->getName() == "VNode" ||
+              cust->getName() == "HeadlessBackend" || cust->getName() == "TuiBackend" || cust->getName() == "DesktopBackend" ||
+              cust->getName() == "WindowConfig" || cust->getName() == "Canvas2D" || cust->getName() == "FrameBuffer" ||
+              cust->getName() == "RgbaColor" || cust->getName() == "WebVdomBackend"))) {
             return "::keet::ui::" + cust->getName();
         }
         std::string prefix;
@@ -448,9 +451,18 @@ std::string HeaderEmitter::to_cpp_type(const typechecker::TypePtr& type, const s
             if (n == "Response" || n == "http.Response" || n == "net.http.Response") return "::keet::net::http::Response";
             if (n == "WebSocket" || n == "http.WebSocket" || n == "net.http.WebSocket") return "::keet::net::http::WebSocket";
             if (n == "HttpServer" || n == "http.HttpServer" || n == "net.http.HttpServer" ||
-                n == "App" || n == "http.App" || n == "Server" || n == "http.Server") return "::keet::net::http::HttpServer";
+                n == "http.App" || n == "http.Server") return "::keet::net::http::HttpServer";
             if (n == "Schema" || n == "http.Schema" || n == "net.http.Schema") return "::keet::net::http::Schema";
             if (n == "SchemaValidator" || n == "http.SchemaValidator" || n == "net.http.SchemaValidator") return "::keet::net::http::SchemaValidator";
+            if (n == "DesktopBackend" || n == "ui.DesktopBackend") return "::keet::ui::DesktopBackend";
+            if (n == "WindowConfig" || n == "ui.WindowConfig") return "::keet::ui::WindowConfig";
+            if (n == "StackNode" || n == "ui.StackNode") return "::keet::ui::StackNode";
+            if (n == "ScrollNode" || n == "ui.ScrollNode") return "::keet::ui::ScrollNode";
+            if (n == "InputNode" || n == "ui.InputNode") return "::keet::ui::InputNode";
+            if (n == "ButtonNode" || n == "ui.ButtonNode") return "::keet::ui::ButtonNode";
+            if (n == "TextNode" || n == "ui.TextNode") return "::keet::ui::TextNode";
+            if (n == "BoxNode" || n == "ui.BoxNode") return "::keet::ui::BoxNode";
+            if (n == "HeadlessBackend" || n == "ui.HeadlessBackend") return "::keet::ui::HeadlessBackend";
         }
         return cust ? cust->getName() : "auto";
     }

@@ -17,6 +17,7 @@ add_executable(keety_unit_tests
     unit/test_kml_toolchain.cpp
     unit/test_ui_runtime.cpp
     unit/test_tui_runtime.cpp
+    unit/test_desktop_ui_runtime.cpp
     unit/test_vdom_runtime.cpp
     unit/test_http_serve_ui.cpp
     unit/test_kml_tooling.cpp
@@ -109,6 +110,7 @@ add_executable(keety_unit_tests
     conformance/test_conformance_test.cpp
     conformance/test_conformance_crypto.cpp
     conformance/test_conformance_http.cpp
+    conformance/test_conformance_ui.cpp
     conformance/test_conformance_negative.cpp
     unit/test_pkg_source_spec.cpp
     unit/test_pkg_manifest.cpp

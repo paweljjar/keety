@@ -22,12 +22,17 @@ option(KEETY_ENABLE_CLANG_TIDY "Enable clang-tidy analysis during build" OFF)
 option(KEETY_BUILD_TESTS "Build conformance and unit test suites" ON)
 option(KEETY_BUILD_BENCHMARKS "Build reference performance benchmarks" ON)
 
+if(WIN32)
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
 # -----------------------------------------------------------------------------
 # Compiler Warnings Interface Target
 # -----------------------------------------------------------------------------
 add_library(keety_warnings INTERFACE)
 
 if(MSVC)
+    target_compile_definitions(keety_warnings INTERFACE NOMINMAX WIN32_LEAN_AND_MEAN)
     target_compile_options(keety_warnings INTERFACE
         /W4
         /permissive-
