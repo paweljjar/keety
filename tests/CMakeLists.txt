@@ -27,6 +27,7 @@ add_executable(keety_unit_tests
     unit/test_diagnostic_translator.cpp
     unit/test_source_map_translation.cpp
     unit/test_linker_diagnostic_translator.cpp
+    unit/test_cli_pipeline_diagnostics.cpp
     unit/test_diagnostics.cpp
     unit/test_error_code.cpp
     unit/test_runtime_error.cpp

@@ -1,6 +1,7 @@
 #include <keety/driver/cli_driver.hpp>
 #include <keety/driver/project_root.hpp>
 
+#include <keety/diag/diagnostic_translator.hpp>
 #include <keety/emitter/cpp_emitter.hpp>
 #include <keety/emitter/header_emitter.hpp>
 #include <keety/ir/ast_lowerer.hpp>
@@ -1401,6 +1402,7 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
 
     // 3. Emit C++ headers and implementations
     std::vector<std::filesystem::path> generated_cpp_files;
+    std::unordered_map<std::string, diag::SourceMap> module_source_maps;
 
     for (const auto* node : ordered_nodes) {
         if (!node || !node->ast) {
@@ -1409,10 +1411,12 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
 
         std::string hpp_content;
         std::string cpp_content;
+        diag::SourceMap smap;
 
         if (node->isKmlComponent && !node->kmlGeneratedHpp.empty()) {
             hpp_content = node->kmlGeneratedHpp;
             cpp_content = node->kmlGeneratedCpp;
+            smap = diag::SourceMap::parseFromCpp(cpp_content);
         } else {
             ir::AstLowerer lowerer(&emitter);
             auto ir_mod = lowerer.lower_module(*node->ast);
@@ -1440,6 +1444,7 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
             }
             emitter::CppEmitter cpp_emitter(*node->ast, *ir_mod, cpp_opts);
             cpp_content = cpp_emitter.emit();
+            smap = cpp_emitter.get_source_map();
         }
 
         std::filesystem::path hpp_path = build_dir / (node->moduleName + ".hpp");
@@ -1449,6 +1454,8 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
         std::filesystem::path cpp_path = build_dir / (node->moduleName + ".cpp");
         std::ofstream cpp_file(cpp_path);
         cpp_file << cpp_content;
+
+        module_source_maps[cpp_path.filename().string()] = std::move(smap);
 
         if (options.verbose) {
             out << "[verbose] Emitted sources: " << hpp_path.filename().string()
@@ -1522,14 +1529,41 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
         }
         auto comp_res = toolchain_driver.compile(cpp_src, obj_path, comp_opts);
         if (!comp_res.success) {
-            if (options.verbose || options.verbose_cpp) {
-                err << "error: compilation failed for '" << cpp_src.filename().string() << "':\n"
+            if (options.verbose_cpp) {
+                err << "[verbose-cpp] Raw compiler output for '" << cpp_src.filename().string() << "':\n"
                     << comp_res.output << "\n";
+            }
+
+            const diag::SourceMap* smap = nullptr;
+            auto sm_it = module_source_maps.find(cpp_src.filename().string());
+            if (sm_it != module_source_maps.end()) {
+                smap = &sm_it->second;
+            }
+
+            auto translated = diag::DiagnosticTranslator::translate(
+                comp_res.output,
+                toolchain_driver.get_toolchain().kind,
+                &sm,
+                smap);
+
+            if (!translated.empty()) {
+                for (const auto& d : translated) {
+                    emitter.report(d);
+                }
+                if (options.diagnostic_format == DiagnosticFormat::Json) {
+                    emitter.emitJson(err);
+                } else {
+                    for (const auto& d : translated) {
+                        err << emitter.format(d);
+                    }
+                }
             } else {
                 err << "error[ICE]: internal compiler error: generated C++ failed to compile for '"
                     << cpp_src.filename().string() << "'\n"
-                    << "  --> Please file a bug report at https://github.com/keetscript/keety/issues\n"
-                    << "      Run with '--verbose-cpp' or '--verbose' to view raw backend compiler backtrace.\n";
+                    << "  --> Please file a bug report at https://github.com/keetscript/keety/issues\n";
+                if (options.verbose || options.verbose_cpp) {
+                    err << comp_res.output << "\n";
+                }
             }
             return std::nullopt;
         }
@@ -1558,14 +1592,31 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     }
     auto link_res = toolchain_driver.link_executable(object_files, target_binary, link_opts);
     if (!link_res.success) {
-        if (options.verbose || options.verbose_cpp) {
-            err << "error: linking failed for '" << target_binary.filename().string() << "':\n"
+        if (options.verbose_cpp) {
+            err << "[verbose-cpp] Raw linker output for '" << target_binary.filename().string() << "':\n"
                 << link_res.output << "\n";
+        }
+
+        auto translated = diag::DiagnosticTranslator::translate_linker_output(link_res.output);
+
+        if (!translated.empty()) {
+            for (const auto& d : translated) {
+                emitter.report(d);
+            }
+            if (options.diagnostic_format == DiagnosticFormat::Json) {
+                emitter.emitJson(err);
+            } else {
+                for (const auto& d : translated) {
+                    err << emitter.format(d);
+                }
+            }
         } else {
             err << "error[ICE]: internal compiler error: backend linking failed for '"
                 << target_binary.filename().string() << "'\n"
-                << "  --> Please file a bug report at https://github.com/keetscript/keety/issues\n"
-                << "      Run with '--verbose-cpp' or '--verbose' to view raw backend linker backtrace.\n";
+                << "  --> Please file a bug report at https://github.com/keetscript/keety/issues\n";
+            if (options.verbose || options.verbose_cpp) {
+                err << link_res.output << "\n";
+            }
         }
         return std::nullopt;
     }
