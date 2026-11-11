@@ -20,10 +20,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     diagnosticManager = new DiagnosticManager();
     context.subscriptions.push(diagnosticManager);
 
+    const selector = [
+      { scheme: 'file', language: 'keetscript' },
+      { scheme: 'file', language: 'kml' }
+    ];
+
     // Quick Fix Code Action Provider (lightbulb)
     context.subscriptions.push(
       vscode.languages.registerCodeActionsProvider(
-        'keetscript',
+        selector,
         new KeetCodeActionProvider(),
         {
           providedCodeActionKinds: KeetCodeActionProvider.providedCodeActionKinds
@@ -34,18 +39,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Fallback IntelliSense Autocompletion Provider
     context.subscriptions.push(
       vscode.languages.registerCompletionItemProvider(
-        'keetscript',
+        selector,
         new KeetCompletionItemProvider(),
         '.',
         ':',
-        '<'
+        '<',
+        '$',
+        '@',
+        '{'
       )
     );
 
     // Fallback Hover Documentation Provider
     context.subscriptions.push(
       vscode.languages.registerHoverProvider(
-        'keetscript',
+        selector,
         new KeetHoverProvider()
       )
     );

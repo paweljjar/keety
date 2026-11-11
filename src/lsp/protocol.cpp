@@ -323,6 +323,368 @@ TextDocumentPositionParams TextDocumentPositionParams::fromJson(const JsonValue&
     return p;
 }
 
+JsonValue ReferenceContext::toJson() const {
+    JsonValue::Object obj;
+    obj["includeDeclaration"] = JsonValue(includeDeclaration);
+    return JsonValue(std::move(obj));
+}
+
+ReferenceContext ReferenceContext::fromJson(const JsonValue& j) {
+    ReferenceContext ctx;
+    if (auto* obj = asObject(j)) {
+        if (auto* inc = findField(*obj, "includeDeclaration"); inc && inc->is_bool()) {
+            ctx.includeDeclaration = std::get<bool>(inc->value);
+        }
+    }
+    return ctx;
+}
+
+JsonValue ReferenceParams::toJson() const {
+    JsonValue::Object obj;
+    JsonValue::Object docObj;
+    docObj["uri"] = JsonValue(textDocument.uri);
+    obj["textDocument"] = JsonValue(std::move(docObj));
+    obj["position"] = position.toJson();
+    obj["context"] = context.toJson();
+    return JsonValue(std::move(obj));
+}
+
+ReferenceParams ReferenceParams::fromJson(const JsonValue& j) {
+    ReferenceParams p;
+    if (auto* obj = asObject(j)) {
+        if (auto* docNode = findField(*obj, "textDocument")) {
+            p.textDocument = TextDocumentIdentifier::fromJson(*docNode);
+        }
+        if (auto* posNode = findField(*obj, "position")) {
+            p.position = Position::fromJson(*posNode);
+        }
+        if (auto* ctxNode = findField(*obj, "context")) {
+            p.context = ReferenceContext::fromJson(*ctxNode);
+        }
+    }
+    return p;
+}
+
+JsonValue PrepareRenameParams::toJson() const {
+    JsonValue::Object obj;
+    JsonValue::Object docObj;
+    docObj["uri"] = JsonValue(textDocument.uri);
+    obj["textDocument"] = JsonValue(std::move(docObj));
+    obj["position"] = position.toJson();
+    return JsonValue(std::move(obj));
+}
+
+PrepareRenameParams PrepareRenameParams::fromJson(const JsonValue& j) {
+    PrepareRenameParams p;
+    if (auto* obj = asObject(j)) {
+        if (auto* docNode = findField(*obj, "textDocument")) {
+            p.textDocument = TextDocumentIdentifier::fromJson(*docNode);
+        }
+        if (auto* posNode = findField(*obj, "position")) {
+            p.position = Position::fromJson(*posNode);
+        }
+    }
+    return p;
+}
+
+JsonValue PrepareRenameResult::toJson() const {
+    JsonValue::Object obj;
+    obj["range"] = range.toJson();
+    obj["placeholder"] = JsonValue(placeholder);
+    return JsonValue(std::move(obj));
+}
+
+PrepareRenameResult PrepareRenameResult::fromJson(const JsonValue& j) {
+    PrepareRenameResult r;
+    if (auto* obj = asObject(j)) {
+        if (auto* rng = findField(*obj, "range")) {
+            r.range = Range::fromJson(*rng);
+        }
+        if (auto* ph = findField(*obj, "placeholder"); ph && ph->is_string()) {
+            r.placeholder = std::get<std::string>(ph->value);
+        }
+    }
+    return r;
+}
+
+JsonValue RenameParams::toJson() const {
+    JsonValue::Object obj;
+    JsonValue::Object docObj;
+    docObj["uri"] = JsonValue(textDocument.uri);
+    obj["textDocument"] = JsonValue(std::move(docObj));
+    obj["position"] = position.toJson();
+    obj["newName"] = JsonValue(newName);
+    return JsonValue(std::move(obj));
+}
+
+RenameParams RenameParams::fromJson(const JsonValue& j) {
+    RenameParams p;
+    if (auto* obj = asObject(j)) {
+        if (auto* docNode = findField(*obj, "textDocument")) {
+            p.textDocument = TextDocumentIdentifier::fromJson(*docNode);
+        }
+        if (auto* posNode = findField(*obj, "position")) {
+            p.position = Position::fromJson(*posNode);
+        }
+        if (auto* nnNode = findField(*obj, "newName"); nnNode && nnNode->is_string()) {
+            p.newName = std::get<std::string>(nnNode->value);
+        }
+    }
+    return p;
+}
+
+JsonValue ParameterInformation::toJson() const {
+    JsonValue::Object obj;
+    obj["label"] = JsonValue(label);
+    if (documentation.has_value()) {
+        obj["documentation"] = documentation->toJson();
+    }
+    return JsonValue(std::move(obj));
+}
+
+ParameterInformation ParameterInformation::fromJson(const JsonValue& j) {
+    ParameterInformation pi;
+    if (auto* obj = asObject(j)) {
+        if (auto* l = findField(*obj, "label"); l && l->is_string()) {
+            pi.label = std::get<std::string>(l->value);
+        }
+        if (auto* d = findField(*obj, "documentation")) {
+            if (d->is_string()) {
+                pi.documentation = MarkupContent{"markdown", std::get<std::string>(d->value)};
+            } else if (d->is_object()) {
+                pi.documentation = MarkupContent::fromJson(*d);
+            }
+        }
+    }
+    return pi;
+}
+
+JsonValue SignatureInformation::toJson() const {
+    JsonValue::Object obj;
+    obj["label"] = JsonValue(label);
+    if (documentation.has_value()) {
+        obj["documentation"] = documentation->toJson();
+    }
+    JsonValue::Array paramsArr;
+    paramsArr.reserve(parameters.size());
+    for (const auto& p : parameters) {
+        paramsArr.push_back(p.toJson());
+    }
+    obj["parameters"] = JsonValue(std::move(paramsArr));
+    if (activeParameter.has_value()) {
+        obj["activeParameter"] = JsonValue(int64_t(*activeParameter));
+    }
+    return JsonValue(std::move(obj));
+}
+
+SignatureInformation SignatureInformation::fromJson(const JsonValue& j) {
+    SignatureInformation si;
+    if (auto* obj = asObject(j)) {
+        if (auto* l = findField(*obj, "label"); l && l->is_string()) {
+            si.label = std::get<std::string>(l->value);
+        }
+        if (auto* d = findField(*obj, "documentation")) {
+            if (d->is_string()) {
+                si.documentation = MarkupContent{"markdown", std::get<std::string>(d->value)};
+            } else if (d->is_object()) {
+                si.documentation = MarkupContent::fromJson(*d);
+            }
+        }
+        if (auto* p = findField(*obj, "parameters"); p && p->is_array()) {
+            for (const auto& item : std::get<JsonValue::Array>(p->value)) {
+                si.parameters.push_back(ParameterInformation::fromJson(item));
+            }
+        }
+        if (auto* ap = findField(*obj, "activeParameter")) {
+            if (ap->is_int()) {
+                si.activeParameter = static_cast<uint32_t>(std::get<int64_t>(ap->value));
+            } else if (ap->is_number()) {
+                si.activeParameter = static_cast<uint32_t>(std::get<double>(ap->value));
+            }
+        }
+    }
+    return si;
+}
+
+JsonValue SignatureHelp::toJson() const {
+    JsonValue::Object obj;
+    JsonValue::Array sigsArr;
+    sigsArr.reserve(signatures.size());
+    for (const auto& s : signatures) {
+        sigsArr.push_back(s.toJson());
+    }
+    obj["signatures"] = JsonValue(std::move(sigsArr));
+    obj["activeSignature"] = JsonValue(int64_t(activeSignature));
+    obj["activeParameter"] = JsonValue(int64_t(activeParameter));
+    return JsonValue(std::move(obj));
+}
+
+SignatureHelp SignatureHelp::fromJson(const JsonValue& j) {
+    SignatureHelp sh;
+    if (auto* obj = asObject(j)) {
+        if (auto* s = findField(*obj, "signatures"); s && s->is_array()) {
+            for (const auto& item : std::get<JsonValue::Array>(s->value)) {
+                sh.signatures.push_back(SignatureInformation::fromJson(item));
+            }
+        }
+        if (auto* as = findField(*obj, "activeSignature")) {
+            if (as->is_int()) {
+                sh.activeSignature = static_cast<uint32_t>(std::get<int64_t>(as->value));
+            } else if (as->is_number()) {
+                sh.activeSignature = static_cast<uint32_t>(std::get<double>(as->value));
+            }
+        }
+        if (auto* ap = findField(*obj, "activeParameter")) {
+            if (ap->is_int()) {
+                sh.activeParameter = static_cast<uint32_t>(std::get<int64_t>(ap->value));
+            } else if (ap->is_number()) {
+                sh.activeParameter = static_cast<uint32_t>(std::get<double>(ap->value));
+            }
+        }
+    }
+    return sh;
+}
+
+JsonValue SignatureHelpParams::toJson() const {
+    JsonValue::Object obj;
+    JsonValue::Object docObj;
+    docObj["uri"] = JsonValue(textDocument.uri);
+    obj["textDocument"] = JsonValue(std::move(docObj));
+    obj["position"] = position.toJson();
+    return JsonValue(std::move(obj));
+}
+
+SignatureHelpParams SignatureHelpParams::fromJson(const JsonValue& j) {
+    SignatureHelpParams p;
+    if (auto* obj = asObject(j)) {
+        if (auto* docNode = findField(*obj, "textDocument")) {
+            p.textDocument = TextDocumentIdentifier::fromJson(*docNode);
+        }
+        if (auto* posNode = findField(*obj, "position")) {
+            p.position = Position::fromJson(*posNode);
+        }
+    }
+    return p;
+}
+
+SemanticTokensLegend SemanticTokensLegend::defaultLegend() {
+    return SemanticTokensLegend{
+        {
+            "type",
+            "class",
+            "interface",
+            "enum",
+            "enumMember",
+            "function",
+            "method",
+            "property",
+            "variable",
+            "parameter",
+            "keyword",
+            "string",
+            "number",
+            "operator",
+            "comment"
+        },
+        {
+            "declaration",
+            "readonly",
+            "static",
+            "defaultLibrary"
+        }
+    };
+}
+
+JsonValue SemanticTokensLegend::toJson() const {
+    JsonValue::Object obj;
+    JsonValue::Array typesArr;
+    typesArr.reserve(tokenTypes.size());
+    for (const auto& t : tokenTypes) {
+        typesArr.push_back(JsonValue(t));
+    }
+    obj["tokenTypes"] = JsonValue(std::move(typesArr));
+
+    JsonValue::Array modsArr;
+    modsArr.reserve(tokenModifiers.size());
+    for (const auto& m : tokenModifiers) {
+        modsArr.push_back(JsonValue(m));
+    }
+    obj["tokenModifiers"] = JsonValue(std::move(modsArr));
+    return JsonValue(std::move(obj));
+}
+
+SemanticTokensLegend SemanticTokensLegend::fromJson(const JsonValue& j) {
+    SemanticTokensLegend leg;
+    if (auto* obj = asObject(j)) {
+        if (auto* tt = findField(*obj, "tokenTypes"); tt && tt->is_array()) {
+            for (const auto& item : std::get<JsonValue::Array>(tt->value)) {
+                if (item.is_string()) {
+                    leg.tokenTypes.push_back(std::get<std::string>(item.value));
+                }
+            }
+        }
+        if (auto* tm = findField(*obj, "tokenModifiers"); tm && tm->is_array()) {
+            for (const auto& item : std::get<JsonValue::Array>(tm->value)) {
+                if (item.is_string()) {
+                    leg.tokenModifiers.push_back(std::get<std::string>(item.value));
+                }
+            }
+        }
+    }
+    return leg;
+}
+
+JsonValue SemanticTokensParams::toJson() const {
+    JsonValue::Object obj;
+    JsonValue::Object docObj;
+    docObj["uri"] = JsonValue(textDocument.uri);
+    obj["textDocument"] = JsonValue(std::move(docObj));
+    return JsonValue(std::move(obj));
+}
+
+SemanticTokensParams SemanticTokensParams::fromJson(const JsonValue& j) {
+    SemanticTokensParams p;
+    if (auto* obj = asObject(j)) {
+        if (auto* docNode = findField(*obj, "textDocument")) {
+            p.textDocument = TextDocumentIdentifier::fromJson(*docNode);
+        }
+    }
+    return p;
+}
+
+JsonValue SemanticTokens::toJson() const {
+    JsonValue::Object obj;
+    if (resultId.has_value()) {
+        obj["resultId"] = JsonValue(*resultId);
+    }
+    JsonValue::Array arr;
+    arr.reserve(data.size());
+    for (uint32_t val : data) {
+        arr.push_back(JsonValue(int64_t(val)));
+    }
+    obj["data"] = JsonValue(std::move(arr));
+    return JsonValue(std::move(obj));
+}
+
+SemanticTokens SemanticTokens::fromJson(const JsonValue& j) {
+    SemanticTokens st;
+    if (auto* obj = asObject(j)) {
+        if (auto* rid = findField(*obj, "resultId"); rid && rid->is_string()) {
+            st.resultId = std::get<std::string>(rid->value);
+        }
+        if (auto* d = findField(*obj, "data"); d && d->is_array()) {
+            for (const auto& item : std::get<JsonValue::Array>(d->value)) {
+                if (item.is_int()) {
+                    st.data.push_back(static_cast<uint32_t>(std::get<int64_t>(item.value)));
+                } else if (item.is_number()) {
+                    st.data.push_back(static_cast<uint32_t>(std::get<double>(item.value)));
+                }
+            }
+        }
+    }
+    return st;
+}
+
 JsonValue PublishDiagnosticsParams::toJson() const {
     JsonValue::Object obj;
     obj["uri"] = JsonValue(uri);
@@ -364,6 +726,38 @@ DocumentFormattingParams DocumentFormattingParams::fromJson(const JsonValue& j) 
     if (auto* obj = asObject(j)) {
         if (auto* td = findField(*obj, "textDocument")) {
             p.textDocument = TextDocumentIdentifier::fromJson(*td);
+        }
+        if (auto* o = findField(*obj, "options")) {
+            p.options = FormattingOptions::fromJson(*o);
+        }
+    }
+    return p;
+}
+
+JsonValue DocumentRangeFormattingParams::toJson() const {
+    JsonValue::Object obj;
+    JsonValue::Object docObj;
+    docObj["uri"] = JsonValue(textDocument.uri);
+    obj["textDocument"] = JsonValue(std::move(docObj));
+    obj["range"] = range.toJson();
+    JsonValue::Object optObj;
+    optObj["tabSize"] = JsonValue(int64_t(options.tabSize));
+    optObj["insertSpaces"] = JsonValue(options.insertSpaces);
+    optObj["trimTrailingWhitespace"] = JsonValue(options.trimTrailingWhitespace);
+    optObj["insertFinalNewline"] = JsonValue(options.insertFinalNewline);
+    optObj["trimFinalNewlines"] = JsonValue(options.trimFinalNewlines);
+    obj["options"] = JsonValue(std::move(optObj));
+    return JsonValue(std::move(obj));
+}
+
+DocumentRangeFormattingParams DocumentRangeFormattingParams::fromJson(const JsonValue& j) {
+    DocumentRangeFormattingParams p;
+    if (auto* obj = asObject(j)) {
+        if (auto* td = findField(*obj, "textDocument")) {
+            p.textDocument = TextDocumentIdentifier::fromJson(*td);
+        }
+        if (auto* r = findField(*obj, "range")) {
+            p.range = Range::fromJson(*r);
         }
         if (auto* o = findField(*obj, "options")) {
             p.options = FormattingOptions::fromJson(*o);

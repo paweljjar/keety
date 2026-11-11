@@ -84,8 +84,20 @@ std::optional<std::string> Server::handleRawMessage(const std::string& rawJson) 
             } else if (method == "textDocument/definition") {
                 auto res = handleDefinition(params);
                 return JsonRpcResponse::makeResult(id, res).serialize();
+            } else if (method == "textDocument/references") {
+                auto res = handleReferences(params);
+                return JsonRpcResponse::makeResult(id, res).serialize();
+            } else if (method == "textDocument/prepareRename") {
+                auto res = handlePrepareRename(params);
+                return JsonRpcResponse::makeResult(id, res).serialize();
+            } else if (method == "textDocument/rename") {
+                auto res = handleRename(params);
+                return JsonRpcResponse::makeResult(id, res).serialize();
             } else if (method == "textDocument/hover") {
                 auto res = handleHover(params);
+                return JsonRpcResponse::makeResult(id, res).serialize();
+            } else if (method == "textDocument/signatureHelp") {
+                auto res = handleSignatureHelp(params);
                 return JsonRpcResponse::makeResult(id, res).serialize();
             } else if (method == "textDocument/completion") {
                 auto res = handleCompletion(params);
@@ -93,8 +105,14 @@ std::optional<std::string> Server::handleRawMessage(const std::string& rawJson) 
             } else if (method == "textDocument/documentSymbol") {
                 auto res = handleDocumentSymbol(params);
                 return JsonRpcResponse::makeResult(id, res).serialize();
+            } else if (method == "textDocument/semanticTokens/full") {
+                auto res = handleSemanticTokensFull(params);
+                return JsonRpcResponse::makeResult(id, res).serialize();
             } else if (method == "textDocument/formatting") {
                 auto res = handleFormatting(params);
+                return JsonRpcResponse::makeResult(id, res).serialize();
+            } else if (method == "textDocument/rangeFormatting") {
+                auto res = handleRangeFormatting(params);
                 return JsonRpcResponse::makeResult(id, res).serialize();
             } else if (method == "textDocument/codeAction") {
                 auto res = handleCodeAction(params);
@@ -186,8 +204,32 @@ void Server::handleRequest(const RequestId& id, const std::string& method, const
         return;
     }
 
+    if (method == "textDocument/references") {
+        auto res = handleReferences(params);
+        transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
+        return;
+    }
+
+    if (method == "textDocument/prepareRename") {
+        auto res = handlePrepareRename(params);
+        transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
+        return;
+    }
+
+    if (method == "textDocument/rename") {
+        auto res = handleRename(params);
+        transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
+        return;
+    }
+
     if (method == "textDocument/hover") {
         auto res = handleHover(params);
+        transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
+        return;
+    }
+
+    if (method == "textDocument/signatureHelp") {
+        auto res = handleSignatureHelp(params);
         transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
         return;
     }
@@ -204,8 +246,20 @@ void Server::handleRequest(const RequestId& id, const std::string& method, const
         return;
     }
 
+    if (method == "textDocument/semanticTokens/full") {
+        auto res = handleSemanticTokensFull(params);
+        transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
+        return;
+    }
+
     if (method == "textDocument/formatting") {
         auto res = handleFormatting(params);
+        transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
+        return;
+    }
+
+    if (method == "textDocument/rangeFormatting") {
+        auto res = handleRangeFormatting(params);
         transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
         return;
     }
@@ -257,7 +311,18 @@ JsonValue Server::handleInitialize(const JsonValue& /*params*/) {
     caps["textDocumentSync"] = JsonValue(std::move(sync));
 
     caps["definitionProvider"] = JsonValue(true);
+    caps["referencesProvider"] = JsonValue(true);
+    JsonValue::Object renameProvider;
+    renameProvider["prepareProvider"] = JsonValue(true);
+    caps["renameProvider"] = JsonValue(std::move(renameProvider));
     caps["hoverProvider"] = JsonValue(true);
+
+    JsonValue::Object sigHelpProvider;
+    JsonValue::Array sigTrigChars;
+    sigTrigChars.push_back(JsonValue(std::string("(")));
+    sigTrigChars.push_back(JsonValue(std::string(",")));
+    sigHelpProvider["triggerCharacters"] = JsonValue(std::move(sigTrigChars));
+    caps["signatureHelpProvider"] = JsonValue(std::move(sigHelpProvider));
 
     JsonValue::Object compProvider;
     compProvider["resolveProvider"] = JsonValue(false);
@@ -265,11 +330,24 @@ JsonValue Server::handleInitialize(const JsonValue& /*params*/) {
     trigChars.push_back(JsonValue(std::string(".")));
     trigChars.push_back(JsonValue(std::string("\"")));
     trigChars.push_back(JsonValue(std::string("/")));
+    trigChars.push_back(JsonValue(std::string("<")));
+    trigChars.push_back(JsonValue(std::string("$")));
+    trigChars.push_back(JsonValue(std::string("@")));
+    trigChars.push_back(JsonValue(std::string("{")));
+    trigChars.push_back(JsonValue(std::string(":")));
     compProvider["triggerCharacters"] = JsonValue(std::move(trigChars));
     caps["completionProvider"] = JsonValue(std::move(compProvider));
 
     caps["documentSymbolProvider"] = JsonValue(true);
+
+    auto defLegend = SemanticTokensLegend::defaultLegend();
+    JsonValue::Object semProvider;
+    semProvider["legend"] = defLegend.toJson();
+    semProvider["full"] = JsonValue(true);
+    caps["semanticTokensProvider"] = JsonValue(std::move(semProvider));
+
     caps["documentFormattingProvider"] = JsonValue(true);
+    caps["documentRangeFormattingProvider"] = JsonValue(true);
     caps["codeActionProvider"] = JsonValue(true);
 
     JsonValue::Object serverInfo;
@@ -356,6 +434,46 @@ JsonValue Server::handleDefinition(const JsonValue& params) {
     return locOpt->toJson();
 }
 
+JsonValue Server::handleReferences(const JsonValue& params) {
+    auto p = ReferenceParams::fromJson(params);
+    auto docOpt = docManager_.getDocument(p.textDocument.uri);
+    if (!docOpt.has_value()) {
+        return JsonValue(JsonValue::Array{});
+    }
+    auto locs = analyzer_.findReferences(*docOpt, p.position, p.context.includeDeclaration, &docManager_);
+    JsonValue::Array arr;
+    for (const auto& loc : locs) {
+        arr.push_back(loc.toJson());
+    }
+    return JsonValue(std::move(arr));
+}
+
+JsonValue Server::handlePrepareRename(const JsonValue& params) {
+    auto p = PrepareRenameParams::fromJson(params);
+    auto docOpt = docManager_.getDocument(p.textDocument.uri);
+    if (!docOpt.has_value()) {
+        return JsonValue(std::monostate{});
+    }
+    auto prepOpt = analyzer_.prepareRename(*docOpt, p.position, &docManager_);
+    if (!prepOpt.has_value()) {
+        return JsonValue(std::monostate{});
+    }
+    return prepOpt->toJson();
+}
+
+JsonValue Server::handleRename(const JsonValue& params) {
+    auto p = RenameParams::fromJson(params);
+    auto docOpt = docManager_.getDocument(p.textDocument.uri);
+    if (!docOpt.has_value()) {
+        return JsonValue(std::monostate{});
+    }
+    auto editOpt = analyzer_.renameSymbol(*docOpt, p.position, p.newName, &docManager_);
+    if (!editOpt.has_value()) {
+        return JsonValue(std::monostate{});
+    }
+    return editOpt->toJson();
+}
+
 JsonValue Server::handleHover(const JsonValue& params) {
     auto p = TextDocumentPositionParams::fromJson(params);
     auto docOpt = docManager_.getDocument(p.textDocument.uri);
@@ -367,6 +485,19 @@ JsonValue Server::handleHover(const JsonValue& params) {
         return JsonValue(std::monostate{});
     }
     return hoverOpt->toJson();
+}
+
+JsonValue Server::handleSignatureHelp(const JsonValue& params) {
+    auto p = SignatureHelpParams::fromJson(params);
+    auto docOpt = docManager_.getDocument(p.textDocument.uri);
+    if (!docOpt.has_value()) {
+        return JsonValue(std::monostate{});
+    }
+    auto sigHelp = analyzer_.getSignatureHelp(*docOpt, p.position, &docManager_);
+    if (!sigHelp.has_value()) {
+        return JsonValue(std::monostate{});
+    }
+    return sigHelp->toJson();
 }
 
 JsonValue Server::handleCompletion(const JsonValue& params) {
@@ -395,6 +526,16 @@ JsonValue Server::handleDocumentSymbol(const JsonValue& params) {
     return JsonValue(std::move(arr));
 }
 
+JsonValue Server::handleSemanticTokensFull(const JsonValue& params) {
+    auto p = SemanticTokensParams::fromJson(params);
+    auto docOpt = docManager_.getDocument(p.textDocument.uri);
+    if (!docOpt.has_value()) {
+        return JsonValue(std::monostate{});
+    }
+    auto semTokens = analyzer_.getSemanticTokens(*docOpt);
+    return semTokens.toJson();
+}
+
 JsonValue Server::handleFormatting(const JsonValue& params) {
     auto p = DocumentFormattingParams::fromJson(params);
     auto docOpt = docManager_.getDocument(p.textDocument.uri);
@@ -403,6 +544,21 @@ JsonValue Server::handleFormatting(const JsonValue& params) {
         return JsonValue(std::move(emptyArr));
     }
     auto edits = analyzer_.format(*docOpt, p.options);
+    JsonValue::Array arr;
+    for (const auto& edit : edits) {
+        arr.push_back(edit.toJson());
+    }
+    return JsonValue(std::move(arr));
+}
+
+JsonValue Server::handleRangeFormatting(const JsonValue& params) {
+    auto p = DocumentRangeFormattingParams::fromJson(params);
+    auto docOpt = docManager_.getDocument(p.textDocument.uri);
+    if (!docOpt.has_value()) {
+        JsonValue::Array emptyArr;
+        return JsonValue(std::move(emptyArr));
+    }
+    auto edits = analyzer_.formatRange(*docOpt, p.range, p.options);
     JsonValue::Array arr;
     for (const auto& edit : edits) {
         arr.push_back(edit.toJson());

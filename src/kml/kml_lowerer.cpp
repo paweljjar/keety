@@ -1,13 +1,58 @@
 #include <keety/kml/kml_lowerer.hpp>
+#include <keety/ast/decl.hpp>
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <iomanip>
+#include <map>
 #include <set>
 #include <sstream>
 
 namespace keety::kml {
 
 namespace {
+
+std::string formatImportStatement(const ast::ImportDecl* imp) {
+    if (!imp) return "";
+    std::string out;
+    if (imp->isReExported()) {
+        out += "export ";
+    }
+    auto formatPath = [](std::string_view path) -> std::string {
+        if (path.empty()) return "\"\"";
+        if (path.front() == '"') return std::string(path);
+        if (path.rfind("./", 0) == 0 || path.rfind("../", 0) == 0 ||
+            path.rfind(".\\", 0) == 0 || path.rfind("..\\", 0) == 0 ||
+            path.find('/') != std::string_view::npos ||
+            path.ends_with(".kml") || path.ends_with(".keet")) {
+            return "\"" + std::string(path) + "\"";
+        }
+        return std::string(path);
+    };
+
+    if (imp->isSelective()) {
+        out += "from ";
+        out += formatPath(imp->getModulePath());
+        out += " import ";
+        const auto& syms = imp->getSymbols();
+        for (size_t i = 0; i < syms.size(); ++i) {
+            if (i > 0) out += ", ";
+            out += syms[i].originalName;
+            if (!syms[i].alias.empty()) {
+                out += " as " + syms[i].alias;
+            }
+        }
+        out += ";\n";
+    } else {
+        out += "import ";
+        out += formatPath(imp->getModulePath());
+        if (!imp->getModuleAlias().empty()) {
+            out += " as " + imp->getModuleAlias();
+        }
+        out += ";\n";
+    }
+    return out;
+}
 
 std::string escapeCppString(std::string_view s) {
     std::string out;
@@ -853,8 +898,80 @@ LoweredComponentResult KmlLowerer::lower() {
     res.scopeClass = styleRes.scopeClass;
     res.scopedCss = styleRes.scopedCss;
 
-    // 3. Synthesize Component Class
+    // 3. Process script imports and map explicit child component paths
+    std::map<std::string, std::string> scriptComponentImports;
+    std::vector<std::string> scriptImportStatements;
+    std::set<std::string> cppIncludes;
+
+    if (doc_.script) {
+        for (const auto& decl : doc_.script->declarations) {
+            if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+                std::string stmt = formatImportStatement(imp);
+                if (!stmt.empty()) {
+                    scriptImportStatements.push_back(stmt);
+                }
+
+                std::string modPath = imp->getModulePath();
+                if (modPath.ends_with(".kml")) {
+                    std::string compName;
+                    if (!imp->getSymbols().empty()) {
+                        compName = imp->getSymbols().front().getEffectiveName();
+                    } else if (!imp->getModuleAlias().empty()) {
+                        compName = imp->getModuleAlias();
+                    } else {
+                        compName = std::filesystem::path(modPath).stem().string();
+                    }
+                    if (!compName.empty()) {
+                        scriptComponentImports[compName] = modPath;
+                    }
+                    std::string hppPath = modPath;
+                    if (hppPath.rfind("./", 0) == 0) hppPath = hppPath.substr(2);
+                    else if (hppPath.rfind(".\\", 0) == 0) hppPath = hppPath.substr(2);
+                    if (hppPath.ends_with(".kml")) {
+                        hppPath = hppPath.substr(0, hppPath.size() - 4) + ".hpp";
+                    }
+                    cppIncludes.insert("#include \"" + hppPath + "\"\n");
+                } else if (modPath.ends_with(".keet")) {
+                    std::string hppPath = modPath;
+                    if (hppPath.rfind("./", 0) == 0) hppPath = hppPath.substr(2);
+                    else if (hppPath.rfind(".\\", 0) == 0) hppPath = hppPath.substr(2);
+                    if (hppPath.ends_with(".keet")) {
+                        hppPath = hppPath.substr(0, hppPath.size() - 5) + ".hpp";
+                    }
+                    cppIncludes.insert("#include \"" + hppPath + "\"\n");
+                } else if (!modPath.empty() && modPath.find('/') == std::string::npos && modPath.find('\\') == std::string::npos) {
+                    cppIncludes.insert("#include <keet/std/" + modPath + ".hpp>\n");
+                }
+            }
+        }
+    }
+
+    std::set<std::string> childComponents;
+    for (const auto& rootNode : doc_.templateNodes) {
+        collectChildComponents(rootNode.get(), childComponents);
+    }
+
+    std::vector<std::string> fallbackComponentImports;
+    for (const auto& compName : childComponents) {
+        if (scriptComponentImports.count(compName) == 0) {
+            fallbackComponentImports.push_back("import \"./" + compName + ".kml\";\n");
+            cppIncludes.insert("#include \"" + compName + ".hpp\"\n");
+        }
+    }
+
+    std::stringstream headerImports;
+    headerImports << "import ui;\n";
+    for (const auto& stmt : scriptImportStatements) {
+        headerImports << stmt;
+    }
+    for (const auto& stmt : fallbackComponentImports) {
+        headerImports << stmt;
+    }
+    headerImports << "\n";
+
+    // 4. Synthesize Component Class
     std::stringstream ss;
+    ss << headerImports.str();
 
     // Dirty bit constants
     ss << "// Dirty Bit Mask Constants\n";
@@ -907,24 +1024,16 @@ LoweredComponentResult KmlLowerer::lower() {
 
     res.generatedKeetScript = ss.str();
 
-    // 4. Synthesize clean KeetScript module interface for TypeChecker & ModuleGraph
-    std::set<std::string> childComponents;
-    for (const auto& rootNode : doc_.templateNodes) {
-        collectChildComponents(rootNode.get(), childComponents);
-    }
-
+    // 5. Synthesize clean KeetScript module interface for TypeChecker & ModuleGraph
     {
         std::stringstream iface;
-        iface << "import ui;\n\n";
-        for (const auto& compName : childComponents) {
-            iface << "import \"./" << compName << ".kml\";\n";
-        }
+        iface << headerImports.str();
         iface << "export class " << doc_.componentName << " inherits ui.Component {\n";
         iface << "}\n";
         res.generatedInterfaceKeet = iface.str();
     }
 
-    // 5. Synthesize C++ Header (<Component>.hpp) and Source (<Component>.cpp)
+    // 6. Synthesize C++ Header (<Component>.hpp) and Source (<Component>.cpp)
     {
         std::stringstream hpp;
         hpp << "// Generated ahead-of-time by the KeetScript Compiler (keety). DO NOT EDIT.\n"
@@ -938,8 +1047,8 @@ LoweredComponentResult KmlLowerer::lower() {
             << "#include <keet/runtime.hpp>\n"
             << "#include <keet/std/ui.hpp>\n";
 
-        for (const auto& compName : childComponents) {
-            hpp << "#include \"" << compName << ".hpp\"\n";
+        for (const auto& inc : cppIncludes) {
+            hpp << inc;
         }
 
         hpp << "\nnamespace keet_module_" << doc_.componentName << " {\n"

@@ -26,14 +26,26 @@ from "ui" import Component, HeadlessBackend, TuiBackend, WebVdomBackend;
 
 ### Importing `.kml` Single-File Components
 
-A `.kml` component file (e.g., `Counter.kml`) compiles into an exported class matching the file's stem (`Counter`) that inherits from `ui.Component`. You can import `.kml` components directly using a relative path import:
+A `.kml` component file (e.g., `App.kml` or `Counter.kml`) compiles into an exported class matching the file's stem (`App`, `Counter`) that inherits from `ui.Component`. You can import `.kml` components directly using relative path imports and run them either as a **native desktop OS application** or as an **HTTP LiveView web application**:
 
+#### 1. Native Desktop GUI Application:
+```keet
+import "./App.kml";
+from ui import renderDesktop;
+
+fn main(): void {
+    let app: App = App();
+    renderDesktop(app, "KeetScript Desktop App", 800, 600);
+}
+```
+
+#### 2. Web LiveView Application (`http.serveUi`):
 ```keet
 import "./Counter.kml";
 import http;
 
 fn main(): int {
-    let mut server: http.Server = http.createServer();
+    let server: http.Server = http.createServer();
 
     server.serveUi("/", fn(): Counter {
         return Counter();
@@ -49,6 +61,32 @@ Selective imports are also supported if desired:
 from "./Counter.kml" import Counter;
 ```
 
+#### Component Composition & Nesting Inside `.kml`
+
+When building hierarchical UI component trees (e.g., embedding a `<Task />` component inside `App.kml`), component imports follow a clear two-tier resolution strategy:
+
+1. **Explicit `<script>` Imports (Priority):**
+   You can explicitly import child `.kml` components inside the parent component's `<script>` block. This allows importing from nested subdirectories or giving components aliases:
+   ```html
+   <script>
+       // Explicit relative path import
+       import "./components/Task.kml";
+       
+       // Or selective import
+       from "./components/Task.kml" import Task;
+   </script>
+   <template>
+       <vstack gap={12}>
+           {#for item in tasks}
+               <Task task={item} onToggle={toggleTask} />
+           {/for}
+       </vstack>
+   </template>
+   ```
+2. **Zero-Config Fallback (Same-Directory Discovery):**
+   If a custom tag (e.g., `<Task />`) is used in `<template>` without an explicit `import` statement in `<script>`, the compiler automatically looks for a neighboring `./<Tag>.kml` file in the same directory.
+
+
 ---
 
 ## 2. `.kml` Single-File Component Architecture
@@ -62,7 +100,7 @@ A `.kml` file consists of up to three top-level blocks:
 
 ```html
 <script>
-    let mut count: int = $state(0);
+    let count: int = $state(0);
     let doubled: int = $derived(count * 2);
     let parity: string = $derived(count % 2 == 0 ? "Even" : "Odd");
 
@@ -111,18 +149,19 @@ A `.kml` file consists of up to three top-level blocks:
 
 ## 3. Reactive Runes (`<script>`)
 
-Inside a `.kml` `<script>` block, the compiler provides three compile-time reactive runes that build a static dependency graph and assign bit positions in the component's `_dirty` bitmask (`uint64_t`):
+Inside a `.kml` `<script>` block, the compiler provides compile-time reactive runes that build a static dependency graph and assign bit positions in the component's `_dirty` bitmask (`uint64_t`):
 
 | Rune | Syntax | Description |
 |---|---|---|
-| **`$state`** | `let mut x: T = $state(initialValue);` | Declares a mutable reactive state slot assigned a unique bit in `_dirty`. Any mutation (`x = ...`, `x += 1`) sets its dirty bit, recomputes dependent `$derived` slots in topological order, and schedules a surgical `update()`. |
+| **`$state`** | `let x: T = $state(initialValue);` | Declares a mutable reactive state slot assigned a unique bit in `_dirty`. Any mutation (`x = ...`, `x += 1`) sets its dirty bit, recomputes dependent `$derived` slots in topological order, and schedules a surgical `update()`. |
 | **`$derived`** | `let y: T = $derived(expr);` | Declares a memoized derived value computed from one or more `$state` or `$derived` dependencies. Recomputed automatically whenever upstream dependencies change. |
 | **`$effect`** | `$effect(fn(): void { ... });` | Registers a reactive side-effect closure that runs after initial mount and re-runs whenever any `$state` or `$derived` symbol referenced in its body is marked dirty. |
 
 > [!IMPORTANT] Compile-Time Enforcement
-> - `$state(...)` variables must be declared with `let mut` (assigning `$state` to an immutable `let` triggers diagnostic `E5010`).
+> - `$state(...)` variables represent mutable reactive state and must be declared using `let` (declaring `$state` with `const` triggers diagnostic `E5010`).
 > - `$derived(...)` values are read-only computations; mutating a `$derived` variable triggers diagnostic `E5011`.
 > - Cyclic dependencies between `$derived` declarations are rejected at compile time via Tarjan's SCC analysis (`E5012`).
+
 
 ---
 
@@ -215,7 +254,51 @@ Base class for all compiled `.kml` components and custom components.
 
 ## 7. Multi-Target Rendering Backends
 
-### 7.1 Web Virtual DOM & HTTP LiveView (`ui.WebVdomBackend` & `server.serveUi`)
+### 7.1 Native Desktop GUI Application (`ui.renderDesktop` & `ui.mountDesktop`)
+
+KeetScript features a native, zero-dependency desktop GUI rendering engine. Rather than embedding Chromium, WebViews, or Electron, `ui` compiles directly into native C++20 code that creates operating system windows and renders the component hierarchy via an antialiased 2D software rasterizer onto an RGBA framebuffer.
+
+```keet
+from io import println;
+from ui import renderDesktop;
+import "./App.kml";
+
+fn main(): void {
+    println("Launching native desktop GUI application...");
+    let app: App = App();
+    renderDesktop(app, "KeetScript Desktop Application", 800, 600);
+}
+```
+
+#### Key Architecture & Capabilities:
+- **Direct Native OS Windowing:**
+  - **macOS:** Pure Cocoa window and view management via direct Objective-C runtime bindings (`NSApplication`, `NSWindow`, `NSView`, and CoreGraphics backing context).
+  - **Windows:** Native Win32 API (`CreateWindowEx`, GDI DIB sections, message pump).
+  - **Linux:** X11 / Wayland integration via dynamic loader.
+- **High-DPI & Retina Scaling:** Automatically detects the display's backing scale factor (e.g. `2.0x` scaling on Apple Retina displays) and scales drawing buffers, geometry calculations, and rasterization coordinates with subpixel clarity.
+- **Custom Vector Font Engine (`ui.loadFont`):**
+  ```keet
+  ui.loadFont("Inter", "./fonts/Inter-Regular.ttf");
+  ```
+  Registers TrueType/OpenType vector fonts for crisp typography rendering across UI elements.
+- **Spatial Hit-Testing Engine:** Traverses the component scene graph in reverse Z-order to dispatch mouse click, hover, and movement events to the exact target node.
+- **Smooth Viewport Scrolling (`<scroll>`):** Interactive mouse-wheel events automatically scroll content within `<scroll>` containers with boundary clamping and clipping.
+- **Focus & Keyboard Navigation:**
+  - Interactive `<input>` elements support text typing, backspace, and cursor navigation.
+  - Tab cycling across focusable nodes.
+  - Keyboard shortcuts (e.g., `Cmd+Q` / `Alt+F4` to exit, `Enter` / `Space` on active buttons).
+- **Reactive Event Loop:** Mutations to reactive `$state(...)` variables trigger surgical bitmask-driven updates and immediately re-render dirty regions without flickering.
+
+#### API Reference:
+| Function | Signature | Description |
+| :--- | :--- | :--- |
+| `ui.renderDesktop` | `renderDesktop(root: Component, title?: string, width?: int, height?: int): void` | Mounts the root component into a native OS window and runs the interactive desktop event loop until the window is closed |
+| `ui.mountDesktop` | `mountDesktop(root: Component, width?: int, height?: int, dpiScale?: float): DesktopBackend` | Mounts the root component onto a desktop raster backend without showing a window (ideal for offscreen rendering or custom loops) |
+| `ui.loadFont` | `loadFont(family: string, path: string): bool` | Loads a TTF/OTF vector font and registers it under the given font family name |
+
+---
+
+### 7.2 Web Virtual DOM & HTTP LiveView (`ui.WebVdomBackend` & `server.serveUi`)
 
 The `ui` engine integrates directly with the `http` server module via `server.serveUi(route, factory, title?, scopedCss?)`. Each connected browser tab receives:
 1. Server-Side Rendered (SSR) initial HTML (`WebVdomBackend::renderDocument`).
@@ -227,7 +310,7 @@ import http;
 import "./Counter.kml";
 
 fn main(): int {
-    let mut server: http.Server = http.createServer();
+    let server: http.Server = http.createServer();
 
     server.serveUi("/", fn(): Counter {
         return Counter();
@@ -238,14 +321,14 @@ fn main(): int {
 }
 ```
 
-### 7.2 Terminal User Interface (`ui.TuiBackend`)
+### 7.3 Terminal User Interface (`ui.TuiBackend`)
 
 Renders a `Component` or `UINode` scene graph directly to an interactive ANSI/VT100 terminal screen using a double-buffered Unicode character grid, Constraint/Flexbox layout solver (`FlexboxEngine`), and keyboard/mouse input parser (`TuiInputParser`):
 
 - **`TuiBackend(width: int, height: int)`**: Creates a TUI renderer for the given terminal dimensions.
 - **`backend.renderFrame(root: UINode): string`**: Computes Flexbox layout, rasterizes box-drawing borders and text cells into the back buffer, diffs against the front buffer, and returns the minimal ANSI escape sequence diff string.
 
-### 7.3 Headless Test Backend (`ui.HeadlessBackend`)
+### 7.4 Headless Test Backend (`ui.HeadlessBackend`)
 
 Provides a deterministic, zero-display test harness for unit testing `.kml` components in `test` suites:
 
@@ -255,4 +338,17 @@ Provides a deterministic, zero-display test harness for unit testing `.kml` comp
 - **`harness.pressKey(key: string): bool`**: Dispatches a keydown event (`"Tab"`, `"Enter"`, `"ArrowDown"`, etc.) to the currently focused node.
 - **`harness.getText(nodeId: string): string`**: Returns the current rendered text or label of `nodeId`.
 - **`harness.dumpTree(): string`**: Serializes the scene graph with computed layout coordinates `(x, y, w, h)` for snapshot assertions.
+
+---
+
+## 8. IDE & Language Server Support (`keet-lsp`)
+
+KeetScript provides native, in-memory Language Server Protocol intelligence for `.kml` Single-File Components:
+
+- **Layout Primitives Hover:** Hovering over `<vstack>`, `<hstack>`, `<scroll>`, `<button>`, `<input>`, `<text>`, `<box>`, or `<slot>` displays description and attribute hints.
+- **Custom Component Navigation:** Hovering or pressing **F12** (Go-to-Definition) on a custom component tag (e.g. `<Task />`) jumps directly to the underlying `Task.kml` file.
+- **Runes & Directives Hover:** Full documentation for reactive runes (`$state`, `$derived`, `$props`, `$effect`) in `<script>`, event directives (`@click`, `@keydown`), and two-way bindings (`$bind.value`) in `<template>`.
+- **Template Expression Cross-References:** Hovering or navigating on `{identifier}` expressions inside `<template>` resolves directly to the variable or function declared inside the component's `<script>` block.
+- **Context-Aware Autocompletions:** Triggering autocomplete (`<`, `$`, `@`, `{`, `.`) in `.kml` provides tag names, event directives, attributes, and script symbols.
+
 

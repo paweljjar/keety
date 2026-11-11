@@ -155,6 +155,71 @@ TEST_CASE("Analyzer getHover produces rich Markdown documentation", "[lsp][hover
         REQUIRE(hoverMember->contents.value.find("(enum member) Color.Green") != std::string::npos);
     }
 
+    SECTION("Local variables and KML component hover") {
+        std::string code =
+            "import \"./App.kml\";\n"
+            "fn main(): void {\n"
+            "    let app: App = App();\n"
+            "    println(app);\n"
+            "}\n";
+        Document doc("file:///main_test.keet", "keet", 1, code);
+
+        // Hover on local variable 'app' (line 2, col 8)
+        auto hoverApp = analyzer.getHover(doc, Position{2, 8});
+        REQUIRE(hoverApp.has_value());
+        CHECK(hoverApp->contents.value.find("let app: App") != std::string::npos);
+        // Must NOT match stdlib http.app()
+        CHECK(hoverApp->contents.value.find("Express-style") == std::string::npos);
+
+        // Hover on usage 'app' in println(app) (line 3, col 12)
+        auto hoverAppUsage = analyzer.getHover(doc, Position{3, 12});
+        REQUIRE(hoverAppUsage.has_value());
+        CHECK(hoverAppUsage->contents.value.find("let app: App") != std::string::npos);
+
+        // Hover on imported KML component 'App' in type annotation (line 2, col 13)
+        auto hoverComp = analyzer.getHover(doc, Position{2, 13});
+        REQUIRE(hoverComp.has_value());
+        CHECK(hoverComp->contents.value.find("component App") != std::string::npos);
+    }
+
+    SECTION("Resilient local variable hover when code above contains syntax errors") {
+        std::string code =
+            "main(\n"
+            "math\n"
+            "prin\n"
+            "let app: App = App();\n"
+            "renderDesktop(app, \"KeetScript To-Do List\", 780, 680);\n";
+        Document doc("file:///broken_syntax_test.keet", "keet", 1, code);
+
+        // Hover on 'app' on line 3, col 5
+        auto hoverApp = analyzer.getHover(doc, Position{3, 5});
+        REQUIRE(hoverApp.has_value());
+        CHECK(hoverApp->contents.value.find("let app: App") != std::string::npos);
+        // CRITICAL: Must NEVER return http.app()
+        CHECK(hoverApp->contents.value.find("Express-style") == std::string::npos);
+        CHECK(hoverApp->contents.value.find("Server") == std::string::npos);
+    }
+
+    SECTION("Stdlib member hover with receiver dot e.g. math.sin") {
+        std::string code =
+            "import math;\n"
+            "fn compute(): void {\n"
+            "    let x = math.sin(0.5);\n"
+            "}\n";
+        Document doc("file:///math_hover_test.keet", "keet", 1, code);
+
+        // Hover on 'math' in 'math.sin' (line 2, col 14)
+        auto hoverMath = analyzer.getHover(doc, Position{2, 14});
+        REQUIRE(hoverMath.has_value());
+        CHECK(hoverMath->contents.value.find("Standard Library Module: `math`") != std::string::npos);
+
+        // Hover on 'sin' in 'math.sin' (line 2, col 18)
+        auto hoverSin = analyzer.getHover(doc, Position{2, 18});
+        REQUIRE(hoverSin.has_value());
+        CHECK(hoverSin->contents.value.find("fn sin(rad: float): float") != std::string::npos);
+        CHECK(hoverSin->contents.value.find("math") != std::string::npos);
+    }
+
     SECTION("Whitespace or unknown position returns nullopt") {
         std::string code = "fn main(): void {}\n";
         Document doc("file:///empty_hover.keet", "keet", 1, code);

@@ -226,4 +226,48 @@ TEST_CASE("KML Lowerer - Desktop Layout Tags, Attributes and Input Binding Lower
     CHECK(ks.find("style.overflowScrollY = true") != std::string::npos);
 }
 
+TEST_CASE("KML Lowerer - Standardized script imports for both .kml and .keet", "[kml][lowerer][imports]") {
+    std::string_view docSource = R"kml(
+<script>
+    import "./components/Task.kml";
+    import "./utils.keet";
+    from io import println;
+
+    let title = $state("My App");
+</script>
+
+<template>
+    <vstack>
+        <Task title={title} />
+        <OtherComp />
+    </vstack>
+</template>
+    )kml";
+
+    KmlParser parser(docSource, 1);
+    KmlDocument doc = parser.parseDocument("AppWithImports");
+
+    KmlLowerer lowerer(doc);
+    auto res = lowerer.lower();
+
+    // 1. Interface KeetScript must preserve explicit script imports and only fallback for unimported components
+    const std::string& iface = res.generatedInterfaceKeet;
+    CHECK(iface.find("import ui;") != std::string::npos);
+    CHECK(iface.find("import \"./components/Task.kml\";") != std::string::npos);
+    CHECK(iface.find("import \"./utils.keet\";") != std::string::npos);
+    CHECK(iface.find("from io import println;") != std::string::npos);
+    // OtherComp is not in script, so it falls back to ./OtherComp.kml
+    CHECK(iface.find("import \"./OtherComp.kml\";") != std::string::npos);
+    // Task was explicitly imported, so there must NOT be a duplicate "./Task.kml" fallback
+    CHECK(iface.find("import \"./Task.kml\";") == std::string::npos);
+
+    // 2. Generated C++ Header must include headers for components, keet modules and stdlib
+    const std::string& hpp = res.generatedHppCode;
+    CHECK(hpp.find("#include \"components/Task.hpp\"") != std::string::npos);
+    CHECK(hpp.find("#include \"utils.hpp\"") != std::string::npos);
+    CHECK(hpp.find("#include <keet/std/io.hpp>") != std::string::npos);
+    CHECK(hpp.find("#include \"OtherComp.hpp\"") != std::string::npos);
+}
+
+
 

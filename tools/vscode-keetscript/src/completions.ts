@@ -22,7 +22,7 @@ export class KeetCompletionItemProvider implements vscode.CompletionItemProvider
     }
 
     // 1. Dot completions: e.g. "io.", "fs.", "math.", or "str."
-    const dotMatch = linePrefix.match(/([a-zA-Z_][a-zA-Z0-9_]*)\.$/);
+    const dotMatch = linePrefix.match(/([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z0-9_]*)$/);
     if (dotMatch) {
       const receiver = dotMatch[1];
       if (receiver in STDLIB_MODULES) {

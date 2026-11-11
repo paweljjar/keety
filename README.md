@@ -18,6 +18,7 @@ KeetScript bridges the gap between high-level scripting ergonomics and raw syste
 - **First-Class Union Types & Flow Narrowing:** Algebraic union types (`int | string | null`) with canonical normalization and control-flow type narrowing (`typeof(x) == "int"`, `x != null`) guarded by a mutation watcher.
 - **Ergonomic Error Recovery (`zonk`):** Handle fallible operations inline with fallback expressions (`expr zonk fallback`) or scoped recovery blocks (`expr zonk (err) { ... }`).
 - **Strict Soundness Guarantees:** Mandatory explicit type annotations on declarations, zero implicit numeric/truthy coercion, strict no-shadowing enforcement, and deterministic 64-bit two's-complement arithmetic.
+- **Native Desktop GUI & Multi-Target UI:** Build reactive `.kml` Single-File Components that compile to zero-dependency native desktop OS windows (Cocoa on macOS, Win32 on Windows, X11 on Linux) with sub-millisecond software rasterization, HiDPI Retina support, and zero Electron/WebView bloat. Also targets Web VDOM LiveView and ANSI terminals.
 - **6-Stage Optimizing Pipeline:** Includes Tarjan SCC circular dependency detection, topological module initialization, liveness analysis, automatic last-use `std::move` insertion, and recursive union boxing.
 - **IDE-Grade Diagnostics & Tooling:** Rich, colored, multi-line terminal diagnostics in the style of Rust and Elm, with source spans, Levenshtein "Did you mean?" suggestions and Quick Fix hints; machine-readable JSON output (`--json-diagnostics`); and an official Visual Studio Code extension.
 
@@ -237,7 +238,7 @@ from "io" import print;
 | **`sys`** | `import sys;` | Command-line arguments (`args`), environment variables (`getEnv`, `getEnvOr`, `setEnv`, `unsetEnv`, `hasEnv`), process exit, and platform metadata |
 | **`test`** | `import test;` | Unit testing suites (`suite`), test cases (`case`), deep equality assertions (`assertEq`), and exception assertions (`assertZonks`) |
 | **`time`** | `import time;` | Monotonic high-resolution timers (`nowNs`, `nowMs`), wall-clock timestamps, calendar formatting, and thread sleep (`sleepMs`) |
-| **`ui`** | `import ui;` | Compile-time reactive UI engine for `.kml` Single-File Components (`$state`, `$derived`, `$effect`), Scene Graph nodes, TUI, Web VDOM, and Headless backends |
+| **`ui`** | `import ui;` | Compile-time reactive UI engine for `.kml` Single-File Components (`$state`, `$derived`, `$effect`), Native Desktop OS Windows (Cocoa/Win32/X11), Web VDOM LiveView, TUI, and Headless backends |
 
 ---
 
@@ -267,13 +268,20 @@ The benchmark suite compares generated KeetScript against idiomatic handwritten 
 
 ---
 
-## Editor Support (VS Code)
+## Editor Support (VS Code & Antigravity IDE)
 
-An official Visual Studio Code extension is included in [`tools/vscode-keetscript/`](tools/vscode-keetscript/README.md), providing:
-- Full TextMate syntax highlighting for `.keet` files
-- Live background diagnostics (`keety check --json-diagnostics`)
+An official Visual Studio Code and Antigravity IDE extension is included in [`tools/vscode-keetscript/`](tools/vscode-keetscript/README.md), providing:
+- **Native In-Memory Language Server (`keet-lsp`):**
+  - **Go to Definition (`F12`):** Direct navigation across local variables, functions, classes, imports, and child `.kml` components
+  - **Find All References (`Shift+F12`):** Workspace-wide symbol reference search respecting lexical scopes
+  - **Rename Symbol (`F2`):** Safe, scope-aware identifier renaming
+  - **Signature Help (`Cmd+Shift+Space`):** Active parameter highlighting for calls and constructors
+  - **Outline & Document Symbols:** Hierarchical symbol trees for classes, methods, functions, and KML component runes/props
+  - **Document Formatting:** Canonical AST-driven formatter
+- Full TextMate syntax highlighting for `.keet` and `.kml` files
+- Live background diagnostics (`keety check --json-diagnostics` & `keet-lsp`)
 - 1-click Quick Fixes for typos, missing imports, and missing semicolons
-- Autocompletion and hover documentation for standard library modules
+- Trigger-assisted autocompletion and hover documentation for standard library modules, KML layout tags, and reactive runes
 - Editor title bar **Run** and **Build** buttons
 
 To install locally into VS Code:
@@ -309,6 +317,7 @@ Detailed specifications and roadmaps are available across the repository:
 - [Keety Project Roadmap](ROADMAP.md) — Strategic engineering roadmap, release milestones, and feature backlog.
 - [The KeetScript Language Specification](documentation/The%20KeetScript%20Language%20Specification.md) — Complete EBNF grammar, type system, memory model, and execution semantics.
 - [Keety Compiler Architecture Specification](documentation/Keety%20Compiler%20Architecture%20Specification.md) — Deep dive into the 6-stage pipeline, KeetIR optimization passes, and C++20 emission templates.
+- [KeetScript Language Server Protocol Specification](documentation/KeetScript%20Language%20Server%20Protocol%20Specification.md) — In-memory analysis engine, JSON-RPC protocol transport, editor capabilities, and `.kml` tooling architecture.
 - [KeetScript Conformance Test Suite and Benchmark Specification](documentation/KeetScript%20Conformance%20Test%20Suite%20and%20Benchmark%20Specification.md) — Validation test cases and benchmark methodology.
 - **Standard Library Reference:**
     - [`crypto` — Cryptography, AEAD & Barcodes/QR](documentation/stdlib/crypto.md)

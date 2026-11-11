@@ -49,10 +49,16 @@ private:
 
     // Language feature handlers
     JsonValue handleDefinition(const JsonValue& params);
+    JsonValue handleReferences(const JsonValue& params);
+    JsonValue handlePrepareRename(const JsonValue& params);
+    JsonValue handleRename(const JsonValue& params);
     JsonValue handleHover(const JsonValue& params);
+    JsonValue handleSignatureHelp(const JsonValue& params);
     JsonValue handleCompletion(const JsonValue& params);
     JsonValue handleDocumentSymbol(const JsonValue& params);
+    JsonValue handleSemanticTokensFull(const JsonValue& params);
     JsonValue handleFormatting(const JsonValue& params);
+    JsonValue handleRangeFormatting(const JsonValue& params);
     JsonValue handleCodeAction(const JsonValue& params);
 
     void publishDiagnostics(const std::string& uri, int32_t version);

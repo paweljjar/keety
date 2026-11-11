@@ -20,6 +20,7 @@
 #include <keety/lint/lint_engine.hpp>
 #include <keety/typechecker/type_checker.hpp>
 
+#include <iostream>
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -43,6 +44,16 @@ std::string uriToPath(const std::string& uri) {
         return path;
     }
     return uri;
+}
+
+bool isKmlDocument(const Document& doc) {
+    std::string pathStr = uriToPath(doc.uri());
+    std::filesystem::path fsPath(pathStr);
+    return fsPath.extension() == ".kml" || doc.languageId() == "kml";
+}
+
+std::string pathToUri(const std::filesystem::path& p) {
+    return "file://" + p.generic_string();
 }
 
 Range spanToRange(const Document& doc, const diag::SourceSpan& span) {
@@ -75,6 +86,263 @@ Range findIdentifierRange(const Document& doc, const std::string& name, const di
         }
     }
     return spanToRange(doc, enclosingSpan);
+}
+
+diag::SourceSpan findIdentifierSpan(const Document& doc, const std::string& name, const diag::SourceSpan& enclosingSpan) {
+    Range r = findIdentifierRange(doc, name, enclosingSpan);
+    auto sOff = doc.positionToOffset(r.start);
+    auto eOff = doc.positionToOffset(r.end);
+    if (sOff && eOff) {
+        diag::FileId fid = enclosingSpan.isValid() ? enclosingSpan.start.fileId : 1;
+        return diag::SourceSpan{
+            diag::SourceLocation{fid, static_cast<uint32_t>(*sOff), r.start.line + 1, r.start.character + 1},
+            diag::SourceLocation{fid, static_cast<uint32_t>(*eOff), r.end.line + 1, r.end.character + 1}
+        };
+    }
+    return enclosingSpan;
+}
+
+std::string formatType(const ast::TypeAnnotation* annot, const std::string& fallback = "void");
+
+struct ScopeDeclInfo {
+    enum class Kind {
+        LocalVar,
+        Param,
+        Function,
+        Variable,
+        Constant,
+        Define,
+        Class,
+        Field,
+        Method,
+        Enum,
+        EnumMember,
+        Import
+    };
+
+    Kind kind{Kind::LocalVar};
+    std::string name;
+    std::string uri;
+    diag::SourceSpan nameSpan{};
+    diag::SourceSpan fullSpan{};
+    std::string containerName;
+    diag::SourceSpan enclosingFnSpan{};
+    std::string typeStr{};
+    bool isConst = false;
+};
+
+struct LexicalScopeNode {
+    LexicalScopeNode* parent = nullptr;
+    diag::SourceSpan span{};
+    std::vector<ScopeDeclInfo> decls;
+    std::vector<std::unique_ptr<LexicalScopeNode>> children;
+
+    const ScopeDeclInfo* lookup(const std::string& name, size_t offset) const {
+        for (auto it = decls.rbegin(); it != decls.rend(); ++it) {
+            if (it->name == name && it->nameSpan.start.offset <= offset) {
+                return &(*it);
+            }
+        }
+        if (parent) {
+            return parent->lookup(name, offset);
+        }
+        return nullptr;
+    }
+
+    const LexicalScopeNode* findInnermostScope(size_t offset) const {
+        for (const auto& child : children) {
+            if (child->span.isValid() &&
+                offset >= child->span.start.offset &&
+                offset <= child->span.end.offset) {
+                return child->findInnermostScope(offset);
+            }
+        }
+        return this;
+    }
+
+    const ScopeDeclInfo* findDeclAtOffset(size_t offset) const {
+        for (const auto& d : decls) {
+            if (d.nameSpan.isValid() &&
+                offset >= d.nameSpan.start.offset &&
+                offset <= d.nameSpan.end.offset) {
+                return &d;
+            }
+        }
+        for (const auto& child : children) {
+            if (child->span.isValid() &&
+                offset >= child->span.start.offset &&
+                offset <= child->span.end.offset) {
+                if (const auto* found = child->findDeclAtOffset(offset)) {
+                    return found;
+                }
+            }
+        }
+        return nullptr;
+    }
+};
+
+void buildScopeTree(const Document& doc, const ast::Stmt* stmt, LexicalScopeNode* currentScope, diag::SourceSpan fnSpan) {
+    if (!stmt) return;
+
+    if (const auto* block = dynamic_cast<const ast::BlockStmt*>(stmt)) {
+        auto child = std::make_unique<LexicalScopeNode>();
+        child->parent = currentScope;
+        child->span = block->getSpan();
+        LexicalScopeNode* pChild = child.get();
+        currentScope->children.push_back(std::move(child));
+
+        for (const auto& s : block->getStatements()) {
+            buildScopeTree(doc, s.get(), pChild, fnSpan);
+        }
+    } else if (const auto* declStmt = dynamic_cast<const ast::DeclStmt*>(stmt)) {
+        const auto* d = declStmt->getDeclaration();
+        if (const auto* vd = dynamic_cast<const ast::VarDecl*>(d)) {
+            ScopeDeclInfo info;
+            info.kind = ScopeDeclInfo::Kind::LocalVar;
+            info.name = vd->getName();
+            info.uri = doc.uri();
+            diag::SourceSpan nSpan = vd->getNameSpan();
+            if (!nSpan.isValid()) {
+                nSpan = findIdentifierSpan(doc, vd->getName(), vd->getSpan());
+            }
+            info.nameSpan = nSpan;
+            info.fullSpan = vd->getSpan();
+            info.enclosingFnSpan = fnSpan;
+            info.typeStr = formatType(vd->getType(), "inferred");
+            info.isConst = false;
+            currentScope->decls.push_back(std::move(info));
+        } else if (const auto* cd = dynamic_cast<const ast::ConstDecl*>(d)) {
+            ScopeDeclInfo info;
+            info.kind = ScopeDeclInfo::Kind::LocalVar;
+            info.name = cd->getName();
+            info.uri = doc.uri();
+            diag::SourceSpan nSpan = cd->getNameSpan();
+            if (!nSpan.isValid()) {
+                nSpan = findIdentifierSpan(doc, cd->getName(), cd->getSpan());
+            }
+            info.nameSpan = nSpan;
+            info.fullSpan = cd->getSpan();
+            info.enclosingFnSpan = fnSpan;
+            info.typeStr = formatType(cd->getType(), "inferred");
+            info.isConst = true;
+            currentScope->decls.push_back(std::move(info));
+        }
+    } else if (const auto* ifStmt = dynamic_cast<const ast::IfStmt*>(stmt)) {
+        LexicalScopeNode* ifScope = currentScope;
+        if (ifStmt->hasInit()) {
+            auto child = std::make_unique<LexicalScopeNode>();
+            child->parent = currentScope;
+            child->span = ifStmt->getSpan();
+            ifScope = child.get();
+            currentScope->children.push_back(std::move(child));
+            buildScopeTree(doc, ifStmt->getInit(), ifScope, fnSpan);
+        }
+        if (ifStmt->getThenBranch()) {
+            buildScopeTree(doc, ifStmt->getThenBranch(), ifScope, fnSpan);
+        }
+        if (ifStmt->getElseBranch()) {
+            buildScopeTree(doc, ifStmt->getElseBranch(), ifScope, fnSpan);
+        }
+    } else if (const auto* whileStmt = dynamic_cast<const ast::WhileStmt*>(stmt)) {
+        LexicalScopeNode* wScope = currentScope;
+        if (whileStmt->hasInit()) {
+            auto child = std::make_unique<LexicalScopeNode>();
+            child->parent = currentScope;
+            child->span = whileStmt->getSpan();
+            wScope = child.get();
+            currentScope->children.push_back(std::move(child));
+            buildScopeTree(doc, whileStmt->getInit(), wScope, fnSpan);
+        }
+        if (whileStmt->getBody()) {
+            buildScopeTree(doc, whileStmt->getBody(), wScope, fnSpan);
+        }
+    } else if (const auto* forStmt = dynamic_cast<const ast::ForStmt*>(stmt)) {
+        auto child = std::make_unique<LexicalScopeNode>();
+        child->parent = currentScope;
+        child->span = forStmt->getSpan();
+        LexicalScopeNode* fScope = child.get();
+        currentScope->children.push_back(std::move(child));
+
+        if (forStmt->getInit()) {
+            buildScopeTree(doc, forStmt->getInit(), fScope, fnSpan);
+        }
+        if (forStmt->getBody()) {
+            buildScopeTree(doc, forStmt->getBody(), fScope, fnSpan);
+        }
+    } else if (const auto* forInStmt = dynamic_cast<const ast::ForInStmt*>(stmt)) {
+        auto child = std::make_unique<LexicalScopeNode>();
+        child->parent = currentScope;
+        child->span = forInStmt->getSpan();
+        LexicalScopeNode* fScope = child.get();
+        currentScope->children.push_back(std::move(child));
+
+        if (!forInStmt->getValueName().empty()) {
+            ScopeDeclInfo info;
+            info.kind = ScopeDeclInfo::Kind::LocalVar;
+            info.name = forInStmt->getValueName();
+            info.uri = doc.uri();
+            info.nameSpan = findIdentifierSpan(doc, forInStmt->getValueName(), forInStmt->getSpan());
+            info.fullSpan = forInStmt->getSpan();
+            info.enclosingFnSpan = fnSpan;
+            fScope->decls.push_back(std::move(info));
+        }
+        if (!forInStmt->getKeyName().empty()) {
+            ScopeDeclInfo info;
+            info.kind = ScopeDeclInfo::Kind::LocalVar;
+            info.name = forInStmt->getKeyName();
+            info.uri = doc.uri();
+            info.nameSpan = findIdentifierSpan(doc, forInStmt->getKeyName(), forInStmt->getSpan());
+            info.fullSpan = forInStmt->getSpan();
+            info.enclosingFnSpan = fnSpan;
+            fScope->decls.push_back(std::move(info));
+        }
+        if (forInStmt->getBody()) {
+            buildScopeTree(doc, forInStmt->getBody(), fScope, fnSpan);
+        }
+    } else if (const auto* swStmt = dynamic_cast<const ast::SwitchStmt*>(stmt)) {
+        LexicalScopeNode* swScope = currentScope;
+        if (swStmt->hasInit()) {
+            auto child = std::make_unique<LexicalScopeNode>();
+            child->parent = currentScope;
+            child->span = swStmt->getSpan();
+            swScope = child.get();
+            currentScope->children.push_back(std::move(child));
+            buildScopeTree(doc, swStmt->getInit(), swScope, fnSpan);
+        }
+        for (const auto& c : swStmt->getCases()) {
+            if (c.body) {
+                buildScopeTree(doc, c.body.get(), swScope, fnSpan);
+            }
+        }
+    }
+}
+
+std::unique_ptr<LexicalScopeNode> buildFnScopeTree(const Document& doc, const ast::FnDecl* fnDecl) {
+    auto fnScope = std::make_unique<LexicalScopeNode>();
+    fnScope->span = fnDecl->getSpan();
+
+    for (const auto& param : fnDecl->getParams()) {
+        ScopeDeclInfo info;
+        info.kind = ScopeDeclInfo::Kind::Param;
+        info.name = param.name;
+        info.uri = doc.uri();
+        diag::SourceSpan nSpan = param.nameSpan;
+        if (!nSpan.isValid()) {
+            nSpan = findIdentifierSpan(doc, param.name, param.span.isValid() ? param.span : fnDecl->getSpan());
+        }
+        info.nameSpan = nSpan;
+        info.fullSpan = param.span.isValid() ? param.span : fnDecl->getSpan();
+        info.enclosingFnSpan = fnDecl->getSpan();
+        info.typeStr = formatType(param.type.get(), "any");
+        info.isConst = !param.isMut;
+        fnScope->decls.push_back(std::move(info));
+    }
+
+    if (fnDecl->getBody()) {
+        buildScopeTree(doc, fnDecl->getBody(), fnScope.get(), fnDecl->getSpan());
+    }
+
+    return fnScope;
 }
 
 DiagnosticSeverity convertSeverity(diag::DiagnosticSeverity sev) {
@@ -139,7 +407,7 @@ void collectLspDiagnostics(
     }
 }
 
-std::string formatType(const ast::TypeAnnotation* annot, const std::string& fallback = "void") {
+std::string formatType(const ast::TypeAnnotation* annot, const std::string& fallback) {
     if (!annot) return fallback;
     auto t = typechecker::Type::fromAnnotation(annot);
     if (t) return t->toString();
@@ -319,7 +587,7 @@ std::optional<std::string> getKeywordDoc(lexer::TokenKind kind) {
     }
 }
 
-lexer::TokenKind kwToTokenKind(const std::string& kw) {
+lexer::TokenKind kwToTokenKind(std::string_view kw) {
     using namespace lexer;
     if (kw == "fn") return TokenKind::KwFn;
     if (kw == "let") return TokenKind::KwLet;
@@ -354,6 +622,17 @@ lexer::TokenKind kwToTokenKind(const std::string& kw) {
     if (kw == "errtype") return TokenKind::KwErrtype;
     if (kw == "zonk") return TokenKind::KwZonk;
     return TokenKind::Invalid;
+}
+
+bool isValidIdentifier(std::string_view name) {
+    if (name.empty()) return false;
+    if (kwToTokenKind(name) != lexer::TokenKind::Invalid) return false;
+    if (name == "true" || name == "false" || name == "null") return false;
+    if (!std::isalpha(static_cast<unsigned char>(name[0])) && name[0] != '_') return false;
+    for (size_t i = 1; i < name.size(); ++i) {
+        if (!std::isalnum(static_cast<unsigned char>(name[i])) && name[i] != '_') return false;
+    }
+    return true;
 }
 
 void collectLocalBindings(
@@ -738,6 +1017,10 @@ std::optional<Location> Analyzer::findDefinition(
     }
     size_t targetOffset = *byteOffsetOpt;
 
+    if (isKmlDocument(doc)) {
+        return findKmlDefinition(doc, pos, targetOffset, docManager);
+    }
+
     diag::SourceManager sm;
     std::string pathStr = uriToPath(doc.uri());
     diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
@@ -836,17 +1119,18 @@ std::optional<Location> Analyzer::findDefinition(
         }
     }
 
-    // 2b. Check local parameters within function enclosing cursor
+    // 2b. Check local parameters and local variables within function enclosing cursor
     for (const auto& decl : ast.declarations) {
         if (!decl) continue;
         if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
             diag::SourceSpan fnSpan = fnDecl->getSpan();
             if (targetOffset >= fnSpan.start.offset && targetOffset <= fnSpan.end.offset) {
-                // Inside this function! Check its parameters first
-                for (const auto& param : fnDecl->getParams()) {
-                    if (param.name == ident) {
-                        return Location{doc.uri(), spanToRange(doc, param.span)};
-                    }
+                auto fnScope = buildFnScopeTree(doc, fnDecl);
+                if (const auto* declFound = fnScope->findDeclAtOffset(targetOffset)) {
+                    return Location{doc.uri(), spanToRange(doc, declFound->nameSpan)};
+                }
+                if (const auto* resolved = fnScope->findInnermostScope(targetOffset)->lookup(ident, targetOffset)) {
+                    return Location{doc.uri(), spanToRange(doc, resolved->nameSpan)};
                 }
             }
         } else if (const auto* classDecl = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
@@ -854,10 +1138,12 @@ std::optional<Location> Analyzer::findDefinition(
                 if (!method) continue;
                 diag::SourceSpan mSpan = method->getSpan();
                 if (targetOffset >= mSpan.start.offset && targetOffset <= mSpan.end.offset) {
-                    for (const auto& param : method->getParams()) {
-                        if (param.name == ident) {
-                            return Location{doc.uri(), spanToRange(doc, param.span)};
-                        }
+                    auto mScope = buildFnScopeTree(doc, method.get());
+                    if (const auto* declFound = mScope->findDeclAtOffset(targetOffset)) {
+                        return Location{doc.uri(), spanToRange(doc, declFound->nameSpan)};
+                    }
+                    if (const auto* resolved = mScope->findInnermostScope(targetOffset)->lookup(ident, targetOffset)) {
+                        return Location{doc.uri(), spanToRange(doc, resolved->nameSpan)};
                     }
                 }
             }
@@ -914,16 +1200,1055 @@ std::optional<Location> Analyzer::findDefinition(
     return std::nullopt;
 }
 
+std::vector<Location> Analyzer::findReferences(
+    const Document& doc,
+    Position pos,
+    bool includeDeclaration,
+    const DocumentManager* docManager
+) {
+    if (isKmlDocument(doc)) {
+        return {};
+    }
+
+    auto byteOffsetOpt = doc.positionToOffset(pos);
+    if (!byteOffsetOpt.has_value()) {
+        return {};
+    }
+    size_t targetOffset = *byteOffsetOpt;
+
+    diag::SourceManager sm;
+    std::string pathStr = uriToPath(doc.uri());
+    diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
+
+    lexer::Lexer lexer(fileId, doc.text());
+    auto tokens = lexer.tokenizeAll();
+
+    // Find token under cursor
+    const lexer::Token* targetTok = nullptr;
+    size_t targetTokIdx = 0;
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        if (targetOffset >= tokens[i].span.start.offset && targetOffset < tokens[i].span.end.offset) {
+            targetTok = &tokens[i];
+            targetTokIdx = i;
+            break;
+        }
+    }
+    if (!targetTok) {
+        for (size_t i = 0; i < tokens.size(); ++i) {
+            if (targetOffset == tokens[i].span.end.offset && tokens[i].span.length() > 0) {
+                targetTok = &tokens[i];
+                targetTokIdx = i;
+                break;
+            }
+        }
+    }
+
+    if (!targetTok || !targetTok->is(lexer::TokenKind::Identifier)) {
+        return {};
+    }
+
+    std::string ident = std::string(targetTok->lexeme);
+    bool targetPrecededByDot = (targetTokIdx > 0 && tokens[targetTokIdx - 1].is(lexer::TokenKind::Dot));
+
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+
+    diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+    lexer::Lexer pLexer(fileId, doc.text());
+    parser::Parser parser(pLexer, &emitter);
+    auto ast = parser.parseModule(moduleName);
+
+    // Try to resolve target declaration
+    std::optional<ScopeDeclInfo> targetDecl;
+    std::unique_ptr<LexicalScopeNode> activeFnScope;
+
+    if (!targetPrecededByDot) {
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                diag::SourceSpan fnSpan = fnDecl->getSpan();
+                if (targetOffset >= fnSpan.start.offset && targetOffset <= fnSpan.end.offset) {
+                    activeFnScope = buildFnScopeTree(doc, fnDecl);
+                    if (const auto* declFound = activeFnScope->findDeclAtOffset(targetOffset)) {
+                        targetDecl = *declFound;
+                        break;
+                    }
+                    if (const auto* resolved = activeFnScope->findInnermostScope(targetOffset)->lookup(ident, targetOffset)) {
+                        targetDecl = *resolved;
+                        break;
+                    }
+                }
+            } else if (const auto* classDecl = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                for (const auto& method : classDecl->getMethods()) {
+                    if (!method) continue;
+                    diag::SourceSpan mSpan = method->getSpan();
+                    if (targetOffset >= mSpan.start.offset && targetOffset <= mSpan.end.offset) {
+                        activeFnScope = buildFnScopeTree(doc, method.get());
+                        if (const auto* declFound = activeFnScope->findDeclAtOffset(targetOffset)) {
+                            targetDecl = *declFound;
+                            break;
+                        }
+                        if (const auto* resolved = activeFnScope->findInnermostScope(targetOffset)->lookup(ident, targetOffset)) {
+                            targetDecl = *resolved;
+                            break;
+                        }
+                    }
+                }
+                if (targetDecl.has_value()) break;
+            }
+        }
+    }
+
+    if (!targetDecl.has_value()) {
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* classDecl = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                if (classDecl->getName() == ident && (!targetPrecededByDot || (targetOffset >= classDecl->getSpan().start.offset && targetOffset <= classDecl->getSpan().end.offset))) {
+                    ScopeDeclInfo info;
+                    info.kind = ScopeDeclInfo::Kind::Class;
+                    info.name = ident;
+                    info.uri = doc.uri();
+                    info.nameSpan = findIdentifierSpan(doc, ident, classDecl->getSpan());
+                    info.fullSpan = classDecl->getSpan();
+                    targetDecl = std::move(info);
+                    break;
+                }
+                for (const auto& field : classDecl->getFields()) {
+                    if (field.name == ident) {
+                        ScopeDeclInfo info;
+                        info.kind = ScopeDeclInfo::Kind::Field;
+                        info.name = ident;
+                        info.uri = doc.uri();
+                        info.containerName = classDecl->getName();
+                        info.nameSpan = field.span;
+                        info.fullSpan = field.span;
+                        targetDecl = std::move(info);
+                        break;
+                    }
+                }
+                if (targetDecl.has_value()) break;
+                for (const auto& method : classDecl->getMethods()) {
+                    if (method && method->getName() == ident) {
+                        ScopeDeclInfo info;
+                        info.kind = ScopeDeclInfo::Kind::Method;
+                        info.name = ident;
+                        info.uri = doc.uri();
+                        info.containerName = classDecl->getName();
+                        info.nameSpan = findIdentifierSpan(doc, ident, method->getSpan());
+                        info.fullSpan = method->getSpan();
+                        targetDecl = std::move(info);
+                        break;
+                    }
+                }
+                if (targetDecl.has_value()) break;
+            } else if (const auto* enumDecl = dynamic_cast<const ast::EnumDecl*>(decl.get())) {
+                if (enumDecl->getName() == ident) {
+                    ScopeDeclInfo info;
+                    info.kind = ScopeDeclInfo::Kind::Enum;
+                    info.name = ident;
+                    info.uri = doc.uri();
+                    info.nameSpan = findIdentifierSpan(doc, ident, enumDecl->getSpan());
+                    info.fullSpan = enumDecl->getSpan();
+                    targetDecl = std::move(info);
+                    break;
+                }
+                for (const auto& member : enumDecl->getMembers()) {
+                    if (member.name == ident) {
+                        ScopeDeclInfo info;
+                        info.kind = ScopeDeclInfo::Kind::EnumMember;
+                        info.name = ident;
+                        info.uri = doc.uri();
+                        info.containerName = enumDecl->getName();
+                        info.nameSpan = member.span;
+                        info.fullSpan = member.span;
+                        targetDecl = std::move(info);
+                        break;
+                    }
+                }
+                if (targetDecl.has_value()) break;
+            } else if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                if (fnDecl->getName() == ident) {
+                    ScopeDeclInfo info;
+                    info.kind = ScopeDeclInfo::Kind::Function;
+                    info.name = ident;
+                    info.uri = doc.uri();
+                    info.nameSpan = findIdentifierSpan(doc, ident, fnDecl->getSpan());
+                    info.fullSpan = fnDecl->getSpan();
+                    targetDecl = std::move(info);
+                    break;
+                }
+            } else if (const auto* varDecl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+                if (varDecl->getName() == ident) {
+                    ScopeDeclInfo info;
+                    info.kind = ScopeDeclInfo::Kind::Variable;
+                    info.name = ident;
+                    info.uri = doc.uri();
+                    info.nameSpan = varDecl->getNameSpan().isValid() ? varDecl->getNameSpan() : findIdentifierSpan(doc, ident, varDecl->getSpan());
+                    info.fullSpan = varDecl->getSpan();
+                    targetDecl = std::move(info);
+                    break;
+                }
+            } else if (const auto* constDecl = dynamic_cast<const ast::ConstDecl*>(decl.get())) {
+                if (constDecl->getName() == ident) {
+                    ScopeDeclInfo info;
+                    info.kind = ScopeDeclInfo::Kind::Constant;
+                    info.name = ident;
+                    info.uri = doc.uri();
+                    info.nameSpan = constDecl->getNameSpan().isValid() ? constDecl->getNameSpan() : findIdentifierSpan(doc, ident, constDecl->getSpan());
+                    info.fullSpan = constDecl->getSpan();
+                    targetDecl = std::move(info);
+                    break;
+                }
+            } else if (const auto* defDecl = dynamic_cast<const ast::DefineDecl*>(decl.get())) {
+                if (defDecl->getName() == ident) {
+                    ScopeDeclInfo info;
+                    info.kind = ScopeDeclInfo::Kind::Define;
+                    info.name = ident;
+                    info.uri = doc.uri();
+                    info.nameSpan = findIdentifierSpan(doc, ident, defDecl->getSpan());
+                    info.fullSpan = defDecl->getSpan();
+                    targetDecl = std::move(info);
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!targetDecl.has_value()) {
+        if (docManager) {
+            for (const auto& decl : ast.declarations) {
+                if (!decl) continue;
+                if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+                    for (const auto& sym : imp->getSymbols()) {
+                        if (sym.getEffectiveName() == ident) {
+                            std::string impPath = imp->getModulePath();
+                            std::string impStem = std::filesystem::path(impPath).stem().string();
+
+                            for (const auto& u : docManager->openUris()) {
+                                if (u == doc.uri()) continue;
+                                std::string uStem = std::filesystem::path(uriToPath(u)).stem().string();
+                                if (uStem == impStem || u.find(impStem) != std::string::npos) {
+                                    auto destDoc = docManager->getDocument(u);
+                                    if (destDoc.has_value() && !isKmlDocument(*destDoc)) {
+                                        diag::SourceManager dSm;
+                                        diag::FileId dFid = dSm.addBuffer(uriToPath(destDoc->uri()), destDoc->text());
+                                        diag::DiagnosticEmitter dEmitter(dSm, diag::ColorMode::Never);
+                                        lexer::Lexer dLexer(dFid, destDoc->text());
+                                        parser::Parser dParser(dLexer, &dEmitter);
+                                        auto dAst = dParser.parseModule(uStem);
+                                        for (const auto& dDecl : dAst.declarations) {
+                                            if (!dDecl) continue;
+                                            if (const auto* fn = dynamic_cast<const ast::FnDecl*>(dDecl.get())) {
+                                                if (fn->getName() == ident) {
+                                                    Range r = findIdentifierRange(*destDoc, ident, fn->getSpan());
+                                                    return findReferences(*destDoc, r.start, includeDeclaration, docManager);
+                                                }
+                                            } else if (const auto* vd = dynamic_cast<const ast::VarDecl*>(dDecl.get())) {
+                                                if (vd->getName() == ident) {
+                                                    Range r = findIdentifierRange(*destDoc, ident, vd->getSpan());
+                                                    return findReferences(*destDoc, r.start, includeDeclaration, docManager);
+                                                }
+                                            } else if (const auto* cd = dynamic_cast<const ast::ConstDecl*>(dDecl.get())) {
+                                                if (cd->getName() == ident) {
+                                                    Range r = findIdentifierRange(*destDoc, ident, cd->getSpan());
+                                                    return findReferences(*destDoc, r.start, includeDeclaration, docManager);
+                                                }
+                                            } else if (const auto* cls = dynamic_cast<const ast::ClassDecl*>(dDecl.get())) {
+                                                if (cls->getName() == ident) {
+                                                    Range r = findIdentifierRange(*destDoc, ident, cls->getSpan());
+                                                    return findReferences(*destDoc, r.start, includeDeclaration, docManager);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return {};
+    }
+
+    std::vector<Location> results;
+
+    if (targetDecl->kind == ScopeDeclInfo::Kind::LocalVar || targetDecl->kind == ScopeDeclInfo::Kind::Param) {
+        if (includeDeclaration && targetDecl->nameSpan.isValid()) {
+            results.push_back(Location{doc.uri(), spanToRange(doc, targetDecl->nameSpan)});
+        }
+
+        if (activeFnScope && targetDecl->enclosingFnSpan.isValid()) {
+            for (size_t i = 0; i < tokens.size(); ++i) {
+                const auto& tok = tokens[i];
+                if (tok.span.start.offset >= targetDecl->enclosingFnSpan.start.offset &&
+                    tok.span.end.offset <= targetDecl->enclosingFnSpan.end.offset) {
+                    if (tok.is(lexer::TokenKind::Identifier) && tok.lexeme == targetDecl->name) {
+                        bool precededByDot = (i > 0 && tokens[i - 1].is(lexer::TokenKind::Dot));
+                        if (precededByDot) continue;
+
+                        if (targetDecl->nameSpan.isValid() &&
+                            tok.span.start.offset == targetDecl->nameSpan.start.offset) {
+                            continue;
+                        }
+
+                        auto resolved = activeFnScope->findInnermostScope(tok.span.start.offset)->lookup(targetDecl->name, tok.span.start.offset);
+                        if (resolved && resolved->nameSpan.start.offset == targetDecl->nameSpan.start.offset) {
+                            results.push_back(Location{doc.uri(), spanToRange(doc, tok.span)});
+                        }
+                    }
+                }
+            }
+        }
+    } else if (targetDecl->kind == ScopeDeclInfo::Kind::Field ||
+               targetDecl->kind == ScopeDeclInfo::Kind::Method ||
+               targetDecl->kind == ScopeDeclInfo::Kind::EnumMember) {
+        if (includeDeclaration && targetDecl->nameSpan.isValid()) {
+            results.push_back(Location{targetDecl->uri, spanToRange(doc, targetDecl->nameSpan)});
+        }
+
+        auto scanDocForMember = [&](const Document& d) {
+            diag::SourceManager dSm;
+            diag::FileId dFid = dSm.addBuffer(uriToPath(d.uri()), d.text());
+            lexer::Lexer dLexer(dFid, d.text());
+            auto dTokens = dLexer.tokenizeAll();
+
+            for (size_t i = 0; i < dTokens.size(); ++i) {
+                const auto& tok = dTokens[i];
+                if (tok.is(lexer::TokenKind::Identifier) && tok.lexeme == targetDecl->name) {
+                    if (d.uri() == targetDecl->uri && targetDecl->nameSpan.isValid() &&
+                        tok.span.start.offset == targetDecl->nameSpan.start.offset) {
+                        continue;
+                    }
+                    bool precededByDot = (i > 0 && dTokens[i - 1].is(lexer::TokenKind::Dot));
+                    if (precededByDot) {
+                        results.push_back(Location{d.uri(), spanToRange(d, tok.span)});
+                    }
+                }
+            }
+        };
+
+        scanDocForMember(doc);
+        if (docManager) {
+            for (const auto& u : docManager->openUris()) {
+                if (u != doc.uri()) {
+                    auto oDoc = docManager->getDocument(u);
+                    if (oDoc.has_value() && !isKmlDocument(*oDoc)) {
+                        scanDocForMember(*oDoc);
+                    }
+                }
+            }
+        }
+    } else {
+        if (includeDeclaration && targetDecl->nameSpan.isValid()) {
+            results.push_back(Location{doc.uri(), spanToRange(doc, targetDecl->nameSpan)});
+        }
+
+        std::vector<std::pair<diag::SourceSpan, std::unique_ptr<LexicalScopeNode>>> docFnScopes;
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                docFnScopes.push_back({fnDecl->getSpan(), buildFnScopeTree(doc, fnDecl)});
+            } else if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                for (const auto& m : cd->getMethods()) {
+                    if (m) {
+                        docFnScopes.push_back({m->getSpan(), buildFnScopeTree(doc, m.get())});
+                    }
+                }
+            }
+        }
+
+        for (size_t i = 0; i < tokens.size(); ++i) {
+            const auto& tok = tokens[i];
+            if (tok.is(lexer::TokenKind::Identifier) && tok.lexeme == targetDecl->name) {
+                if (targetDecl->nameSpan.isValid() && tok.span.start.offset == targetDecl->nameSpan.start.offset) {
+                    continue;
+                }
+                bool precededByDot = (i > 0 && tokens[i - 1].is(lexer::TokenKind::Dot));
+                if (precededByDot) continue;
+
+                bool shadowed = false;
+                for (const auto& [span, scope] : docFnScopes) {
+                    if (tok.span.start.offset >= span.start.offset && tok.span.end.offset <= span.end.offset) {
+                        auto local = scope->findInnermostScope(tok.span.start.offset)->lookup(targetDecl->name, tok.span.start.offset);
+                        if (local != nullptr) {
+                            shadowed = true;
+                            break;
+                        }
+                    }
+                }
+                if (!shadowed) {
+                    results.push_back(Location{doc.uri(), spanToRange(doc, tok.span)});
+                }
+            }
+        }
+
+        if (docManager) {
+            std::filesystem::path currentPath(pathStr);
+            std::string currentStem = currentPath.stem().string();
+
+            for (const auto& openUri : docManager->openUris()) {
+                if (openUri == doc.uri()) continue;
+                auto otherDocOpt = docManager->getDocument(openUri);
+                if (!otherDocOpt.has_value() || isKmlDocument(*otherDocOpt)) continue;
+                const auto& otherDoc = *otherDocOpt;
+
+                std::string otherPathStr = uriToPath(otherDoc.uri());
+                diag::SourceManager oSm;
+                diag::FileId oFileId = oSm.addBuffer(otherPathStr, otherDoc.text());
+                diag::DiagnosticEmitter oEmitter(oSm, diag::ColorMode::Never);
+                lexer::Lexer oLexer(oFileId, otherDoc.text());
+                parser::Parser oParser(oLexer, &oEmitter);
+                auto oAst = oParser.parseModule(std::filesystem::path(otherPathStr).stem().string());
+
+                bool importsSymbol = false;
+                diag::SourceSpan importSymSpan{};
+
+                for (const auto& d : oAst.declarations) {
+                    if (!d) continue;
+                    if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(d.get())) {
+                        std::string modPath = imp->getModulePath();
+                        std::string modStem = std::filesystem::path(modPath).stem().string();
+                        bool moduleMatches = (modStem == currentStem || modPath == currentPath.filename().string() || modPath == currentStem);
+
+                        if (moduleMatches) {
+                            if (imp->isSelective()) {
+                                for (const auto& sym : imp->getSymbols()) {
+                                    if (sym.originalName == targetDecl->name) {
+                                        importsSymbol = true;
+                                        importSymSpan = sym.span.isValid() ? sym.span : imp->getSpan();
+                                        break;
+                                    }
+                                }
+                            } else {
+                                importsSymbol = true;
+                            }
+                        }
+                    }
+                    if (importsSymbol) break;
+                }
+
+                if (!importsSymbol) continue;
+
+                if (importSymSpan.isValid()) {
+                    results.push_back(Location{otherDoc.uri(), spanToRange(otherDoc, importSymSpan)});
+                }
+
+                lexer::Lexer oTokLexer(oFileId, otherDoc.text());
+                auto oTokens = oTokLexer.tokenizeAll();
+
+                std::vector<std::pair<diag::SourceSpan, std::unique_ptr<LexicalScopeNode>>> oFnScopes;
+                for (const auto& d : oAst.declarations) {
+                    if (!d) continue;
+                    if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(d.get())) {
+                        oFnScopes.push_back({fnDecl->getSpan(), buildFnScopeTree(otherDoc, fnDecl)});
+                    } else if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(d.get())) {
+                        for (const auto& m : cd->getMethods()) {
+                            if (m) {
+                                oFnScopes.push_back({m->getSpan(), buildFnScopeTree(otherDoc, m.get())});
+                            }
+                        }
+                    }
+                }
+
+                for (size_t i = 0; i < oTokens.size(); ++i) {
+                    const auto& tok = oTokens[i];
+                    if (tok.is(lexer::TokenKind::Identifier) && tok.lexeme == targetDecl->name) {
+                        if (importSymSpan.isValid() && tok.span.start.offset == importSymSpan.start.offset) {
+                            continue;
+                        }
+                        bool precededByDot = (i > 0 && oTokens[i - 1].is(lexer::TokenKind::Dot));
+                        if (precededByDot) continue;
+
+                        bool shadowed = false;
+                        for (const auto& [span, scope] : oFnScopes) {
+                            if (tok.span.start.offset >= span.start.offset && tok.span.end.offset <= span.end.offset) {
+                                auto local = scope->findInnermostScope(tok.span.start.offset)->lookup(targetDecl->name, tok.span.start.offset);
+                                if (local != nullptr) {
+                                    shadowed = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!shadowed) {
+                            results.push_back(Location{otherDoc.uri(), spanToRange(otherDoc, tok.span)});
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    std::sort(results.begin(), results.end(), [](const Location& a, const Location& b) {
+        if (a.uri != b.uri) return a.uri < b.uri;
+        if (a.range.start.line != b.range.start.line) return a.range.start.line < b.range.start.line;
+        return a.range.start.character < b.range.start.character;
+    });
+
+    results.erase(std::unique(results.begin(), results.end(), [](const Location& a, const Location& b) {
+        return a.uri == b.uri && a.range == b.range;
+    }), results.end());
+
+    return results;
+}
+
+std::optional<PrepareRenameResult> Analyzer::prepareRename(
+    const Document& doc,
+    Position pos,
+    const DocumentManager* docManager
+) {
+    if (isKmlDocument(doc)) {
+        return std::nullopt;
+    }
+
+    auto byteOffsetOpt = doc.positionToOffset(pos);
+    if (!byteOffsetOpt.has_value()) {
+        return std::nullopt;
+    }
+    size_t targetOffset = *byteOffsetOpt;
+
+    diag::SourceManager sm;
+    std::string pathStr = uriToPath(doc.uri());
+    diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
+
+    lexer::Lexer lexer(fileId, doc.text());
+    auto tokens = lexer.tokenizeAll();
+
+    const lexer::Token* targetTok = nullptr;
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        if (targetOffset >= tokens[i].span.start.offset && targetOffset < tokens[i].span.end.offset) {
+            targetTok = &tokens[i];
+            break;
+        }
+    }
+    if (!targetTok) {
+        for (size_t i = 0; i < tokens.size(); ++i) {
+            if (targetOffset == tokens[i].span.end.offset && tokens[i].span.length() > 0) {
+                targetTok = &tokens[i];
+                break;
+            }
+        }
+    }
+
+    if (!targetTok || !targetTok->is(lexer::TokenKind::Identifier)) {
+        return std::nullopt;
+    }
+
+    std::string ident = std::string(targetTok->lexeme);
+
+    // Reject keywords and built-in constants/types
+    if (kwToTokenKind(ident) != lexer::TokenKind::Invalid) {
+        return std::nullopt;
+    }
+    if (ident == "true" || ident == "false" || ident == "null" ||
+        ident == "int" || ident == "float" || ident == "string" ||
+        ident == "bool" || ident == "char" || ident == "byte" ||
+        ident == "void" || ident == "any" || ident == "this" ||
+        ident == "inherited" || ident == "print" || ident == "println") {
+        return std::nullopt;
+    }
+
+    // Check if the symbol resolves to user code in workspace
+    auto refs = findReferences(doc, pos, true, docManager);
+    if (refs.empty()) {
+        return std::nullopt;
+    }
+
+    return PrepareRenameResult{
+        spanToRange(doc, targetTok->span),
+        ident
+    };
+}
+
+std::optional<WorkspaceEdit> Analyzer::renameSymbol(
+    const Document& doc,
+    Position pos,
+    const std::string& newName,
+    const DocumentManager* docManager
+) {
+    if (!isValidIdentifier(newName)) {
+        return std::nullopt;
+    }
+
+    auto prep = prepareRename(doc, pos, docManager);
+    if (!prep.has_value()) {
+        return std::nullopt;
+    }
+
+    // Find all occurrences to rename across workspace
+    auto refs = findReferences(doc, pos, true, docManager);
+    if (refs.empty()) {
+        return std::nullopt;
+    }
+
+    // Collision detection in same scope
+    diag::SourceManager sm;
+    std::string pathStr = uriToPath(doc.uri());
+    diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
+    diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+    lexer::Lexer pLexer(fileId, doc.text());
+    parser::Parser parser(pLexer, &emitter);
+    auto ast = parser.parseModule(std::filesystem::path(pathStr).stem().string());
+
+    auto byteOffsetOpt = doc.positionToOffset(pos);
+    size_t targetOffset = byteOffsetOpt.value_or(0);
+
+    bool isLocal = false;
+    for (const auto& decl : ast.declarations) {
+        if (!decl) continue;
+        if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+            if (targetOffset >= fnDecl->getSpan().start.offset && targetOffset <= fnDecl->getSpan().end.offset) {
+                lexer::Lexer tokLexer(fileId, doc.text());
+                auto fnTokens = tokLexer.tokenizeAll();
+                auto fnScope = buildFnScopeTree(doc, fnDecl);
+                if (const auto* declFound = fnScope->findDeclAtOffset(targetOffset)) {
+                    isLocal = true;
+                    const auto* scopeNode = fnScope->findInnermostScope(targetOffset);
+                    for (const auto& d : scopeNode->decls) {
+                        if (d.name == newName && d.nameSpan.start.offset != declFound->nameSpan.start.offset) {
+                            return std::nullopt; // collision in local scope!
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (!isLocal) {
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* fn = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                if (fn->getName() == newName && fn->getName() != prep->placeholder) return std::nullopt;
+            } else if (const auto* vd = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+                if (vd->getName() == newName && vd->getName() != prep->placeholder) return std::nullopt;
+            } else if (const auto* cd = dynamic_cast<const ast::ConstDecl*>(decl.get())) {
+                if (cd->getName() == newName && cd->getName() != prep->placeholder) return std::nullopt;
+            } else if (const auto* cls = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                if (cls->getName() == newName && cls->getName() != prep->placeholder) return std::nullopt;
+            } else if (const auto* ed = dynamic_cast<const ast::EnumDecl*>(decl.get())) {
+                if (ed->getName() == newName && ed->getName() != prep->placeholder) return std::nullopt;
+            }
+        }
+    }
+
+    WorkspaceEdit edit;
+    for (const auto& loc : refs) {
+        edit.changes[loc.uri].push_back(TextEdit{loc.range, newName});
+    }
+
+    for (auto& [uri, edits] : edit.changes) {
+        std::sort(edits.begin(), edits.end(), [](const TextEdit& a, const TextEdit& b) {
+            if (a.range.start.line != b.range.start.line) return a.range.start.line < b.range.start.line;
+            return a.range.start.character < b.range.start.character;
+        });
+        edits.erase(std::unique(edits.begin(), edits.end(), [](const TextEdit& a, const TextEdit& b) {
+            return a.range == b.range;
+        }), edits.end());
+    }
+
+    return edit;
+}
+
+static std::string trimWhitespace(std::string_view s) {
+    size_t start = 0;
+    while (start < s.size() && (s[start] == ' ' || s[start] == '\t' || s[start] == '\r' || s[start] == '\n')) {
+        start++;
+    }
+    size_t end = s.size();
+    while (end > start && (s[end - 1] == ' ' || s[end - 1] == '\t' || s[end - 1] == '\r' || s[end - 1] == '\n')) {
+        end--;
+    }
+    return std::string(s.substr(start, end - start));
+}
+
+static SignatureInformation buildFnSignatureInfo(const ast::FnDecl* fnDecl, const std::string& source) {
+    SignatureInformation sig;
+    std::string sigStr = (fnDecl->isExported() ? "export " : "");
+    if (fnDecl->isAsync()) sigStr += "async ";
+    sigStr += "fn " + fnDecl->getName() + "(";
+    for (size_t i = 0; i < fnDecl->getParams().size(); ++i) {
+        if (i > 0) sigStr += ", ";
+        const auto& p = fnDecl->getParams()[i];
+        std::string pStr = (p.isMut ? "mut " : "") + p.name + ": " + formatType(p.type.get(), "any");
+        sigStr += pStr;
+        ParameterInformation pi;
+        pi.label = pStr;
+        sig.parameters.push_back(std::move(pi));
+    }
+    sigStr += "): " + formatType(fnDecl->getReturnType(), "void");
+    sig.label = std::move(sigStr);
+
+    std::string doc = extractDocComments(source, fnDecl->getSpan().start.offset);
+    if (!doc.empty()) {
+        sig.documentation = MarkupContent{"markdown", std::move(doc)};
+    }
+    return sig;
+}
+
+static SignatureInformation buildClassConstructorSignatureInfo(const ast::ClassDecl* cd, const std::string& source) {
+    SignatureInformation sig;
+    std::string sigStr = (cd->isExported() ? "export " : "");
+    sigStr += cd->getName() + "(";
+    for (size_t i = 0; i < cd->getFields().size(); ++i) {
+        if (i > 0) sigStr += ", ";
+        const auto& f = cd->getFields()[i];
+        std::string pStr = f.name + ": " + formatType(f.type.get(), "any");
+        sigStr += pStr;
+        ParameterInformation pi;
+        pi.label = pStr;
+        sig.parameters.push_back(std::move(pi));
+    }
+    sigStr += ")";
+    sig.label = std::move(sigStr);
+
+    std::string doc = extractDocComments(source, cd->getSpan().start.offset);
+    if (!doc.empty()) {
+        sig.documentation = MarkupContent{"markdown", std::move(doc)};
+    } else {
+        sig.documentation = MarkupContent{"markdown", "Constructor for class `" + cd->getName() + "`"};
+    }
+    return sig;
+}
+
+static std::optional<SignatureInformation> parseStdlibSignatureInfo(const StdlibDoc& stdDoc) {
+    size_t openParen = stdDoc.signature.find('(');
+    if (openParen == std::string::npos) {
+        return std::nullopt;
+    }
+    size_t closeParen = stdDoc.signature.rfind(')');
+    if (closeParen == std::string::npos || closeParen <= openParen) {
+        return std::nullopt;
+    }
+
+    SignatureInformation sig;
+    sig.label = stdDoc.signature;
+    if (!stdDoc.doc.empty()) {
+        sig.documentation = MarkupContent{"markdown", stdDoc.doc};
+    }
+
+    std::string cur;
+    int depth = 0;
+    for (size_t i = openParen + 1; i < closeParen; ++i) {
+        char c = stdDoc.signature[i];
+        if (c == '<' || c == '(' || c == '[' || c == '{') {
+            depth++;
+            cur += c;
+        } else if (c == '>' || c == ')' || c == ']' || c == '}') {
+            depth--;
+            cur += c;
+        } else if (c == ',' && depth == 0) {
+            std::string trimmed = trimWhitespace(cur);
+            if (!trimmed.empty()) {
+                sig.parameters.push_back(ParameterInformation{std::move(trimmed), std::nullopt});
+            }
+            cur.clear();
+        } else {
+            cur += c;
+        }
+    }
+    std::string trimmed = trimWhitespace(cur);
+    if (!trimmed.empty()) {
+        sig.parameters.push_back(ParameterInformation{std::move(trimmed), std::nullopt});
+    }
+
+    return sig;
+}
+
+std::optional<SignatureHelp> Analyzer::getSignatureHelp(
+    const Document& doc,
+    Position pos,
+    const DocumentManager* docManager
+) {
+    if (isKmlDocument(doc)) {
+        return std::nullopt;
+    }
+
+    auto byteOffsetOpt = doc.positionToOffset(pos);
+    if (!byteOffsetOpt.has_value()) {
+        return std::nullopt;
+    }
+    size_t targetOffset = *byteOffsetOpt;
+
+    diag::SourceManager sm;
+    std::string pathStr = uriToPath(doc.uri());
+    diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
+
+    lexer::Lexer lexer(fileId, doc.text());
+    auto tokens = lexer.tokenizeAll();
+
+    struct DelimEntry {
+        lexer::TokenKind kind;
+        bool isCall = false;
+        std::string callee;
+        std::string receiver;
+        uint32_t commaCount = 0;
+    };
+
+    std::vector<DelimEntry> stack;
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        const auto& tok = tokens[i];
+        if (tok.span.start.offset >= targetOffset) {
+            break;
+        }
+
+        if (tok.is(lexer::TokenKind::LParen)) {
+            bool isCall = false;
+            std::string callee;
+            std::string receiver;
+
+            if (i > 0 && tokens[i - 1].is(lexer::TokenKind::Identifier)) {
+                bool isDef = false;
+                if (i >= 2 && tokens[i - 2].is(lexer::TokenKind::KwFn)) {
+                    isDef = true;
+                }
+                if (!isDef) {
+                    isCall = true;
+                    callee = std::string(tokens[i - 1].lexeme);
+                    if (i >= 3 && tokens[i - 2].is(lexer::TokenKind::Dot)) {
+                        if (tokens[i - 3].is(lexer::TokenKind::Identifier)) {
+                            receiver = std::string(tokens[i - 3].lexeme);
+                        } else if (tokens[i - 3].is(lexer::TokenKind::KwThis)) {
+                            receiver = "this";
+                        }
+                    }
+                }
+            }
+            stack.push_back(DelimEntry{tok.kind, isCall, std::move(callee), std::move(receiver), 0});
+        } else if (tok.is(lexer::TokenKind::LBracket) || tok.is(lexer::TokenKind::LBrace)) {
+            stack.push_back(DelimEntry{tok.kind, false, "", "", 0});
+        } else if (tok.is(lexer::TokenKind::RParen)) {
+            while (!stack.empty() && stack.back().kind != lexer::TokenKind::LParen) {
+                stack.pop_back();
+            }
+            if (!stack.empty() && stack.back().kind == lexer::TokenKind::LParen) {
+                stack.pop_back();
+            }
+        } else if (tok.is(lexer::TokenKind::RBracket)) {
+            while (!stack.empty() && stack.back().kind != lexer::TokenKind::LBracket) {
+                stack.pop_back();
+            }
+            if (!stack.empty() && stack.back().kind == lexer::TokenKind::LBracket) {
+                stack.pop_back();
+            }
+        } else if (tok.is(lexer::TokenKind::RBrace)) {
+            while (!stack.empty() && stack.back().kind != lexer::TokenKind::LBrace) {
+                stack.pop_back();
+            }
+            if (!stack.empty() && stack.back().kind == lexer::TokenKind::LBrace) {
+                stack.pop_back();
+            }
+        } else if (tok.is(lexer::TokenKind::Comma)) {
+            if (!stack.empty()) {
+                stack.back().commaCount++;
+            }
+        }
+    }
+
+    const DelimEntry* activeCall = nullptr;
+    for (auto it = stack.rbegin(); it != stack.rend(); ++it) {
+        if (it->isCall) {
+            activeCall = &(*it);
+            break;
+        }
+    }
+    if (!activeCall) {
+        return std::nullopt;
+    }
+
+    uint32_t activeParamIdx = activeCall->commaCount;
+    const std::string& calleeName = activeCall->callee;
+    const std::string& receiverName = activeCall->receiver;
+
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+
+    diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+    lexer::Lexer pLexer(fileId, doc.text());
+    parser::Parser parser(pLexer, &emitter);
+    auto ast = parser.parseModule(moduleName);
+
+    std::optional<SignatureInformation> foundSig;
+
+    // 1. If receiver is specified:
+    if (!receiverName.empty()) {
+        if (receiverName == "this") {
+            for (const auto& decl : ast.declarations) {
+                if (!decl) continue;
+                if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                    if (targetOffset >= cd->getSpan().start.offset && targetOffset <= cd->getSpan().end.offset) {
+                        for (const auto& method : cd->getMethods()) {
+                            if (method && method->getName() == calleeName) {
+                                foundSig = buildFnSignatureInfo(method.get(), doc.text());
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (foundSig.has_value()) break;
+            }
+        } else {
+            std::string className = findReceiverClassName(ast, receiverName, targetOffset);
+            if (!className.empty()) {
+                for (const auto& decl : ast.declarations) {
+                    if (!decl) continue;
+                    if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                        if (cd->getName() == className) {
+                            for (const auto& method : cd->getMethods()) {
+                                if (method && method->getName() == calleeName) {
+                                    foundSig = buildFnSignatureInfo(method.get(), doc.text());
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (foundSig.has_value()) break;
+                }
+            }
+
+            // Check if receiver is stdlib module or member e.g. "fs.readFile" or just "readFile"
+            if (!foundSig.has_value()) {
+                if (auto stdDoc = getStdlibMemberDoc(receiverName + "." + calleeName); stdDoc.has_value()) {
+                    foundSig = parseStdlibSignatureInfo(*stdDoc);
+                } else if (auto stdDoc2 = getStdlibMemberDoc(calleeName); stdDoc2.has_value()) {
+                    foundSig = parseStdlibSignatureInfo(*stdDoc2);
+                }
+            }
+        }
+    } else {
+        // Receiver is empty.
+        // A. Check enclosing class method if cursor is inside a class
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                if (targetOffset >= cd->getSpan().start.offset && targetOffset <= cd->getSpan().end.offset) {
+                    for (const auto& method : cd->getMethods()) {
+                        if (method && method->getName() == calleeName) {
+                            foundSig = buildFnSignatureInfo(method.get(), doc.text());
+                            break;
+                        }
+                    }
+                }
+            }
+            if (foundSig.has_value()) break;
+        }
+
+        // B. Check top-level functions and class constructors
+        if (!foundSig.has_value()) {
+            for (const auto& decl : ast.declarations) {
+                if (!decl) continue;
+                if (const auto* fn = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                    if (fn->getName() == calleeName) {
+                        foundSig = buildFnSignatureInfo(fn, doc.text());
+                        break;
+                    }
+                } else if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                    if (cd->getName() == calleeName) {
+                        foundSig = buildClassConstructorSignatureInfo(cd, doc.text());
+                        break;
+                    }
+                }
+            }
+        }
+
+        // B2. Check imported KML UI components constructors (e.g. `App()`)
+        if (!foundSig.has_value()) {
+            for (const auto& decl : ast.declarations) {
+                if (!decl) continue;
+                if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+                    std::filesystem::path p(imp->getModulePath());
+                    if (p.extension() == ".kml" && p.stem().string() == calleeName) {
+                        SignatureInformation sig;
+                        sig.label = calleeName + "(): " + calleeName;
+                        sig.documentation = MarkupContent{"markdown", "Constructs a new instance of the `" + calleeName + "` KML component."};
+                        foundSig = std::move(sig);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // C. Check imported symbols across documents
+        if (!foundSig.has_value() && docManager) {
+            for (const auto& decl : ast.declarations) {
+                if (!decl) continue;
+                if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+                    for (const auto& sym : imp->getSymbols()) {
+                        if (sym.getEffectiveName() == calleeName) {
+                            std::string impPath = imp->getModulePath();
+                            std::string impStem = std::filesystem::path(impPath).stem().string();
+                            for (const auto& u : docManager->openUris()) {
+                                if (u == doc.uri()) continue;
+                                std::string uStem = std::filesystem::path(uriToPath(u)).stem().string();
+                                if (uStem == impStem || u.find(impStem) != std::string::npos) {
+                                    auto destDoc = docManager->getDocument(u);
+                                    if (destDoc.has_value() && !isKmlDocument(*destDoc)) {
+                                        diag::SourceManager dSm;
+                                        diag::FileId dFid = dSm.addBuffer(uriToPath(destDoc->uri()), destDoc->text());
+                                        diag::DiagnosticEmitter dEmitter(dSm, diag::ColorMode::Never);
+                                        lexer::Lexer dLexer(dFid, destDoc->text());
+                                        parser::Parser dParser(dLexer, &dEmitter);
+                                        auto dAst = dParser.parseModule(uStem);
+                                        for (const auto& dDecl : dAst.declarations) {
+                                            if (!dDecl) continue;
+                                            if (const auto* fn = dynamic_cast<const ast::FnDecl*>(dDecl.get())) {
+                                                if (fn->getName() == sym.originalName) {
+                                                    foundSig = buildFnSignatureInfo(fn, destDoc->text());
+                                                    break;
+                                                }
+                                            } else if (const auto* cls = dynamic_cast<const ast::ClassDecl*>(dDecl.get())) {
+                                                if (cls->getName() == sym.originalName) {
+                                                    foundSig = buildClassConstructorSignatureInfo(cls, destDoc->text());
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                if (foundSig.has_value()) break;
+                            }
+                        }
+                        if (foundSig.has_value()) break;
+                    }
+                }
+                if (foundSig.has_value()) break;
+            }
+        }
+
+        // D. Check standard library built-in functions
+        if (!foundSig.has_value()) {
+            if (auto stdDoc = getStdlibMemberDoc(calleeName); stdDoc.has_value()) {
+                foundSig = parseStdlibSignatureInfo(*stdDoc);
+            }
+        }
+    }
+
+    if (!foundSig.has_value()) {
+        return std::nullopt;
+    }
+
+    foundSig->activeParameter = activeParamIdx;
+
+    SignatureHelp help;
+    help.activeSignature = 0;
+    help.activeParameter = activeParamIdx;
+    help.signatures.push_back(std::move(*foundSig));
+    return help;
+}
+
 std::optional<Hover> Analyzer::getHover(
     const Document& doc,
     Position pos,
-    const DocumentManager* /*docManager*/
+    const DocumentManager* docManager
 ) {
     auto byteOffsetOpt = doc.positionToOffset(pos);
     if (!byteOffsetOpt.has_value()) {
         return std::nullopt;
     }
     size_t targetOffset = *byteOffsetOpt;
+
+    if (isKmlDocument(doc)) {
+        return getKmlHover(doc, pos, targetOffset, docManager);
+    }
 
     diag::SourceManager sm;
     std::string pathStr = uriToPath(doc.uri());
@@ -1023,17 +2348,30 @@ std::optional<Hover> Analyzer::getHover(
     parser::Parser parser(pLexer, &emitter);
     auto ast = parser.parseModule(moduleName);
 
-    // 3c. Function Parameters inside enclosing function/method
+    // 3c. Local parameters and local variables inside enclosing function/method
     for (const auto& decl : ast.declarations) {
         if (!decl) continue;
         if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
             diag::SourceSpan fnSpan = fnDecl->getSpan();
             if (targetOffset >= fnSpan.start.offset && targetOffset <= fnSpan.end.offset) {
-                for (const auto& param : fnDecl->getParams()) {
-                    if (param.name == ident) {
-                        std::string sig = "(parameter) " + std::string(param.isMut ? "mut " : "") + param.name + ": " + formatType(param.type.get(), "any");
-                        return Hover{MarkupContent{"markdown", "```keet\n" + sig + "\n```"}, tokRange};
+                auto fnScope = buildFnScopeTree(doc, fnDecl);
+                const ScopeDeclInfo* declFound = fnScope->findDeclAtOffset(targetOffset);
+                if (!declFound) {
+                    if (const auto* inner = fnScope->findInnermostScope(targetOffset)) {
+                        declFound = inner->lookup(ident, targetOffset);
                     }
+                }
+                if (declFound) {
+                    std::string sig;
+                    if (declFound->kind == ScopeDeclInfo::Kind::Param) {
+                        sig = "(parameter) " + std::string(declFound->isConst ? "" : "mut ") + declFound->name + ": " + declFound->typeStr;
+                    } else {
+                        sig = std::string(declFound->isConst ? "const " : "let ") + declFound->name;
+                        if (!declFound->typeStr.empty()) {
+                            sig += ": " + declFound->typeStr;
+                        }
+                    }
+                    return Hover{MarkupContent{"markdown", "```keet\n" + sig + "\n```"}, tokRange};
                 }
             }
         } else if (const auto* classDecl = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
@@ -1041,11 +2379,24 @@ std::optional<Hover> Analyzer::getHover(
                 if (!method) continue;
                 diag::SourceSpan mSpan = method->getSpan();
                 if (targetOffset >= mSpan.start.offset && targetOffset <= mSpan.end.offset) {
-                    for (const auto& param : method->getParams()) {
-                        if (param.name == ident) {
-                            std::string sig = "(parameter) " + std::string(param.isMut ? "mut " : "") + param.name + ": " + formatType(param.type.get(), "any");
-                            return Hover{MarkupContent{"markdown", "```keet\n" + sig + "\n```"}, tokRange};
+                    auto mScope = buildFnScopeTree(doc, method.get());
+                    const ScopeDeclInfo* declFound = mScope->findDeclAtOffset(targetOffset);
+                    if (!declFound) {
+                        if (const auto* inner = mScope->findInnermostScope(targetOffset)) {
+                            declFound = inner->lookup(ident, targetOffset);
                         }
+                    }
+                    if (declFound) {
+                        std::string sig;
+                        if (declFound->kind == ScopeDeclInfo::Kind::Param) {
+                            sig = "(parameter) " + std::string(declFound->isConst ? "" : "mut ") + declFound->name + ": " + declFound->typeStr;
+                        } else {
+                            sig = std::string(declFound->isConst ? "const " : "let ") + declFound->name;
+                            if (!declFound->typeStr.empty()) {
+                                sig += ": " + declFound->typeStr;
+                            }
+                        }
+                        return Hover{MarkupContent{"markdown", "```keet\n" + sig + "\n```"}, tokRange};
                     }
                 }
             }
@@ -1172,10 +2523,102 @@ std::optional<Hover> Analyzer::getHover(
         }
     }
 
+    // 3d2. Check imported KML UI components (e.g. `import "./App.kml";`)
+    for (const auto& decl : ast.declarations) {
+        if (!decl) continue;
+        if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+            std::filesystem::path p(imp->getModulePath());
+            if (p.extension() == ".kml" && p.stem().string() == ident) {
+                std::string md = "```keet\ncomponent " + ident + "\n```\n*KML UI Component imported from `" + imp->getModulePath() + "`.*";
+                return Hover{MarkupContent{"markdown", std::move(md)}, tokRange};
+            }
+        }
+    }
+
     // 3e. Standard Library Built-in Functions/Constants
-    if (auto stdDoc = getStdlibMemberDoc(ident); stdDoc.has_value()) {
-        std::string content = "```keet\n" + stdDoc->signature + "\n```\n" + stdDoc->doc;
-        return Hover{MarkupContent{"markdown", std::move(content)}, tokRange};
+    // Check if ident is part of member access (receiver.ident)
+    std::string receiverName;
+    for (size_t i = 1; i < tokens.size(); ++i) {
+        if (&tokens[i] == targetTok && tokens[i - 1].is(lexer::TokenKind::Dot) && i >= 2 && tokens[i - 2].is(lexer::TokenKind::Identifier)) {
+            receiverName = std::string(tokens[i - 2].lexeme);
+            break;
+        }
+    }
+
+    if (!receiverName.empty()) {
+        if (sema::isStdlibModule(receiverName)) {
+            auto scope = sema::createStdlibModuleScope(receiverName);
+            if (scope && scope->lookup(ident)) {
+                if (auto stdDoc = getStdlibMemberDoc(receiverName + "." + ident); stdDoc.has_value()) {
+                    std::string content = "```keet\n" + stdDoc->signature + "\n```\n" + stdDoc->doc +
+                                          "\n\n*Exported member of standard library module `" + receiverName + "`*";
+                    return Hover{MarkupContent{"markdown", std::move(content)}, tokRange};
+                } else if (auto stdDoc2 = getStdlibMemberDoc(ident); stdDoc2.has_value()) {
+                    std::string content = "```keet\n" + stdDoc2->signature + "\n```\n" + stdDoc2->doc +
+                                          "\n\n*Exported member of standard library module `" + receiverName + "`*";
+                    return Hover{MarkupContent{"markdown", std::move(content)}, tokRange};
+                }
+            }
+        }
+    } else {
+        // Bare identifier: ONLY match stdlib if explicitly imported or predeclared universe builtin
+        bool isImportedSymbol = false;
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+                for (const auto& sym : imp->getSymbols()) {
+                    if (sym.getEffectiveName() == ident) {
+                        isImportedSymbol = true;
+                        break;
+                    }
+                }
+            }
+            if (isImportedSymbol) break;
+        }
+
+        bool isUniverseBuiltin = (ident == "println" || ident == "print" || ident == "eprint" ||
+                                  ident == "eprintln" || ident == "panic" || ident == "assert" ||
+                                  ident == "len" || ident == "typeof" || ident == "readln" ||
+                                  ident == "readLine");
+
+        if (isImportedSymbol || isUniverseBuiltin) {
+            if (auto stdDoc = getStdlibMemberDoc(ident); stdDoc.has_value()) {
+                std::string content = "```keet\n" + stdDoc->signature + "\n```\n" + stdDoc->doc;
+                return Hover{MarkupContent{"markdown", std::move(content)}, tokRange};
+            }
+        }
+
+        // Syntactic fallback: search document lines for local variable declaration when AST parse failed due to incomplete syntax
+        std::string patternLet = "let " + ident;
+        std::string patternConst = "const " + ident;
+        std::string patternDefine = "define " + ident;
+        std::string patternMut = "mut " + ident;
+        std::istringstream stream(doc.text());
+        std::string line;
+        while (std::getline(stream, line)) {
+            size_t pLet = line.find(patternLet);
+            size_t pConst = line.find(patternConst);
+            size_t pDefine = line.find(patternDefine);
+            size_t pMut = line.find(patternMut);
+            size_t matchPos = (pLet != std::string::npos) ? pLet :
+                              (pConst != std::string::npos ? pConst :
+                              (pDefine != std::string::npos ? pDefine : pMut));
+            if (matchPos != std::string::npos) {
+                size_t pLen = (matchPos == pLet) ? patternLet.size() :
+                              (matchPos == pConst) ? patternConst.size() :
+                              (matchPos == pDefine) ? patternDefine.size() : patternMut.size();
+                size_t afterIdent = matchPos + pLen;
+                if (afterIdent < line.size() && (std::isalnum(static_cast<unsigned char>(line[afterIdent])) || line[afterIdent] == '_')) {
+                    continue;
+                }
+                size_t semi = line.find(';', matchPos);
+                std::string declStr = (semi != std::string::npos) ? line.substr(matchPos, semi - matchPos) : line.substr(matchPos);
+                size_t eqPos = declStr.find('=');
+                std::string sig = (eqPos != std::string::npos) ? declStr.substr(0, eqPos) : declStr;
+                while (!sig.empty() && (sig.back() == ' ' || sig.back() == '\t')) sig.pop_back();
+                return Hover{MarkupContent{"markdown", "```keet\n" + sig + "\n```\n*Local variable declaration*"}, tokRange};
+            }
+        }
     }
 
     return std::nullopt;
@@ -1197,6 +2640,10 @@ CompletionList Analyzer::getCompletions(
     const std::string& text = doc.text();
     if (targetOffset > text.size()) {
         targetOffset = text.size();
+    }
+
+    if (isKmlDocument(doc)) {
+        return getKmlCompletions(doc, pos, targetOffset, docManager);
     }
 
     std::string pathStr = uriToPath(doc.uri());
@@ -1926,6 +3373,10 @@ CompletionList Analyzer::getCompletions(
 }
 
 std::vector<DocumentSymbol> Analyzer::getDocumentSymbols(const Document& doc) {
+    if (isKmlDocument(doc)) {
+        return getKmlDocumentSymbols(doc);
+    }
+
     std::vector<DocumentSymbol> symbols;
 
     std::string pathStr = uriToPath(doc.uri());
@@ -2085,7 +3536,444 @@ std::vector<DocumentSymbol> Analyzer::getDocumentSymbols(const Document& doc) {
     return symbols;
 }
 
+namespace {
+
+enum SemanticTokenTypeIdx : uint32_t {
+    SemType = 0,
+    SemClass = 1,
+    SemInterface = 2,
+    SemEnum = 3,
+    SemEnumMember = 4,
+    SemFunction = 5,
+    SemMethod = 6,
+    SemProperty = 7,
+    SemVariable = 8,
+    SemParameter = 9,
+    SemKeyword = 10,
+    SemString = 11,
+    SemNumber = 12,
+    SemOperator = 13,
+    SemComment = 14
+};
+
+enum SemanticTokenModBit : uint32_t {
+    ModNone = 0,
+    ModDeclaration = 1 << 0,
+    ModReadonly = 1 << 1,
+    ModStatic = 1 << 2,
+    ModDefaultLibrary = 1 << 3
+};
+
+struct RawTokenItem {
+    uint32_t line = 0;
+    uint32_t character = 0;
+    uint32_t length = 0;
+    uint32_t tokenType = 0;
+    uint32_t tokenModifiers = 0;
+};
+
+void addSemanticSpanToken(
+    const Document& doc,
+    std::vector<RawTokenItem>& out,
+    const diag::SourceSpan& span,
+    uint32_t type,
+    uint32_t mods
+) {
+    if (!span.isValid()) return;
+    Range r = spanToRange(doc, span);
+    if (r.start.line == r.end.line) {
+        if (r.end.character > r.start.character) {
+            out.push_back(RawTokenItem{r.start.line, r.start.character, r.end.character - r.start.character, type, mods});
+        }
+    } else {
+        const std::string& text = doc.text();
+        size_t startOff = span.start.offset;
+        size_t endOff = span.end.offset;
+        if (endOff > text.size()) endOff = text.size();
+        if (startOff >= endOff) return;
+
+        size_t cur = startOff;
+        uint32_t curLine = r.start.line;
+        uint32_t curCol = r.start.character;
+
+        while (cur < endOff) {
+            size_t nextNl = text.find('\n', cur);
+            size_t lineEnd = (nextNl == std::string::npos || nextNl >= endOff) ? endOff : nextNl;
+            if (lineEnd > cur) {
+                out.push_back(RawTokenItem{curLine, curCol, static_cast<uint32_t>(lineEnd - cur), type, mods});
+            }
+            if (nextNl == std::string::npos || nextNl >= endOff) {
+                break;
+            }
+            cur = nextNl + 1;
+            curLine++;
+            curCol = 0;
+        }
+    }
+}
+
+} // namespace
+
+SemanticTokens Analyzer::getSemanticTokens(const Document& doc) {
+    if (isKmlDocument(doc)) {
+        return getKmlSemanticTokens(doc);
+    }
+    diag::SourceManager sm;
+    std::string pathStr = uriToPath(doc.uri());
+    diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
+
+    lexer::Lexer lexer(fileId, doc.text());
+    lexer.setCaptureComments(true);
+    auto tokens = lexer.tokenizeAll();
+    auto comments = lexer.takeCapturedComments();
+
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+
+    diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+    lexer::Lexer pLexer(fileId, doc.text());
+    parser::Parser parser(pLexer, &emitter);
+    auto ast = parser.parseModule(moduleName);
+
+    std::unordered_set<std::string> classNames;
+    std::unordered_set<std::string> enumNames;
+    std::unordered_set<std::string> enumMemberNames;
+    std::unordered_set<std::string> functionNames;
+    std::unordered_set<std::string> constNames;
+    std::unordered_set<std::string> varNames;
+    std::unordered_set<std::string> methodNames;
+    std::unordered_set<std::string> fieldNames;
+    std::unordered_set<std::string> importedNames;
+
+    for (const auto& decl : ast.declarations) {
+        if (!decl) continue;
+        if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+            classNames.insert(cd->getName());
+            for (const auto& f : cd->getFields()) {
+                fieldNames.insert(f.name);
+            }
+            for (const auto& m : cd->getMethods()) {
+                if (m) methodNames.insert(m->getName());
+            }
+        } else if (const auto* ed = dynamic_cast<const ast::EnumDecl*>(decl.get())) {
+            enumNames.insert(ed->getName());
+            for (const auto& m : ed->getMembers()) {
+                enumMemberNames.insert(m.name);
+            }
+        } else if (const auto* fn = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+            functionNames.insert(fn->getName());
+        } else if (const auto* kd = dynamic_cast<const ast::ConstDecl*>(decl.get())) {
+            constNames.insert(kd->getName());
+        } else if (const auto* vd = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+            varNames.insert(vd->getName());
+        } else if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+            for (const auto& sym : imp->getSymbols()) {
+                importedNames.insert(sym.getEffectiveName());
+            }
+        }
+    }
+
+    std::vector<std::unique_ptr<LexicalScopeNode>> fnScopes;
+    for (const auto& decl : ast.declarations) {
+        if (!decl) continue;
+        if (const auto* fn = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+            fnScopes.push_back(buildFnScopeTree(doc, fn));
+        } else if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+            for (const auto& m : cd->getMethods()) {
+                if (m) {
+                    fnScopes.push_back(buildFnScopeTree(doc, m.get()));
+                }
+            }
+        }
+    }
+
+    auto lookupInScopes = [&](size_t offset, const std::string& name) -> const ScopeDeclInfo* {
+        for (const auto& scope : fnScopes) {
+            if (offset >= scope->span.start.offset && offset <= scope->span.end.offset) {
+                const auto* inner = scope->findInnermostScope(offset);
+                if (inner) {
+                    return inner->lookup(name, offset);
+                }
+            }
+        }
+        return nullptr;
+    };
+
+    auto isMethodDecl = [&](size_t offset, const std::string& name) -> bool {
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                if (offset >= cd->getSpan().start.offset && offset <= cd->getSpan().end.offset) {
+                    for (const auto& m : cd->getMethods()) {
+                        if (m && m->getName() == name) return true;
+                    }
+                }
+            }
+        }
+        return false;
+    };
+
+    auto isFieldDecl = [&](size_t offset, const std::string& name) -> bool {
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                if (offset >= cd->getSpan().start.offset && offset <= cd->getSpan().end.offset) {
+                    for (const auto& f : cd->getFields()) {
+                        if (f.name == name) return true;
+                    }
+                }
+            }
+        }
+        return false;
+    };
+
+    auto isEnumMemberDecl = [&](size_t offset, const std::string& name) -> bool {
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* ed = dynamic_cast<const ast::EnumDecl*>(decl.get())) {
+                if (offset >= ed->getSpan().start.offset && offset <= ed->getSpan().end.offset) {
+                    for (const auto& m : ed->getMembers()) {
+                        if (m.name == name) return true;
+                    }
+                }
+            }
+        }
+        return false;
+    };
+
+    std::vector<RawTokenItem> rawTokens;
+
+    // 1. Captured comments
+    for (const auto& c : comments) {
+        addSemanticSpanToken(doc, rawTokens, c.span, SemComment, ModNone);
+    }
+
+    // 2. Lexical tokens
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        const auto& tok = tokens[i];
+        if (tok.isOneOf(lexer::TokenKind::Eof, lexer::TokenKind::Invalid)) {
+            continue;
+        }
+
+        // 2a. Built-in types
+        if (tok.isOneOf(lexer::TokenKind::KwBool, lexer::TokenKind::KwInt, lexer::TokenKind::KwFloat,
+                        lexer::TokenKind::KwChar, lexer::TokenKind::KwString, lexer::TokenKind::KwVoid,
+                        lexer::TokenKind::KwError, lexer::TokenKind::KwArray, lexer::TokenKind::KwMap)) {
+            addSemanticSpanToken(doc, rawTokens, tok.span, SemType, ModDefaultLibrary);
+            continue;
+        }
+
+        // 2b. Keywords
+        if (lexer::isKeyword(tok.kind)) {
+            addSemanticSpanToken(doc, rawTokens, tok.span, SemKeyword, ModNone);
+            continue;
+        }
+
+        // 2c. String and char literals
+        if (tok.isOneOf(lexer::TokenKind::StringLiteral, lexer::TokenKind::CharLiteral,
+                        lexer::TokenKind::TemplateNoSub, lexer::TokenKind::TemplateHead,
+                        lexer::TokenKind::TemplateMiddle, lexer::TokenKind::TemplateTail)) {
+            addSemanticSpanToken(doc, rawTokens, tok.span, SemString, ModNone);
+            continue;
+        }
+
+        // 2d. Numbers
+        if (tok.isOneOf(lexer::TokenKind::IntLiteral, lexer::TokenKind::FloatLiteral)) {
+            addSemanticSpanToken(doc, rawTokens, tok.span, SemNumber, ModNone);
+            continue;
+        }
+
+        // 2e. Operators
+        if (tok.isOneOf(lexer::TokenKind::Plus, lexer::TokenKind::Minus, lexer::TokenKind::Star,
+                        lexer::TokenKind::Slash, lexer::TokenKind::Percent, lexer::TokenKind::PlusPlus,
+                        lexer::TokenKind::MinusMinus, lexer::TokenKind::Question,
+                        lexer::TokenKind::EqualEqual, lexer::TokenKind::ExclaimEqual,
+                        lexer::TokenKind::Less, lexer::TokenKind::LessEqual,
+                        lexer::TokenKind::Greater, lexer::TokenKind::GreaterEqual,
+                        lexer::TokenKind::AmpAmp, lexer::TokenKind::PipePipe,
+                        lexer::TokenKind::Exclaim, lexer::TokenKind::Pipe,
+                        lexer::TokenKind::Equal, lexer::TokenKind::PlusEqual,
+                        lexer::TokenKind::MinusEqual, lexer::TokenKind::StarEqual,
+                        lexer::TokenKind::SlashEqual, lexer::TokenKind::PercentEqual,
+                        lexer::TokenKind::Arrow)) {
+            addSemanticSpanToken(doc, rawTokens, tok.span, SemOperator, ModNone);
+            continue;
+        }
+
+        // Skip punctuation tokens (dots, commas, colons, semicolons, parens, brackets, braces)
+        if (!tok.is(lexer::TokenKind::Identifier)) {
+            continue;
+        }
+
+        // 2f. Identifiers classification
+        std::string ident = std::string(tok.lexeme);
+        uint32_t type = SemVariable;
+        uint32_t mods = ModNone;
+
+        lexer::TokenKind declKw = lexer::TokenKind::Invalid;
+        if (i > 0) {
+            if (tokens[i - 1].is(lexer::TokenKind::KwMut) && i >= 2) {
+                declKw = tokens[i - 2].kind;
+            } else {
+                declKw = tokens[i - 1].kind;
+            }
+        }
+
+        if (declKw == lexer::TokenKind::KwFn) {
+            if (isMethodDecl(tok.span.start.offset, ident)) {
+                type = SemMethod;
+            } else {
+                type = SemFunction;
+            }
+            mods = ModDeclaration;
+        } else if (declKw == lexer::TokenKind::KwClass) {
+            type = SemClass;
+            mods = ModDeclaration;
+        } else if (declKw == lexer::TokenKind::KwEnum) {
+            type = SemEnum;
+            mods = ModDeclaration;
+        } else if (declKw == lexer::TokenKind::KwLet) {
+            if (isFieldDecl(tok.span.start.offset, ident)) {
+                type = SemProperty;
+            } else {
+                type = SemVariable;
+            }
+            mods = ModDeclaration;
+        } else if (declKw == lexer::TokenKind::KwConst) {
+            if (isFieldDecl(tok.span.start.offset, ident)) {
+                type = SemProperty;
+            } else {
+                type = SemVariable;
+            }
+            mods = ModDeclaration | ModReadonly;
+        } else if (isEnumMemberDecl(tok.span.start.offset, ident)) {
+            type = SemEnumMember;
+            mods = ModDeclaration;
+        } else if (i > 0 && tokens[i - 1].is(lexer::TokenKind::Dot)) {
+            std::string receiver;
+            if (i >= 2 && tokens[i - 2].is(lexer::TokenKind::Identifier)) {
+                receiver = std::string(tokens[i - 2].lexeme);
+            } else if (i >= 2 && tokens[i - 2].is(lexer::TokenKind::KwThis)) {
+                receiver = "this";
+            }
+
+            bool followedByParen = (i + 1 < tokens.size() && tokens[i + 1].is(lexer::TokenKind::LParen));
+            bool isStdlib = (receiver == "io" || receiver == "fs" || receiver == "sys" ||
+                             receiver == "math" || receiver == "time" || receiver == "json" ||
+                             receiver == "net" || receiver == "test" || receiver == "crypto");
+
+            if (enumNames.count(receiver)) {
+                type = SemEnumMember;
+            } else if (followedByParen) {
+                type = SemMethod;
+                if (isStdlib) mods |= ModDefaultLibrary;
+            } else {
+                type = SemProperty;
+                if (isStdlib) mods |= ModDefaultLibrary;
+            }
+        } else if (i + 1 < tokens.size() && tokens[i + 1].is(lexer::TokenKind::LParen)) {
+            if (classNames.count(ident)) {
+                type = SemClass;
+            } else if (getStdlibMemberDoc(ident).has_value()) {
+                type = SemFunction;
+                mods |= ModDefaultLibrary;
+            } else if (methodNames.count(ident) && isMethodDecl(tok.span.start.offset, ident)) {
+                type = SemMethod;
+            } else {
+                type = SemFunction;
+            }
+        } else if (i > 0 && tokens[i - 1].isOneOf(lexer::TokenKind::Colon, lexer::TokenKind::KwAs, lexer::TokenKind::KwInherits)) {
+            if (classNames.count(ident)) {
+                type = SemClass;
+            } else if (enumNames.count(ident)) {
+                type = SemEnum;
+            } else {
+                type = SemType;
+            }
+        } else if (ident == "io" || ident == "fs" || ident == "sys" || ident == "math" ||
+                   ident == "time" || ident == "json" || ident == "net" || ident == "test" || ident == "crypto") {
+            type = SemVariable;
+            mods |= ModDefaultLibrary;
+        } else if (const auto* sDecl = lookupInScopes(tok.span.start.offset, ident)) {
+            if (sDecl->kind == ScopeDeclInfo::Kind::Param) {
+                type = SemParameter;
+            } else {
+                type = SemVariable;
+            }
+            if (sDecl->nameSpan.isValid() &&
+                tok.span.start.offset >= sDecl->nameSpan.start.offset &&
+                tok.span.end.offset <= sDecl->nameSpan.end.offset) {
+                mods |= ModDeclaration;
+            }
+        } else if (classNames.count(ident)) {
+            type = SemClass;
+        } else if (enumNames.count(ident)) {
+            type = SemEnum;
+        } else if (enumMemberNames.count(ident)) {
+            type = SemEnumMember;
+        } else if (functionNames.count(ident)) {
+            type = SemFunction;
+        } else if (constNames.count(ident)) {
+            type = SemVariable;
+            mods |= ModReadonly;
+        } else if (varNames.count(ident)) {
+            type = SemVariable;
+        } else if (fieldNames.count(ident)) {
+            type = SemProperty;
+        } else if (importedNames.count(ident)) {
+            type = SemVariable;
+        } else if (getStdlibMemberDoc(ident).has_value()) {
+            type = SemVariable;
+            mods |= ModDefaultLibrary;
+        } else {
+            type = SemVariable;
+        }
+
+        addSemanticSpanToken(doc, rawTokens, tok.span, type, mods);
+    }
+
+    // 3. Sort raw tokens by line ASC, then character ASC
+    std::sort(rawTokens.begin(), rawTokens.end(), [](const RawTokenItem& a, const RawTokenItem& b) {
+        if (a.line != b.line) return a.line < b.line;
+        return a.character < b.character;
+    });
+
+    // Deduplicate any identical positions
+    rawTokens.erase(std::unique(rawTokens.begin(), rawTokens.end(), [](const RawTokenItem& a, const RawTokenItem& b) {
+        return a.line == b.line && a.character == b.character;
+    }), rawTokens.end());
+
+    // 4. Compute standard LSP 5-integer delta encoding
+    std::vector<uint32_t> data;
+    data.reserve(rawTokens.size() * 5);
+
+    uint32_t prevLine = 0;
+    uint32_t prevChar = 0;
+
+    for (const auto& tok : rawTokens) {
+        uint32_t deltaLine = tok.line - prevLine;
+        uint32_t deltaChar = (deltaLine == 0) ? (tok.character - prevChar) : tok.character;
+
+        data.push_back(deltaLine);
+        data.push_back(deltaChar);
+        data.push_back(tok.length);
+        data.push_back(tok.tokenType);
+        data.push_back(tok.tokenModifiers);
+
+        prevLine = tok.line;
+        prevChar = tok.character;
+    }
+
+    SemanticTokens result;
+    result.data = std::move(data);
+    return result;
+}
+
 std::vector<TextEdit> Analyzer::format(const Document& doc, const FormattingOptions& options) {
+    if (isKmlDocument(doc)) {
+        return {};
+    }
+
     keety::fmt::FormatterOptions fmtOpts;
     if (options.tabSize > 0) {
         fmtOpts.indentWidth = options.tabSize;
@@ -2113,11 +4001,105 @@ std::vector<TextEdit> Analyzer::format(const Document& doc, const FormattingOpti
     return {std::move(edit)};
 }
 
+std::vector<TextEdit> Analyzer::formatRange(
+    const Document& doc,
+    Range range,
+    const FormattingOptions& options
+) {
+    if (isKmlDocument(doc)) {
+        return {};
+    }
+
+    if (doc.text().empty()) {
+        return {};
+    }
+
+    uint32_t startLine = range.start.line;
+    uint32_t endLine = range.end.line;
+
+    if (range.end.character == 0 && endLine > startLine) {
+        endLine = endLine - 1;
+    }
+
+    keety::fmt::FormatterOptions fmtOpts;
+    if (options.tabSize > 0) {
+        fmtOpts.indentWidth = options.tabSize;
+    }
+
+    keety::fmt::Formatter formatter(fmtOpts);
+    diag::SourceManager sm;
+    diag::DiagnosticEmitter emitter(sm);
+
+    std::string formatted = formatter.format(doc.text(), doc.uri(), &emitter);
+    if (emitter.hasErrors() || formatted == doc.text()) {
+        return {};
+    }
+
+    auto splitLines = [](std::string_view text) {
+        std::vector<std::string> lines;
+        std::string current;
+        for (char c : text) {
+            if (c == '\r') continue;
+            if (c == '\n') {
+                lines.push_back(std::move(current));
+                current.clear();
+            } else {
+                current += c;
+            }
+        }
+        if (!current.empty() || (!text.empty() && text.back() != '\n')) {
+            lines.push_back(std::move(current));
+        }
+        return lines;
+    };
+
+    std::vector<std::string> origLines = splitLines(doc.text());
+    std::vector<std::string> fmtLines = splitLines(formatted);
+
+    auto chunks = keety::fmt::Formatter::computeLineDiff(origLines, fmtLines);
+    std::vector<TextEdit> edits;
+
+    for (const auto& chunk : chunks) {
+        bool overlaps = (chunk.origStart <= endLine && chunk.origEnd > startLine);
+        if (!overlaps) {
+            continue;
+        }
+
+        TextEdit edit;
+        edit.range.start = Position{static_cast<uint32_t>(chunk.origStart), 0};
+
+        if (chunk.origEnd < origLines.size()) {
+            edit.range.end = Position{static_cast<uint32_t>(chunk.origEnd), 0};
+        } else {
+            edit.range.end = doc.offsetToPosition(doc.text().size());
+        }
+
+        std::string replacement;
+        for (size_t f = chunk.fmtStart; f < chunk.fmtEnd; ++f) {
+            replacement += fmtLines[f] + "\n";
+        }
+
+        if (chunk.origEnd >= origLines.size() && !doc.text().empty() && doc.text().back() != '\n' &&
+            !replacement.empty() && replacement.back() == '\n') {
+            replacement.pop_back();
+        }
+
+        edit.newText = std::move(replacement);
+        edits.push_back(std::move(edit));
+    }
+
+    return edits;
+}
+
 std::vector<CodeAction> Analyzer::getCodeActions(
     const Document& doc,
     Range range,
     const std::vector<Diagnostic>& /*contextDiagnostics*/
 ) {
+    if (isKmlDocument(doc)) {
+        return {};
+    }
+
     std::vector<CodeAction> actions;
 
     diag::SourceManager sm;
@@ -2231,6 +4213,796 @@ std::vector<CodeAction> Analyzer::getCodeActions(
     }
 
     return actions;
+}
+
+std::optional<Hover> Analyzer::getKmlHover(
+    const Document& doc,
+    Position /*pos*/,
+    size_t targetOffset,
+    const DocumentManager* /*docManager*/
+) {
+    diag::SourceManager sm;
+    std::string pathStr = uriToPath(doc.uri());
+    diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
+    diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+
+    const std::string& text = doc.text();
+
+    // Extract word under cursor (supporting runes like $state and directives like @click, $bind.value)
+    size_t wordStart = targetOffset;
+    while (wordStart > 0) {
+        char prev = text[wordStart - 1];
+        if (std::isalnum(static_cast<unsigned char>(prev)) || prev == '_' || prev == '$' || prev == '@' || prev == '.') {
+            wordStart--;
+        } else {
+            break;
+        }
+    }
+    size_t wordEnd = targetOffset;
+    while (wordEnd < text.size()) {
+        char next = text[wordEnd];
+        if (std::isalnum(static_cast<unsigned char>(next)) || next == '_' || next == '$' || next == '@' || next == '.') {
+            wordEnd++;
+        } else {
+            break;
+        }
+    }
+    std::string word = text.substr(wordStart, wordEnd - wordStart);
+    Range wordRange = {
+        doc.offsetToPosition(wordStart),
+        doc.offsetToPosition(wordEnd)
+    };
+
+    kml::KmlParser kmlParser(text, fileId, &sm, &emitter);
+    auto kmlDoc = kmlParser.parseDocument(moduleName);
+
+    // 1. Is cursor inside <script> block?
+    bool inScript = false;
+    if (kmlDoc.script.has_value()) {
+        if (targetOffset >= kmlDoc.script->span.start.offset && targetOffset <= kmlDoc.script->span.end.offset) {
+            inScript = true;
+        }
+    }
+
+    if (inScript && kmlDoc.script.has_value()) {
+        // A. Runes: $state, $derived, $effect, $props, $bind
+        if (word == "$state") {
+            return Hover{MarkupContent{"markdown", "```keet\n$state(initialValue)\n```\n**KML State Rune**\n\nDeclares reactive local state for the component. Mutating this variable triggers reactive DOM/TUI re-renders."}, wordRange};
+        }
+        if (word == "$derived") {
+            return Hover{MarkupContent{"markdown", "```keet\n$derived(expression)\n```\n**KML Derived Rune**\n\nDeclares computed reactive state derived from other reactive state or properties."}, wordRange};
+        }
+        if (word == "$effect") {
+            return Hover{MarkupContent{"markdown", "```keet\n$effect(() => { ... })\n```\n**KML Effect Rune**\n\nRegisters a reactive side-effect that automatically re-executes whenever its dependencies change."}, wordRange};
+        }
+        if (word == "$props") {
+            return Hover{MarkupContent{"markdown", "```keet\n$props()\n```\n**KML Props Rune**\n\nDeclares component properties received from parent components."}, wordRange};
+        }
+
+        // B. State runes defined in this script
+        for (const auto& rune : kmlDoc.script->runes) {
+            if (rune.variableName == word) {
+                std::string kindStr = (rune.kind == kml::KmlStateRune::Kind::State) ? "$state" : "$derived";
+                std::string md = "```keet\nlet mut " + rune.variableName + " = " + kindStr + "(" + rune.initExpr + ")\n```\n*Reactive state rune in `<script>`.*";
+                return Hover{MarkupContent{"markdown", std::move(md)}, wordRange};
+            }
+        }
+
+        // C. Props defined in this script
+        for (const auto& prop : kmlDoc.script->props) {
+            if (prop.name == word) {
+                std::string md = "```keet\n(prop) " + prop.name + ": " + prop.type;
+                if (!prop.defaultValueExpr.empty()) {
+                    md += " = " + prop.defaultValueExpr;
+                }
+                md += "\n```\n*Component property in `<script>`.*";
+                return Hover{MarkupContent{"markdown", std::move(md)}, wordRange};
+            }
+        }
+
+        // D. Declarations inside script (functions, variables, imports)
+        for (const auto& decl : kmlDoc.script->declarations) {
+            if (!decl) continue;
+            if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                if (fnDecl->getName() == word) {
+                    std::string sig = (fnDecl->isExported() ? "export fn " : "fn ") + fnDecl->getName() + "(";
+                    for (size_t i = 0; i < fnDecl->getParams().size(); ++i) {
+                        if (i > 0) sig += ", ";
+                        const auto& p = fnDecl->getParams()[i];
+                        if (p.isMut) sig += "mut ";
+                        sig += p.name + ": " + formatType(p.type.get(), "any");
+                    }
+                    sig += "): " + formatType(fnDecl->getReturnType(), "void");
+                    std::string md = "```keet\n" + sig + "\n```";
+                    return Hover{MarkupContent{"markdown", std::move(md)}, wordRange};
+                }
+            } else if (const auto* varDecl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+                if (varDecl->getName() == word) {
+                    std::string sig = "let " + varDecl->getName();
+                    if (varDecl->getType()) {
+                        sig += ": " + formatType(varDecl->getType());
+                    }
+                    return Hover{MarkupContent{"markdown", "```keet\n" + sig + "\n```"}, wordRange};
+                }
+            } else if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+                std::filesystem::path p(imp->getModulePath());
+                if (p.extension() == ".kml" && p.stem().string() == word) {
+                    std::string md = "```keet\ncomponent " + word + "\n```\n*KML UI Component imported from `" + imp->getModulePath() + "`.*";
+                    return Hover{MarkupContent{"markdown", std::move(md)}, wordRange};
+                }
+            }
+        }
+
+        // E. Check stdlib member access if preceded by a module receiver (e.g. math.sin)
+        size_t dotPos = word.rfind('.');
+        if (dotPos != std::string::npos) {
+            std::string receiver = word.substr(0, dotPos);
+            std::string member = word.substr(dotPos + 1);
+            if (sema::isStdlibModule(receiver)) {
+                if (auto stdDoc = getStdlibMemberDoc(member); stdDoc.has_value()) {
+                    std::string content = "```keet\n" + stdDoc->signature + "\n```\n" + stdDoc->doc +
+                                          "\n\n*Exported member of standard library module `" + receiver + "`*";
+                    return Hover{MarkupContent{"markdown", std::move(content)}, wordRange};
+                }
+            }
+        } else {
+            // Check if preceded by dot in text (e.g. math.sin with cursor on sin)
+            size_t beforeWord = wordStart;
+            while (beforeWord > 0 && (text[beforeWord - 1] == ' ' || text[beforeWord - 1] == '\t')) beforeWord--;
+            if (beforeWord > 0 && text[beforeWord - 1] == '.') {
+                size_t dot = beforeWord - 1;
+                size_t rEnd = dot;
+                while (rEnd > 0 && (text[rEnd - 1] == ' ' || text[rEnd - 1] == '\t')) rEnd--;
+                size_t rStart = rEnd;
+                while (rStart > 0 && (std::isalnum(static_cast<unsigned char>(text[rStart - 1])) || text[rStart - 1] == '_')) rStart--;
+                std::string receiver = text.substr(rStart, rEnd - rStart);
+                if (sema::isStdlibModule(receiver)) {
+                    if (auto stdDoc = getStdlibMemberDoc(word); stdDoc.has_value()) {
+                        std::string content = "```keet\n" + stdDoc->signature + "\n```\n" + stdDoc->doc +
+                                              "\n\n*Exported member of standard library module `" + receiver + "`*";
+                        return Hover{MarkupContent{"markdown", std::move(content)}, wordRange};
+                    }
+                }
+            }
+        }
+
+        // F. Stdlib module directly (e.g. hovering on 'math' in 'import math;')
+        if (word == "math") {
+            return Hover{MarkupContent{"markdown", "```keet\nimport math;\n```\n**Standard Library Module: `math`**\n\nMathematical constants and standard functions."}, wordRange};
+        }
+        if (word == "io") {
+            return Hover{MarkupContent{"markdown", "```keet\nimport io;\n```\n**Standard Library Module: `io`**\n\nInput and output operations, terminal formatting, and standard streams."}, wordRange};
+        }
+        if (word == "fs") {
+            return Hover{MarkupContent{"markdown", "```keet\nimport fs;\n```\n**Standard Library Module: `fs`**\n\nFile system operations."}, wordRange};
+        }
+        if (word == "ui") {
+            return Hover{MarkupContent{"markdown", "```keet\nimport ui;\n```\n**Standard Library Module: `ui`**\n\nReactive UI mounting and rendering runtime."}, wordRange};
+        }
+
+        // G. Fallback text scan for local declarations inside script
+        std::string patternLet = "let " + word;
+        std::string patternConst = "const " + word;
+        std::string patternDefine = "define " + word;
+        std::string patternMut = "mut " + word;
+        std::istringstream stream(kmlDoc.script->rawCode);
+        std::string line;
+        while (std::getline(stream, line)) {
+            size_t pLet = line.find(patternLet);
+            size_t pConst = line.find(patternConst);
+            size_t pDefine = line.find(patternDefine);
+            size_t pMut = line.find(patternMut);
+            size_t matchPos = (pLet != std::string::npos) ? pLet :
+                              (pConst != std::string::npos ? pConst :
+                              (pDefine != std::string::npos ? pDefine : pMut));
+            if (matchPos != std::string::npos) {
+                size_t pLen = (matchPos == pLet) ? patternLet.size() :
+                              (matchPos == pConst) ? patternConst.size() :
+                              (matchPos == pDefine) ? patternDefine.size() : patternMut.size();
+                size_t afterIdent = matchPos + pLen;
+                if (afterIdent < line.size() && (std::isalnum(static_cast<unsigned char>(line[afterIdent])) || line[afterIdent] == '_')) {
+                    continue;
+                }
+                size_t semi = line.find(';', matchPos);
+                std::string declStr = (semi != std::string::npos) ? line.substr(matchPos, semi - matchPos) : line.substr(matchPos);
+                size_t eqPos = declStr.find('=');
+                std::string sig = (eqPos != std::string::npos) ? declStr.substr(0, eqPos) : declStr;
+                while (!sig.empty() && (sig.back() == ' ' || sig.back() == '\t')) sig.pop_back();
+                return Hover{MarkupContent{"markdown", "```keet\n" + sig + "\n```\n*Script local variable*"}, wordRange};
+            }
+        }
+
+        return std::nullopt;
+    }
+
+    // 2. Cursor is in Template Block
+    // A. KML Layout Primitives
+    if (word == "vstack") {
+        return Hover{MarkupContent{"markdown", "```kml\n<vstack gap={...} padding={...}>\n```\n**Vertical Stack Layout Container**\n\nArranges children vertically with configurable alignment, padding, and gap spacing."}, wordRange};
+    }
+    if (word == "hstack") {
+        return Hover{MarkupContent{"markdown", "```kml\n<hstack gap={...} padding={...}>\n```\n**Horizontal Stack Layout Container**\n\nArranges children horizontally with configurable alignment, padding, and gap spacing."}, wordRange};
+    }
+    if (word == "scroll") {
+        return Hover{MarkupContent{"markdown", "```kml\n<scroll width={...} height={...}>\n```\n**Scrollable Viewport Container**\n\nEnables smooth vertical and horizontal scrolling for overflowing child content."}, wordRange};
+    }
+    if (word == "button") {
+        return Hover{MarkupContent{"markdown", "```kml\n<button @click={...} bg={...}>\n```\n**Interactive Button Element**\n\nTriggers actions when clicked. Supports styles, active states, and keyboard focus."}, wordRange};
+    }
+    if (word == "input") {
+        return Hover{MarkupContent{"markdown", "```kml\n<input $bind.value={...} placeholder={...} />\n```\n**Text Input Field**\n\nCaptures user text input. Supports two-way binding via `$bind.value`."}, wordRange};
+    }
+    if (word == "text") {
+        return Hover{MarkupContent{"markdown", "```kml\n<text color={...} font-size={...}>\n```\n**Text Rendering Element**\n\nDisplays styled text content, labels, or interpolated string values."}, wordRange};
+    }
+    if (word == "box") {
+        return Hover{MarkupContent{"markdown", "```kml\n<box width={...} height={...} bg={...}>\n```\n**Container Box Layout Node**\n\nBasic box container with customizable dimensions, borders, and background."}, wordRange};
+    }
+    if (word == "slot") {
+        return Hover{MarkupContent{"markdown", "```kml\n<slot name=\"...\" />\n```\n**Component Projection Slot**\n\nDefines insertion points for child content passed from parent components."}, wordRange};
+    }
+
+    // B. Directives
+    if (word.rfind("@click", 0) == 0 || word.rfind("@keydown", 0) == 0 || word.rfind("@submit", 0) == 0 || word.rfind("@change", 0) == 0) {
+        return Hover{MarkupContent{"markdown", "```kml\n" + word + "={handler}\n```\n**KML Event Directive**\n\nListens for user interaction events and invokes the specified script handler function."}, wordRange};
+    }
+    if (word.rfind("$bind", 0) == 0) {
+        return Hover{MarkupContent{"markdown", "```kml\n$bind.value={stateVariable}\n```\n**KML Two-Way Binding Directive**\n\nEstablishes bidirectional synchronization between UI input values and reactive script state."}, wordRange};
+    }
+    if (word == "if" || word == "#if") {
+        return Hover{MarkupContent{"markdown", "```kml\n{#if condition} ... {:else} ... {/if}\n```\n**KML Conditional Block**\n\nConditionally renders template branches based on truthiness of the condition expression."}, wordRange};
+    }
+    if (word == "for" || word == "#for") {
+        return Hover{MarkupContent{"markdown", "```kml\n{#for item in items [key expr]} ... {/for}\n```\n**KML Loop Block**\n\nIterates over an array or collection, rendering the body for each item with optional keyed reconciliation."}, wordRange};
+    }
+
+    // C. Custom Component Check (e.g. <Task ... />)
+    if (!word.empty() && std::isupper(static_cast<unsigned char>(word[0]))) {
+        std::string importPath;
+        if (kmlDoc.script.has_value()) {
+            for (const auto& decl : kmlDoc.script->declarations) {
+                if (!decl) continue;
+                if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+                    std::filesystem::path p(imp->getModulePath());
+                    if (p.extension() == ".kml" && p.stem().string() == word) {
+                        importPath = imp->getModulePath();
+                        break;
+                    }
+                }
+            }
+        }
+        if (importPath.empty()) {
+            std::filesystem::path adj = fsPath.parent_path() / (word + ".kml");
+            if (std::filesystem::exists(adj)) {
+                importPath = "./" + word + ".kml";
+            }
+        }
+        if (!importPath.empty()) {
+            std::string md = "```kml\ncomponent " + word + "\n```\n*Custom KML UI Component imported from `" + importPath + "`.*";
+            return Hover{MarkupContent{"markdown", std::move(md)}, wordRange};
+        }
+    }
+
+    // D. Script variables/functions referenced inside template bindings {var}
+    if (kmlDoc.script.has_value()) {
+        for (const auto& rune : kmlDoc.script->runes) {
+            if (rune.variableName == word) {
+                std::string kindStr = (rune.kind == kml::KmlStateRune::Kind::State) ? "$state" : "$derived";
+                std::string md = "```keet\nlet mut " + rune.variableName + " = " + kindStr + "(" + rune.initExpr + ")\n```\n*Reactive state variable referenced in template.*";
+                return Hover{MarkupContent{"markdown", std::move(md)}, wordRange};
+            }
+        }
+        for (const auto& decl : kmlDoc.script->declarations) {
+            if (!decl) continue;
+            if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                if (fnDecl->getName() == word) {
+                    std::string sig = "fn " + fnDecl->getName() + "(): " + formatType(fnDecl->getReturnType(), "void");
+                    std::string md = "```keet\n" + sig + "\n```\n*Script function referenced in template.*";
+                    return Hover{MarkupContent{"markdown", std::move(md)}, wordRange};
+                }
+            } else if (const auto* varDecl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+                if (varDecl->getName() == word) {
+                    std::string sig = "let " + varDecl->getName();
+                    if (varDecl->getType()) {
+                        sig += ": " + formatType(varDecl->getType());
+                    }
+                    return Hover{MarkupContent{"markdown", "```keet\n" + sig + "\n```\n*Script variable referenced in template.*"}, wordRange};
+                }
+            }
+        }
+    }
+
+    // E. Layout attributes
+    static const std::unordered_map<std::string, std::pair<std::string, std::string>> layoutAttrs = {
+        {"width", {"int | string", "Sets explicit node width in pixels or percentage (\"100%\")."}},
+        {"height", {"int | string", "Sets explicit node height in pixels or percentage (\"100%\")."}},
+        {"bg", {"string", "Background color hex string (e.g. \"#ffffff\") or CSS color name."}},
+        {"color", {"string", "Text foreground color hex string (e.g. \"#333333\") or CSS color."}},
+        {"padding", {"int", "Inner spacing padding in pixels applied to all edges."}},
+        {"gap", {"int", "Gap spacing in pixels between child nodes in stacks."}},
+        {"grow", {"int | bool", "Flex grow factor (1 to expand and fill available viewport space)."}},
+        {"radius", {"int", "Corner radius in pixels for rounded container box edges."}},
+        {"font-size", {"int", "Font point size for rendered text nodes."}},
+        {"placeholder", {"string", "Hint text displayed inside an empty input field."}},
+        {"disabled", {"bool", "Disables interactivity and dims visual appearance."}},
+        {"checked", {"bool", "State indicating whether a checkbox or toggle is currently checked."}}
+    };
+    auto attrIt = layoutAttrs.find(word);
+    if (attrIt != layoutAttrs.end()) {
+        std::string md = "```kml\n" + attrIt->first + ": " + attrIt->second.first + "\n```\n**Layout Attribute**\n\n" + attrIt->second.second;
+        return Hover{MarkupContent{"markdown", std::move(md)}, wordRange};
+    }
+
+    return std::nullopt;
+}
+
+std::optional<Location> Analyzer::findKmlDefinition(
+    const Document& doc,
+    Position /*pos*/,
+    size_t targetOffset,
+    const DocumentManager* /*docManager*/
+) {
+    diag::SourceManager sm;
+    std::string pathStr = uriToPath(doc.uri());
+    diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
+    diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+
+    const std::string& text = doc.text();
+
+    // Check if cursor is on a string literal (e.g. import path "./Task.kml")
+    size_t lineStart = targetOffset;
+    while (lineStart > 0 && text[lineStart - 1] != '\n') lineStart--;
+    size_t lineEnd = targetOffset;
+    while (lineEnd < text.size() && text[lineEnd] != '\n') lineEnd++;
+    std::string line = text.substr(lineStart, lineEnd - lineStart);
+
+    size_t quoteStart = line.find('"');
+    if (quoteStart != std::string::npos) {
+        size_t quoteEnd = line.find('"', quoteStart + 1);
+        if (quoteEnd != std::string::npos) {
+            size_t absQuoteStart = lineStart + quoteStart;
+            size_t absQuoteEnd = lineStart + quoteEnd + 1;
+            if (targetOffset >= absQuoteStart && targetOffset <= absQuoteEnd) {
+                std::string rawPath = line.substr(quoteStart + 1, quoteEnd - quoteStart - 1);
+                std::filesystem::path target = fsPath.parent_path() / rawPath;
+                if (std::filesystem::exists(target)) {
+                    return Location{pathToUri(std::filesystem::canonical(target)), Range{Position{0, 0}, Position{0, 0}}};
+                }
+            }
+        }
+    }
+
+    // Extract word under cursor
+    size_t wordStart = targetOffset;
+    while (wordStart > 0 && (std::isalnum(static_cast<unsigned char>(text[wordStart - 1])) || text[wordStart - 1] == '_' || text[wordStart - 1] == '$')) {
+        wordStart--;
+    }
+    size_t wordEnd = targetOffset;
+    while (wordEnd < text.size() && (std::isalnum(static_cast<unsigned char>(text[wordEnd])) || text[wordEnd] == '_' || text[wordEnd] == '$')) {
+        wordEnd++;
+    }
+    std::string word = text.substr(wordStart, wordEnd - wordStart);
+    if (word.empty()) return std::nullopt;
+
+    kml::KmlParser kmlParser(text, fileId, &sm, &emitter);
+    auto kmlDoc = kmlParser.parseDocument(moduleName);
+
+    // 1. If word is custom component (e.g. <Task ...>)
+    if (std::isupper(static_cast<unsigned char>(word[0]))) {
+        // A. Check script imports
+        if (kmlDoc.script.has_value()) {
+            for (const auto& decl : kmlDoc.script->declarations) {
+                if (!decl) continue;
+                if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+                    std::filesystem::path p(imp->getModulePath());
+                    if (p.extension() == ".kml" && p.stem().string() == word) {
+                        std::filesystem::path target = fsPath.parent_path() / imp->getModulePath();
+                        if (std::filesystem::exists(target)) {
+                            return Location{pathToUri(std::filesystem::canonical(target)), Range{Position{0, 0}, Position{0, 0}}};
+                        }
+                    }
+                }
+            }
+        }
+        // B. Check adjacent file (./<Word>.kml)
+        std::filesystem::path adj = fsPath.parent_path() / (word + ".kml");
+        if (std::filesystem::exists(adj)) {
+            return Location{pathToUri(std::filesystem::canonical(adj)), Range{Position{0, 0}, Position{0, 0}}};
+        }
+    }
+
+    // 2. If word is a function or variable declared in script
+    if (kmlDoc.script.has_value()) {
+        for (const auto& decl : kmlDoc.script->declarations) {
+            if (!decl) continue;
+            if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                if (fnDecl->getName() == word) {
+                    size_t p = text.find(word, kmlDoc.script->span.start.offset);
+                    if (p != std::string::npos) {
+                        Position defPos = doc.offsetToPosition(p);
+                        return Location{doc.uri(), Range{defPos, Position{defPos.line, defPos.character + static_cast<uint32_t>(word.size())}}};
+                    }
+                }
+            } else if (const auto* varDecl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+                if (varDecl->getName() == word) {
+                    size_t p = text.find(word, kmlDoc.script->span.start.offset);
+                    if (p != std::string::npos) {
+                        Position defPos = doc.offsetToPosition(p);
+                        return Location{doc.uri(), Range{defPos, Position{defPos.line, defPos.character + static_cast<uint32_t>(word.size())}}};
+                    }
+                }
+            }
+        }
+        for (const auto& rune : kmlDoc.script->runes) {
+            if (rune.variableName == word) {
+                size_t p = text.find(word, kmlDoc.script->span.start.offset);
+                if (p != std::string::npos) {
+                    Position defPos = doc.offsetToPosition(p);
+                    return Location{doc.uri(), Range{defPos, Position{defPos.line, defPos.character + static_cast<uint32_t>(word.size())}}};
+                }
+            }
+        }
+    }
+
+    return std::nullopt;
+}
+
+CompletionList Analyzer::getKmlCompletions(
+    const Document& doc,
+    Position /*pos*/,
+    size_t targetOffset,
+    const DocumentManager* /*docManager*/
+) {
+    CompletionList list;
+    list.isIncomplete = false;
+
+    const std::string& text = doc.text();
+    std::string pathStr = uriToPath(doc.uri());
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+
+    diag::SourceManager sm;
+    diag::FileId fileId = sm.addBuffer(pathStr, text);
+    diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+    kml::KmlParser kmlParser(text, fileId, &sm, &emitter);
+    auto kmlDoc = kmlParser.parseDocument(moduleName);
+
+    // Layout primitives are always available in KML
+    static const std::vector<std::string> primitives = {
+        "box", "vstack", "hstack", "scroll", "button", "input", "text", "slot"
+    };
+    for (const auto& tag : primitives) {
+        CompletionItem item;
+        item.label = tag;
+        item.kind = CompletionItemKind::Class;
+        item.detail = "KML Layout Primitive";
+        list.items.push_back(std::move(item));
+    }
+
+    // Line prefix up to cursor
+    size_t lineStart = targetOffset;
+    while (lineStart > 0 && text[lineStart - 1] != '\n') lineStart--;
+    std::string linePrefix = text.substr(lineStart, targetOffset - lineStart);
+
+    bool inScript = false;
+    if (kmlDoc.script.has_value()) {
+        if (targetOffset >= kmlDoc.script->span.start.offset && targetOffset <= kmlDoc.script->span.end.offset) {
+            inScript = true;
+        }
+    }
+
+    // 1. Check if user is typing inside <script>
+    if (inScript) {
+        // Check for Dot-completion (e.g. math., io., fs., ui.)
+        size_t p = targetOffset;
+        while (p > 0 && (std::isalnum(static_cast<unsigned char>(text[p - 1])) || text[p - 1] == '_')) p--;
+        while (p > 0 && (text[p - 1] == ' ' || text[p - 1] == '\t')) p--;
+        if (p > 0 && text[p - 1] == '.') {
+            p--;
+            while (p > 0 && (text[p - 1] == ' ' || text[p - 1] == '\t')) p--;
+            size_t rEnd = p;
+            while (p > 0 && (std::isalnum(static_cast<unsigned char>(text[p - 1])) || text[p - 1] == '_')) p--;
+            std::string receiver = text.substr(p, rEnd - p);
+
+            if (sema::isStdlibModule(receiver)) {
+                auto scope = sema::createStdlibModuleScope(receiver);
+                if (scope) {
+                    for (const auto& [name, sym] : scope->getSymbols()) {
+                        CompletionItem item;
+                        item.label = name;
+                        item.kind = (sym->getKind() == sema::SymbolKind::Function) ? CompletionItemKind::Function :
+                                    (sym->getKind() == sema::SymbolKind::Constant) ? CompletionItemKind::Constant :
+                                    (sym->getKind() == sema::SymbolKind::Enum) ? CompletionItemKind::Enum : CompletionItemKind::Field;
+                        if (auto docOpt = getStdlibMemberDoc(name)) {
+                            item.detail = docOpt->signature;
+                            item.documentation = docOpt->doc;
+                        } else {
+                            item.detail = receiver + "." + name;
+                        }
+                        list.items.push_back(std::move(item));
+                    }
+                    std::sort(list.items.begin(), list.items.end(), [](const CompletionItem& a, const CompletionItem& b) {
+                        return a.label < b.label;
+                    });
+                    return list;
+                }
+            }
+        }
+
+        // General Script Completions: Runes, keywords, stdlib modules, script declarations
+        static const std::vector<std::pair<std::string, std::string>> runes = {
+            {"$state", "KML State Rune: creates reactive local state"},
+            {"$derived", "KML Derived Rune: creates computed reactive state"},
+            {"$effect", "KML Effect Rune: registers a reactive side-effect"},
+            {"$props", "KML Props Rune: declares component properties"}
+        };
+        for (const auto& [rune, docStr] : runes) {
+            CompletionItem item;
+            item.label = rune;
+            item.kind = CompletionItemKind::Keyword;
+            item.detail = "KML Rune";
+            item.documentation = docStr;
+            list.items.push_back(std::move(item));
+        }
+
+        static const std::vector<std::string> kw = {
+            "let", "mut", "const", "fn", "import", "export", "return", "if", "else", "for", "while"
+        };
+        for (const auto& k : kw) {
+            CompletionItem item;
+            item.label = k;
+            item.kind = CompletionItemKind::Keyword;
+            item.detail = "Keyword";
+            list.items.push_back(std::move(item));
+        }
+
+        static const std::vector<std::string> mods = {
+            "math", "io", "fs", "sys", "time", "json", "net", "ui"
+        };
+        for (const auto& m : mods) {
+            CompletionItem item;
+            item.label = m;
+            item.kind = CompletionItemKind::Module;
+            item.detail = "Standard Library Module";
+            list.items.push_back(std::move(item));
+        }
+
+        if (kmlDoc.script.has_value()) {
+            for (const auto& rune : kmlDoc.script->runes) {
+                CompletionItem item;
+                item.label = rune.variableName;
+                item.kind = CompletionItemKind::Variable;
+                item.detail = "Reactive state variable";
+                list.items.push_back(std::move(item));
+            }
+            for (const auto& decl : kmlDoc.script->declarations) {
+                if (!decl) continue;
+                if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                    CompletionItem item;
+                    item.label = fnDecl->getName();
+                    item.kind = CompletionItemKind::Function;
+                    item.detail = "fn " + fnDecl->getName() + "()";
+                    list.items.push_back(std::move(item));
+                }
+            }
+        }
+
+        return list;
+    }
+
+    // 2. Cursor is in Template Block
+    // A. Check if typing dynamic expression inside `{...}`
+    size_t lastOpenBrace = linePrefix.rfind('{');
+    size_t lastCloseBrace = linePrefix.rfind('}');
+    if (lastOpenBrace != std::string::npos && (lastCloseBrace == std::string::npos || lastCloseBrace < lastOpenBrace)) {
+        if (kmlDoc.script.has_value()) {
+            for (const auto& rune : kmlDoc.script->runes) {
+                CompletionItem item;
+                item.label = rune.variableName;
+                item.kind = CompletionItemKind::Variable;
+                item.detail = "Reactive state variable";
+                list.items.push_back(std::move(item));
+            }
+            for (const auto& prop : kmlDoc.script->props) {
+                CompletionItem item;
+                item.label = prop.name;
+                item.kind = CompletionItemKind::Property;
+                item.detail = "prop " + prop.name + ": " + prop.type;
+                list.items.push_back(std::move(item));
+            }
+            for (const auto& decl : kmlDoc.script->declarations) {
+                if (!decl) continue;
+                if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                    CompletionItem item;
+                    item.label = fnDecl->getName();
+                    item.kind = CompletionItemKind::Function;
+                    item.detail = "fn " + fnDecl->getName() + "()";
+                    list.items.push_back(std::move(item));
+                }
+            }
+        }
+        return list;
+    }
+
+    // B. Check if typing `<` (tags and components)
+    size_t lastLess = linePrefix.rfind('<');
+    size_t lastGreater = linePrefix.rfind('>');
+    if (lastLess != std::string::npos && (lastGreater == std::string::npos || lastGreater < lastLess)) {
+        std::string tagPrefix = linePrefix.substr(lastLess + 1);
+        if (tagPrefix.find(' ') == std::string::npos && tagPrefix.find('\t') == std::string::npos) {
+            if (kmlDoc.script.has_value()) {
+                for (const auto& decl : kmlDoc.script->declarations) {
+                    if (!decl) continue;
+                    if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+                        std::filesystem::path p(imp->getModulePath());
+                        if (p.extension() == ".kml") {
+                            CompletionItem item;
+                            item.label = p.stem().string();
+                            item.kind = CompletionItemKind::Class;
+                            item.detail = "Custom Component (" + imp->getModulePath() + ")";
+                            list.items.push_back(std::move(item));
+                        }
+                    }
+                }
+            }
+
+            if (std::filesystem::exists(fsPath.parent_path())) {
+                for (const auto& entry : std::filesystem::directory_iterator(fsPath.parent_path())) {
+                    if (entry.path().extension() == ".kml" && entry.path().stem().string() != moduleName) {
+                        std::string cName = entry.path().stem().string();
+                        bool alreadyAdded = false;
+                        for (const auto& existing : list.items) {
+                            if (existing.label == cName) { alreadyAdded = true; break; }
+                        }
+                        if (!alreadyAdded) {
+                            CompletionItem item;
+                            item.label = cName;
+                            item.kind = CompletionItemKind::Class;
+                            item.detail = "Custom Component (" + entry.path().filename().string() + ")";
+                            list.items.push_back(std::move(item));
+                        }
+                    }
+                }
+            }
+
+            return list;
+        }
+
+        // Inside tag attributes
+        static const std::vector<std::pair<std::string, std::string>> attrs = {
+            {"width", "int | string - Width in pixels or percentage"},
+            {"height", "int | string - Height in pixels or percentage"},
+            {"bg", "string - Background color hex or name"},
+            {"color", "string - Text foreground color hex or name"},
+            {"padding", "int - Inner padding in pixels"},
+            {"gap", "int - Gap spacing between child nodes in pixels"},
+            {"grow", "int - Flex grow factor"},
+            {"radius", "int - Corner radius in pixels"},
+            {"font-size", "int - Font point size"},
+            {"placeholder", "string - Text input placeholder"},
+            {"disabled", "bool - Disabled state"},
+            {"checked", "bool - Checked state"}
+        };
+        for (const auto& [attr, desc] : attrs) {
+            CompletionItem item;
+            item.label = attr;
+            item.kind = CompletionItemKind::Property;
+            item.detail = desc;
+            item.insertText = attr + "=\"$1\"";
+            list.items.push_back(std::move(item));
+        }
+
+        static const std::vector<std::pair<std::string, std::string>> dirs = {
+            {"@click", "Event directive: triggers handler on click"},
+            {"@keydown", "Event directive: triggers handler on keydown"},
+            {"@keydown.enter", "Event directive: triggers handler on Enter key"},
+            {"@submit", "Event directive: triggers handler on form submit"},
+            {"$bind.value", "Binding directive: two-way value binding"}
+        };
+        for (const auto& [dir, desc] : dirs) {
+            CompletionItem item;
+            item.label = dir;
+            item.kind = CompletionItemKind::Event;
+            item.detail = desc;
+            item.insertText = dir + "={$1}";
+            list.items.push_back(std::move(item));
+        }
+
+        return list;
+    }
+
+    // C. Control Blocks: `{#`
+    size_t lastHash = linePrefix.rfind("{#");
+    if (lastHash != std::string::npos) {
+        CompletionItem itemIf;
+        itemIf.label = "if";
+        itemIf.kind = CompletionItemKind::Snippet;
+        itemIf.detail = "KML Conditional Block";
+        itemIf.insertText = "if ${1:condition}}\n\t$0\n{/if}";
+        list.items.push_back(std::move(itemIf));
+
+        CompletionItem itemFor;
+        itemFor.label = "for";
+        itemFor.kind = CompletionItemKind::Snippet;
+        itemFor.detail = "KML Loop Block";
+        itemFor.insertText = "for ${1:item} in ${2:items}}\n\t$0\n{/for}";
+        list.items.push_back(std::move(itemFor));
+
+        return list;
+    }
+
+    return list;
+}
+
+std::vector<DocumentSymbol> Analyzer::getKmlDocumentSymbols(const Document& doc) {
+    std::vector<DocumentSymbol> symbols;
+
+    std::string pathStr = uriToPath(doc.uri());
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+
+    diag::SourceManager sm;
+    diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
+    diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+    kml::KmlParser kmlParser(doc.text(), fileId, &sm, &emitter);
+    auto kmlDoc = kmlParser.parseDocument(moduleName);
+
+    DocumentSymbol compSym;
+    compSym.name = moduleName;
+    compSym.kind = SymbolKind::Class;
+    compSym.detail = "KML Component";
+    compSym.range = Range{Position{0, 0}, doc.offsetToPosition(doc.text().size())};
+    compSym.selectionRange = Range{Position{0, 0}, Position{0, static_cast<uint32_t>(moduleName.size())}};
+
+    if (kmlDoc.script.has_value()) {
+        for (const auto& prop : kmlDoc.script->props) {
+            DocumentSymbol pSym;
+            pSym.name = prop.name;
+            pSym.kind = SymbolKind::Property;
+            pSym.detail = prop.type;
+            pSym.range = spanToRange(doc, prop.span);
+            pSym.selectionRange = pSym.range;
+            compSym.children.push_back(std::move(pSym));
+        }
+
+        for (const auto& rune : kmlDoc.script->runes) {
+            DocumentSymbol rSym;
+            rSym.name = rune.variableName;
+            rSym.kind = SymbolKind::Variable;
+            rSym.detail = (rune.kind == kml::KmlStateRune::Kind::State) ? "$state" : "$derived";
+            rSym.range = spanToRange(doc, rune.span);
+            rSym.selectionRange = rSym.range;
+            compSym.children.push_back(std::move(rSym));
+        }
+
+        for (const auto& decl : kmlDoc.script->declarations) {
+            if (!decl) continue;
+            if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                DocumentSymbol fSym;
+                fSym.name = fnDecl->getName();
+                fSym.kind = SymbolKind::Function;
+                fSym.detail = "fn " + fnDecl->getName() + "()";
+                size_t p = doc.text().find(fnDecl->getName(), kmlDoc.script->span.start.offset);
+                if (p != std::string::npos) {
+                    Position pos = doc.offsetToPosition(p);
+                    fSym.range = Range{pos, Position{pos.line, pos.character + static_cast<uint32_t>(fnDecl->getName().size())}};
+                    fSym.selectionRange = fSym.range;
+                }
+                compSym.children.push_back(std::move(fSym));
+            }
+        }
+    }
+
+    symbols.push_back(std::move(compSym));
+    return symbols;
+}
+
+SemanticTokens Analyzer::getKmlSemanticTokens(const Document& /*doc*/) {
+    return SemanticTokens{};
 }
 
 } // namespace keety::lsp

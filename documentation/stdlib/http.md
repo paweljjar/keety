@@ -29,7 +29,7 @@ from "http" import app, createServer, cors, jsonParser, logger, recover;
 import http as h;
 
 fn main(): void {
-    let mut server: http.Server = h.app();
+    let server: http.Server = h.app();
     server.use(cors());
     server.use(logger());
     server.use(recover());
@@ -281,7 +281,7 @@ import io;
 import "./Counter.kml";
 
 fn main(): int {
-    let mut server: http.Server = http.createServer();
+    let server: http.Server = http.createServer();
 
     // Serve reactive Counter.kml component on "/"
     server.serveUi("/", fn(): Counter {

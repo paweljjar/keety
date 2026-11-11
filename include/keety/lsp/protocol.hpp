@@ -252,6 +252,106 @@ struct TextDocumentPositionParams {
     static TextDocumentPositionParams fromJson(const JsonValue& j);
 };
 
+struct ReferenceContext {
+    bool includeDeclaration = true;
+
+    JsonValue toJson() const;
+    static ReferenceContext fromJson(const JsonValue& j);
+};
+
+struct ReferenceParams {
+    TextDocumentIdentifier textDocument;
+    Position position;
+    ReferenceContext context;
+
+    JsonValue toJson() const;
+    static ReferenceParams fromJson(const JsonValue& j);
+};
+
+struct PrepareRenameParams {
+    TextDocumentIdentifier textDocument;
+    Position position;
+
+    JsonValue toJson() const;
+    static PrepareRenameParams fromJson(const JsonValue& j);
+};
+
+struct PrepareRenameResult {
+    Range range;
+    std::string placeholder;
+
+    JsonValue toJson() const;
+    static PrepareRenameResult fromJson(const JsonValue& j);
+};
+
+struct RenameParams {
+    TextDocumentIdentifier textDocument;
+    Position position;
+    std::string newName;
+
+    JsonValue toJson() const;
+    static RenameParams fromJson(const JsonValue& j);
+};
+
+struct ParameterInformation {
+    std::string label;
+    std::optional<MarkupContent> documentation;
+
+    JsonValue toJson() const;
+    static ParameterInformation fromJson(const JsonValue& j);
+};
+
+struct SignatureInformation {
+    std::string label;
+    std::optional<MarkupContent> documentation;
+    std::vector<ParameterInformation> parameters;
+    std::optional<uint32_t> activeParameter;
+
+    JsonValue toJson() const;
+    static SignatureInformation fromJson(const JsonValue& j);
+};
+
+struct SignatureHelp {
+    std::vector<SignatureInformation> signatures;
+    uint32_t activeSignature = 0;
+    uint32_t activeParameter = 0;
+
+    JsonValue toJson() const;
+    static SignatureHelp fromJson(const JsonValue& j);
+};
+
+struct SignatureHelpParams {
+    TextDocumentIdentifier textDocument;
+    Position position;
+
+    JsonValue toJson() const;
+    static SignatureHelpParams fromJson(const JsonValue& j);
+};
+
+struct SemanticTokensLegend {
+    std::vector<std::string> tokenTypes;
+    std::vector<std::string> tokenModifiers;
+
+    JsonValue toJson() const;
+    static SemanticTokensLegend fromJson(const JsonValue& j);
+    static SemanticTokensLegend defaultLegend();
+};
+
+struct SemanticTokensParams {
+    TextDocumentIdentifier textDocument;
+
+    JsonValue toJson() const;
+    static SemanticTokensParams fromJson(const JsonValue& j);
+};
+
+struct SemanticTokens {
+    std::optional<std::string> resultId;
+    std::vector<uint32_t> data;
+
+    JsonValue toJson() const;
+    static SemanticTokens fromJson(const JsonValue& j);
+};
+
 struct PublishDiagnosticsParams {
     std::string uri;
     std::optional<int32_t> version;
@@ -275,6 +375,15 @@ struct DocumentFormattingParams {
     FormattingOptions options;
 
     static DocumentFormattingParams fromJson(const JsonValue& j);
+};
+
+struct DocumentRangeFormattingParams {
+    TextDocumentIdentifier textDocument;
+    Range range;
+    FormattingOptions options;
+
+    JsonValue toJson() const;
+    static DocumentRangeFormattingParams fromJson(const JsonValue& j);
 };
 
 struct TextEdit {
