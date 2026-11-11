@@ -2,7 +2,7 @@
 
 The `keety` compiler is the official ahead-of-time (AOT) compiler and toolchain driver for the KeetScript programming language. It transpiles KeetScript source code (`.keet`) into clean, idiomatic, and highly optimized standard C++17 source (`.cpp`) and header (`.hpp`) files, subsequently coordinating with native platform toolchains (GCC, Clang, MSVC) to produce native machine executables or shared libraries.
 
-This document formally specifies the internal architecture, compiler pipeline stages, intermediate representation (KeetIR), diagnostic standards, and C++ code emission conventions of the `keety` compiler, acting as the implementation companion to [The KeetScript Language Specification.md](file:///Users/pawel/Documents/Keet%20Documentation/The%20KeetScript%20Language%20Specification.md).
+This document formally specifies the internal architecture, compiler pipeline stages, intermediate representation (KeetIR), diagnostic standards, and C++ code emission conventions of the `keety` compiler, acting as the implementation companion to [The KeetScript Language Specification.md](file:///Users/pawel/Documents/GitHub/keety/documentation/The%20KeetScript%20Language%20Specification.md) and [KeetScript Language Server Protocol Specification.md](file:///Users/pawel/Documents/GitHub/keety/documentation/KeetScript%20Language%20Server%20Protocol%20Specification.md).
 
 ---
 
@@ -356,5 +356,20 @@ To keep the AOT compiler focused exclusively on deterministic compilation, code 
 * **`Workspace`**: Discovers monorepo roots and member packages via glob patterns (`packages/*`), ensuring duplicate-free member names.
 * **`DependencyGraph` & `Installer`**: Walks transitive dependencies, detects dependency cycles and conflicting versions, stages checkouts, and performs atomic installations into `keet_modules/` with `.kattery.json` state tracking.
 * **`ScriptRunner`**: Cross-platform shell execution (`/bin/sh -c` on POSIX, `cmd /C` on Windows) with automatic `keety` `PATH` injection and exit-code propagation.
+
+---
+
+## 8. Language Server Architecture: `keet-lsp`
+
+The **`keet-lsp`** binary (`keety::lsp`) provides sub-millisecond, editor-agnostic Language Server Protocol support for KeetScript (`.keet`) and Keet Markup Language (`.kml`) Single-File Components.
+
+### Key Architectural Characteristics:
+* **Zero-Spawning In-Memory Analysis:** Avoids invoking CLI sub-processes by linking directly against `keet_lsp_core` and `keety_core`. Reuses the production lexer, recursive descent parser, AST structures, symbol tables, and typechecker directly in memory.
+* **Transient Document Management:** The [`DocumentManager`](file:///Users/pawel/Documents/GitHub/keety/include/keety/lsp/document.hpp) manages open editor buffers (`didOpen`, `didChange`, `didClose`) with monotonic byte-offset line index caches, ensuring efficient conversion between zero-based UTF-16 LSP positions and UTF-8 lexer byte offsets.
+* **Heterogeneous SFC Isolation (`.kml`):** Keet Markup Language files combine KeetScript `<script>`, reactive `<template>`, and scoped `<style>`. To prevent template markup from causing syntax errors in the KeetScript parser, `keet-lsp` intercepts `.kml` documents and routes them to specialized KML tooling handlers (`getKmlHover`, `findKmlDefinition`, `getKmlCompletions`, `getKmlDocumentSymbols`, `getKmlSemanticTokens`).
+* **Fault-Tolerant Syntactic Fallbacks:** During active typing (such as dangling dots `math.` or unclosed blocks), the AST parser may report syntax errors. `keet-lsp` couples AST queries with resilient line-based syntactic heuristics to guarantee that local variables, parameters, and documentation remain available in completions and hovers.
+
+For full protocol message specifications, transport framing, capability negotiation, and KML tooling mechanics, see [KeetScript Language Server Protocol Specification.md](file:///Users/pawel/Documents/GitHub/keety/documentation/KeetScript%20Language%20Server%20Protocol%20Specification.md).
+
 
 

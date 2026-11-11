@@ -49,6 +49,32 @@ Selective imports are also supported if desired:
 from "./Counter.kml" import Counter;
 ```
 
+#### Component Composition & Nesting Inside `.kml`
+
+When building hierarchical UI component trees (e.g., embedding a `<Task />` component inside `App.kml`), component imports follow a clear two-tier resolution strategy:
+
+1. **Explicit `<script>` Imports (Priority):**
+   You can explicitly import child `.kml` components inside the parent component's `<script>` block. This allows importing from nested subdirectories or giving components aliases:
+   ```html
+   <script>
+       // Explicit relative path import
+       import "./components/Task.kml";
+       
+       // Or selective import
+       from "./components/Task.kml" import Task;
+   </script>
+   <template>
+       <vstack gap={12}>
+           {#for item in tasks}
+               <Task task={item} onToggle={toggleTask} />
+           {/for}
+       </vstack>
+   </template>
+   ```
+2. **Zero-Config Fallback (Same-Directory Discovery):**
+   If a custom tag (e.g., `<Task />`) is used in `<template>` without an explicit `import` statement in `<script>`, the compiler automatically looks for a neighboring `./<Tag>.kml` file in the same directory.
+
+
 ---
 
 ## 2. `.kml` Single-File Component Architecture
@@ -255,4 +281,17 @@ Provides a deterministic, zero-display test harness for unit testing `.kml` comp
 - **`harness.pressKey(key: string): bool`**: Dispatches a keydown event (`"Tab"`, `"Enter"`, `"ArrowDown"`, etc.) to the currently focused node.
 - **`harness.getText(nodeId: string): string`**: Returns the current rendered text or label of `nodeId`.
 - **`harness.dumpTree(): string`**: Serializes the scene graph with computed layout coordinates `(x, y, w, h)` for snapshot assertions.
+
+---
+
+## 8. IDE & Language Server Support (`keet-lsp`)
+
+KeetScript provides native, in-memory Language Server Protocol intelligence for `.kml` Single-File Components:
+
+- **Layout Primitives Hover:** Hovering over `<vstack>`, `<hstack>`, `<scroll>`, `<button>`, `<input>`, `<text>`, `<box>`, or `<slot>` displays description and attribute hints.
+- **Custom Component Navigation:** Hovering or pressing **F12** (Go-to-Definition) on a custom component tag (e.g. `<Task />`) jumps directly to the underlying `Task.kml` file.
+- **Runes & Directives Hover:** Full documentation for reactive runes (`$state`, `$derived`, `$props`, `$effect`) in `<script>`, event directives (`@click`, `@keydown`), and two-way bindings (`$bind.value`) in `<template>`.
+- **Template Expression Cross-References:** Hovering or navigating on `{identifier}` expressions inside `<template>` resolves directly to the variable or function declared inside the component's `<script>` block.
+- **Context-Aware Autocompletions:** Triggering autocomplete (`<`, `$`, `@`, `{`, `.`) in `.kml` provides tag names, event directives, attributes, and script symbols.
+
 

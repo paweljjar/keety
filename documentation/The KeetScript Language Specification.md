@@ -17,8 +17,9 @@ KeetScript gives developers the speed and power of C++ with the speed and ease o
 
 ## Companion Specifications
 
-* **Compiler Architecture & Toolchain Design:** [Keety Compiler Architecture Specification.md](file:///Users/pawel/Documents/Keet%20Documentation/Keety%20Compiler%20Architecture%20Specification.md) details the 6-stage AOT compiler pipeline, KeetIR optimization passes, diagnostic reporting standards, and canonical C++17 emission templates.
-* **Test Suite & Benchmarks:** [KeetScript Conformance Test Suite and Benchmark Specification.md](file:///Users/pawel/Documents/Keet%20Documentation/KeetScript%20Conformance%20Test%20Suite%20and%20Benchmark%20Specification.md) specifies test harness suites (positive semantics, negative diagnostics `E1000`–`E4000`) and the 4 canonical performance benchmarks against idiomatic C++17.
+* **Compiler Architecture & Toolchain Design:** [Keety Compiler Architecture Specification.md](file:///Users/pawel/Documents/GitHub/keety/documentation/Keety%20Compiler%20Architecture%20Specification.md) details the 6-stage AOT compiler pipeline, KeetIR optimization passes, diagnostic reporting standards, and canonical C++17 emission templates.
+* **Test Suite & Benchmarks:** [KeetScript Conformance Test Suite and Benchmark Specification.md](file:///Users/pawel/Documents/GitHub/keety/documentation/KeetScript%20Conformance%20Test%20Suite%20and%20Benchmark%20Specification.md) specifies test harness suites (positive semantics, negative diagnostics `E1000`–`E4000`) and the 4 canonical performance benchmarks against idiomatic C++17.
+* **Language Server Protocol (LSP) Specification:** [KeetScript Language Server Protocol Specification.md](file:///Users/pawel/Documents/GitHub/keety/documentation/KeetScript%20Language%20Server%20Protocol%20Specification.md) specifies the in-memory compiler analyzer, JSON-RPC communication model, editor language services, and `.kml` tooling architecture.
 
 
 # Notation

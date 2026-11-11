@@ -267,13 +267,20 @@ The benchmark suite compares generated KeetScript against idiomatic handwritten 
 
 ---
 
-## Editor Support (VS Code)
+## Editor Support (VS Code & Antigravity IDE)
 
-An official Visual Studio Code extension is included in [`tools/vscode-keetscript/`](tools/vscode-keetscript/README.md), providing:
-- Full TextMate syntax highlighting for `.keet` files
-- Live background diagnostics (`keety check --json-diagnostics`)
+An official Visual Studio Code and Antigravity IDE extension is included in [`tools/vscode-keetscript/`](tools/vscode-keetscript/README.md), providing:
+- **Native In-Memory Language Server (`keet-lsp`):**
+  - **Go to Definition (`F12`):** Direct navigation across local variables, functions, classes, imports, and child `.kml` components
+  - **Find All References (`Shift+F12`):** Workspace-wide symbol reference search respecting lexical scopes
+  - **Rename Symbol (`F2`):** Safe, scope-aware identifier renaming
+  - **Signature Help (`Cmd+Shift+Space`):** Active parameter highlighting for calls and constructors
+  - **Outline & Document Symbols:** Hierarchical symbol trees for classes, methods, functions, and KML component runes/props
+  - **Document Formatting:** Canonical AST-driven formatter
+- Full TextMate syntax highlighting for `.keet` and `.kml` files
+- Live background diagnostics (`keety check --json-diagnostics` & `keet-lsp`)
 - 1-click Quick Fixes for typos, missing imports, and missing semicolons
-- Autocompletion and hover documentation for standard library modules
+- Trigger-assisted autocompletion and hover documentation for standard library modules, KML layout tags, and reactive runes
 - Editor title bar **Run** and **Build** buttons
 
 To install locally into VS Code:
@@ -309,6 +316,7 @@ Detailed specifications and roadmaps are available across the repository:
 - [Keety Project Roadmap](ROADMAP.md) — Strategic engineering roadmap, release milestones, and feature backlog.
 - [The KeetScript Language Specification](documentation/The%20KeetScript%20Language%20Specification.md) — Complete EBNF grammar, type system, memory model, and execution semantics.
 - [Keety Compiler Architecture Specification](documentation/Keety%20Compiler%20Architecture%20Specification.md) — Deep dive into the 6-stage pipeline, KeetIR optimization passes, and C++20 emission templates.
+- [KeetScript Language Server Protocol Specification](documentation/KeetScript%20Language%20Server%20Protocol%20Specification.md) — In-memory analysis engine, JSON-RPC protocol transport, editor capabilities, and `.kml` tooling architecture.
 - [KeetScript Conformance Test Suite and Benchmark Specification](documentation/KeetScript%20Conformance%20Test%20Suite%20and%20Benchmark%20Specification.md) — Validation test cases and benchmark methodology.
 - **Standard Library Reference:**
     - [`crypto` — Cryptography, AEAD & Barcodes/QR](documentation/stdlib/crypto.md)
