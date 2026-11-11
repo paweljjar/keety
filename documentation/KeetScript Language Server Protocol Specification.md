@@ -138,12 +138,12 @@ On every open or change event, [`Analyzer::analyze`](file:///Users/pawel/Documen
 2. **Local Variables & Parameters:** Resolves the lexical scope via [`buildFnScopeTree`](file:///Users/pawel/Documents/GitHub/keety/src/lsp/analyzer.cpp), displaying signatures such as `let x: int` or `(parameter) mut buffer: string`.
 3. **User Functions & Classes:** Displays parameter signatures, return types, field types, and doc comments extracted from preceding `///` or `/* ... */` comment blocks.
 4. **Standard Library Members:** Dot-access expressions (`math.sin`, `fs.readFile`) display the exact type signature, parameter hints, and docstrings from [`analyzer_stdlib_docs.inc`](file:///Users/pawel/Documents/GitHub/keety/src/lsp/analyzer_stdlib_docs.inc).
-5. **Syntactic Fallback:** If code preceding the cursor contains incomplete syntax (such as an uncompleted `math.` statement), a line-based syntactic scan extracts local variable bindings (`let`, `mut`, `const`), ensuring hover remains responsive during typing.
+5. **Syntactic Fallback:** If code preceding the cursor contains incomplete syntax (such as an uncompleted `math.` statement), a line-based syntactic scan extracts local variable bindings (`let`, `const`, `define`), ensuring hover remains responsive during typing.
 
 ### 4.3 Go-to-Definition (`textDocument/definition`)
 
 [`Analyzer::findDefinition`](file:///Users/pawel/Documents/GitHub/keety/src/lsp/analyzer.cpp) navigates from an identifier usage to its source declaration:
-- **Local Scope:** Jumps to the exact parameter, `let`, `mut`, or `const` definition line and column.
+- **Local Scope:** Jumps to the exact parameter (`mut` or read-only), `let`, `const`, or `define` definition line and column.
 - **Top-Level Declarations:** Jumps to functions, classes, enums, or methods within the current file.
 - **Import Statements:** Jumps to relative `.keet` modules or `.kml` component files.
 - **Imported Symbols:** Resolves selective imports (`from "./utils" import compute;`) across the workspace and opens the destination file at the symbol declaration.
@@ -271,3 +271,4 @@ cd tools/vscode-keetscript
 ```
 
 Then reload the editor window via **`Cmd+Shift+P`** (or `Ctrl+Shift+P`) -> **`Developer: Reload Window`**.
+

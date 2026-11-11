@@ -141,9 +141,9 @@ fn benchmarkTask(): void {
 import time;
 
 fn gameLoop(): void {
-    let mut last_frame: float = time.monotonicSec();
+    let last_frame: float = time.monotonicSec();
 
-    let mut frame_count: int = 0;
+    let frame_count: int = 0;
     while (frame_count < 60) {
         let current_time: float = time.monotonicSec();
         let dt: float = current_time - last_frame;

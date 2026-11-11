@@ -33,7 +33,7 @@ import "./Counter.kml";
 import http;
 
 fn main(): int {
-    let mut server: http.Server = http.createServer();
+    let server: http.Server = http.createServer();
 
     server.serveUi("/", fn(): Counter {
         return Counter();
@@ -88,7 +88,7 @@ A `.kml` file consists of up to three top-level blocks:
 
 ```html
 <script>
-    let mut count: int = $state(0);
+    let count: int = $state(0);
     let doubled: int = $derived(count * 2);
     let parity: string = $derived(count % 2 == 0 ? "Even" : "Odd");
 
@@ -137,18 +137,19 @@ A `.kml` file consists of up to three top-level blocks:
 
 ## 3. Reactive Runes (`<script>`)
 
-Inside a `.kml` `<script>` block, the compiler provides three compile-time reactive runes that build a static dependency graph and assign bit positions in the component's `_dirty` bitmask (`uint64_t`):
+Inside a `.kml` `<script>` block, the compiler provides compile-time reactive runes that build a static dependency graph and assign bit positions in the component's `_dirty` bitmask (`uint64_t`):
 
 | Rune | Syntax | Description |
 |---|---|---|
-| **`$state`** | `let mut x: T = $state(initialValue);` | Declares a mutable reactive state slot assigned a unique bit in `_dirty`. Any mutation (`x = ...`, `x += 1`) sets its dirty bit, recomputes dependent `$derived` slots in topological order, and schedules a surgical `update()`. |
+| **`$state`** | `let x: T = $state(initialValue);` | Declares a mutable reactive state slot assigned a unique bit in `_dirty`. Any mutation (`x = ...`, `x += 1`) sets its dirty bit, recomputes dependent `$derived` slots in topological order, and schedules a surgical `update()`. |
 | **`$derived`** | `let y: T = $derived(expr);` | Declares a memoized derived value computed from one or more `$state` or `$derived` dependencies. Recomputed automatically whenever upstream dependencies change. |
 | **`$effect`** | `$effect(fn(): void { ... });` | Registers a reactive side-effect closure that runs after initial mount and re-runs whenever any `$state` or `$derived` symbol referenced in its body is marked dirty. |
 
 > [!IMPORTANT] Compile-Time Enforcement
-> - `$state(...)` variables must be declared with `let mut` (assigning `$state` to an immutable `let` triggers diagnostic `E5010`).
+> - `$state(...)` variables represent mutable reactive state and must be declared using `let` (declaring `$state` with `const` triggers diagnostic `E5010`).
 > - `$derived(...)` values are read-only computations; mutating a `$derived` variable triggers diagnostic `E5011`.
 > - Cyclic dependencies between `$derived` declarations are rejected at compile time via Tarjan's SCC analysis (`E5012`).
+
 
 ---
 
@@ -253,7 +254,7 @@ import http;
 import "./Counter.kml";
 
 fn main(): int {
-    let mut server: http.Server = http.createServer();
+    let server: http.Server = http.createServer();
 
     server.serveUi("/", fn(): Counter {
         return Counter();

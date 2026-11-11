@@ -2590,17 +2590,24 @@ std::optional<Hover> Analyzer::getHover(
 
         // Syntactic fallback: search document lines for local variable declaration when AST parse failed due to incomplete syntax
         std::string patternLet = "let " + ident;
-        std::string patternMut = "mut " + ident;
         std::string patternConst = "const " + ident;
+        std::string patternDefine = "define " + ident;
+        std::string patternMut = "mut " + ident;
         std::istringstream stream(doc.text());
         std::string line;
         while (std::getline(stream, line)) {
             size_t pLet = line.find(patternLet);
-            size_t pMut = line.find(patternMut);
             size_t pConst = line.find(patternConst);
-            size_t matchPos = (pLet != std::string::npos) ? pLet : (pMut != std::string::npos ? pMut : pConst);
+            size_t pDefine = line.find(patternDefine);
+            size_t pMut = line.find(patternMut);
+            size_t matchPos = (pLet != std::string::npos) ? pLet :
+                              (pConst != std::string::npos ? pConst :
+                              (pDefine != std::string::npos ? pDefine : pMut));
             if (matchPos != std::string::npos) {
-                size_t afterIdent = matchPos + (pLet != std::string::npos ? patternLet.size() : (pMut != std::string::npos ? patternMut.size() : patternConst.size()));
+                size_t pLen = (matchPos == pLet) ? patternLet.size() :
+                              (matchPos == pConst) ? patternConst.size() :
+                              (matchPos == pDefine) ? patternDefine.size() : patternMut.size();
+                size_t afterIdent = matchPos + pLen;
                 if (afterIdent < line.size() && (std::isalnum(static_cast<unsigned char>(line[afterIdent])) || line[afterIdent] == '_')) {
                     continue;
                 }
@@ -4377,14 +4384,27 @@ std::optional<Hover> Analyzer::getKmlHover(
 
         // G. Fallback text scan for local declarations inside script
         std::string patternLet = "let " + word;
+        std::string patternConst = "const " + word;
+        std::string patternDefine = "define " + word;
         std::string patternMut = "mut " + word;
         std::istringstream stream(kmlDoc.script->rawCode);
         std::string line;
         while (std::getline(stream, line)) {
             size_t pLet = line.find(patternLet);
+            size_t pConst = line.find(patternConst);
+            size_t pDefine = line.find(patternDefine);
             size_t pMut = line.find(patternMut);
-            size_t matchPos = (pLet != std::string::npos) ? pLet : pMut;
+            size_t matchPos = (pLet != std::string::npos) ? pLet :
+                              (pConst != std::string::npos ? pConst :
+                              (pDefine != std::string::npos ? pDefine : pMut));
             if (matchPos != std::string::npos) {
+                size_t pLen = (matchPos == pLet) ? patternLet.size() :
+                              (matchPos == pConst) ? patternConst.size() :
+                              (matchPos == pDefine) ? patternDefine.size() : patternMut.size();
+                size_t afterIdent = matchPos + pLen;
+                if (afterIdent < line.size() && (std::isalnum(static_cast<unsigned char>(line[afterIdent])) || line[afterIdent] == '_')) {
+                    continue;
+                }
                 size_t semi = line.find(';', matchPos);
                 std::string declStr = (semi != std::string::npos) ? line.substr(matchPos, semi - matchPos) : line.substr(matchPos);
                 size_t eqPos = declStr.find('=');
