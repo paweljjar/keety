@@ -91,6 +91,8 @@ diag::SourceSpan findIdentifierSpan(const Document& doc, const std::string& name
     return enclosingSpan;
 }
 
+std::string formatType(const ast::TypeAnnotation* annot, const std::string& fallback = "void");
+
 struct ScopeDeclInfo {
     enum class Kind {
         LocalVar,
@@ -114,6 +116,8 @@ struct ScopeDeclInfo {
     diag::SourceSpan fullSpan{};
     std::string containerName;
     diag::SourceSpan enclosingFnSpan{};
+    std::string typeStr{};
+    bool isConst = false;
 };
 
 struct LexicalScopeNode {
@@ -193,6 +197,8 @@ void buildScopeTree(const Document& doc, const ast::Stmt* stmt, LexicalScopeNode
             info.nameSpan = nSpan;
             info.fullSpan = vd->getSpan();
             info.enclosingFnSpan = fnSpan;
+            info.typeStr = formatType(vd->getType(), "inferred");
+            info.isConst = false;
             currentScope->decls.push_back(std::move(info));
         } else if (const auto* cd = dynamic_cast<const ast::ConstDecl*>(d)) {
             ScopeDeclInfo info;
@@ -206,6 +212,8 @@ void buildScopeTree(const Document& doc, const ast::Stmt* stmt, LexicalScopeNode
             info.nameSpan = nSpan;
             info.fullSpan = cd->getSpan();
             info.enclosingFnSpan = fnSpan;
+            info.typeStr = formatType(cd->getType(), "inferred");
+            info.isConst = true;
             currentScope->decls.push_back(std::move(info));
         }
     } else if (const auto* ifStmt = dynamic_cast<const ast::IfStmt*>(stmt)) {
@@ -314,6 +322,8 @@ std::unique_ptr<LexicalScopeNode> buildFnScopeTree(const Document& doc, const as
         info.nameSpan = nSpan;
         info.fullSpan = param.span.isValid() ? param.span : fnDecl->getSpan();
         info.enclosingFnSpan = fnDecl->getSpan();
+        info.typeStr = formatType(param.type.get(), "any");
+        info.isConst = !param.isMut;
         fnScope->decls.push_back(std::move(info));
     }
 
@@ -386,7 +396,7 @@ void collectLspDiagnostics(
     }
 }
 
-std::string formatType(const ast::TypeAnnotation* annot, const std::string& fallback = "void") {
+std::string formatType(const ast::TypeAnnotation* annot, const std::string& fallback) {
     if (!annot) return fallback;
     auto t = typechecker::Type::fromAnnotation(annot);
     if (t) return t->toString();
@@ -2113,6 +2123,23 @@ std::optional<SignatureHelp> Analyzer::getSignatureHelp(
             }
         }
 
+        // B2. Check imported KML UI components constructors (e.g. `App()`)
+        if (!foundSig.has_value()) {
+            for (const auto& decl : ast.declarations) {
+                if (!decl) continue;
+                if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+                    std::filesystem::path p(imp->getModulePath());
+                    if (p.extension() == ".kml" && p.stem().string() == calleeName) {
+                        SignatureInformation sig;
+                        sig.label = calleeName + "(): " + calleeName;
+                        sig.documentation = MarkupContent{"markdown", "Constructs a new instance of the `" + calleeName + "` KML component."};
+                        foundSig = std::move(sig);
+                        break;
+                    }
+                }
+            }
+        }
+
         // C. Check imported symbols across documents
         if (!foundSig.has_value() && docManager) {
             for (const auto& decl : ast.declarations) {
@@ -2290,17 +2317,30 @@ std::optional<Hover> Analyzer::getHover(
     parser::Parser parser(pLexer, &emitter);
     auto ast = parser.parseModule(moduleName);
 
-    // 3c. Function Parameters inside enclosing function/method
+    // 3c. Local parameters and local variables inside enclosing function/method
     for (const auto& decl : ast.declarations) {
         if (!decl) continue;
         if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
             diag::SourceSpan fnSpan = fnDecl->getSpan();
             if (targetOffset >= fnSpan.start.offset && targetOffset <= fnSpan.end.offset) {
-                for (const auto& param : fnDecl->getParams()) {
-                    if (param.name == ident) {
-                        std::string sig = "(parameter) " + std::string(param.isMut ? "mut " : "") + param.name + ": " + formatType(param.type.get(), "any");
-                        return Hover{MarkupContent{"markdown", "```keet\n" + sig + "\n```"}, tokRange};
+                auto fnScope = buildFnScopeTree(doc, fnDecl);
+                const ScopeDeclInfo* declFound = fnScope->findDeclAtOffset(targetOffset);
+                if (!declFound) {
+                    if (const auto* inner = fnScope->findInnermostScope(targetOffset)) {
+                        declFound = inner->lookup(ident, targetOffset);
                     }
+                }
+                if (declFound) {
+                    std::string sig;
+                    if (declFound->kind == ScopeDeclInfo::Kind::Param) {
+                        sig = "(parameter) " + std::string(declFound->isConst ? "" : "mut ") + declFound->name + ": " + declFound->typeStr;
+                    } else {
+                        sig = std::string(declFound->isConst ? "const " : "let ") + declFound->name;
+                        if (!declFound->typeStr.empty()) {
+                            sig += ": " + declFound->typeStr;
+                        }
+                    }
+                    return Hover{MarkupContent{"markdown", "```keet\n" + sig + "\n```"}, tokRange};
                 }
             }
         } else if (const auto* classDecl = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
@@ -2308,11 +2348,24 @@ std::optional<Hover> Analyzer::getHover(
                 if (!method) continue;
                 diag::SourceSpan mSpan = method->getSpan();
                 if (targetOffset >= mSpan.start.offset && targetOffset <= mSpan.end.offset) {
-                    for (const auto& param : method->getParams()) {
-                        if (param.name == ident) {
-                            std::string sig = "(parameter) " + std::string(param.isMut ? "mut " : "") + param.name + ": " + formatType(param.type.get(), "any");
-                            return Hover{MarkupContent{"markdown", "```keet\n" + sig + "\n```"}, tokRange};
+                    auto mScope = buildFnScopeTree(doc, method.get());
+                    const ScopeDeclInfo* declFound = mScope->findDeclAtOffset(targetOffset);
+                    if (!declFound) {
+                        if (const auto* inner = mScope->findInnermostScope(targetOffset)) {
+                            declFound = inner->lookup(ident, targetOffset);
                         }
+                    }
+                    if (declFound) {
+                        std::string sig;
+                        if (declFound->kind == ScopeDeclInfo::Kind::Param) {
+                            sig = "(parameter) " + std::string(declFound->isConst ? "" : "mut ") + declFound->name + ": " + declFound->typeStr;
+                        } else {
+                            sig = std::string(declFound->isConst ? "const " : "let ") + declFound->name;
+                            if (!declFound->typeStr.empty()) {
+                                sig += ": " + declFound->typeStr;
+                            }
+                        }
+                        return Hover{MarkupContent{"markdown", "```keet\n" + sig + "\n```"}, tokRange};
                     }
                 }
             }
@@ -2435,6 +2488,18 @@ std::optional<Hover> Analyzer::getHover(
                     std::string sig = "(enum member) " + enumDecl->getName() + "." + member.name;
                     return Hover{MarkupContent{"markdown", "```keet\n" + sig + "\n```"}, tokRange};
                 }
+            }
+        }
+    }
+
+    // 3d2. Check imported KML UI components (e.g. `import "./App.kml";`)
+    for (const auto& decl : ast.declarations) {
+        if (!decl) continue;
+        if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+            std::filesystem::path p(imp->getModulePath());
+            if (p.extension() == ".kml" && p.stem().string() == ident) {
+                std::string md = "```keet\ncomponent " + ident + "\n```\n*KML UI Component imported from `" + imp->getModulePath() + "`.*";
+                return Hover{MarkupContent{"markdown", std::move(md)}, tokRange};
             }
         }
     }
