@@ -7,6 +7,13 @@
 #include <string>
 #include <vector>
 
+#if defined(__has_include)
+#if __has_include(<cxxabi.h>)
+#include <cxxabi.h>
+#define KEETY_HAS_CXXABI 1
+#endif
+#endif
+
 namespace keety::diag {
 
 namespace {
@@ -258,6 +265,119 @@ std::string DiagnosticTranslator::demangle_cpp_type(std::string_view raw_cpp_typ
 
     (void)is_const;
     return s;
+}
+
+std::string DiagnosticTranslator::demangle_symbol(std::string_view mangled_name) {
+    std::string s = trim(std::string(mangled_name));
+    if (s.empty()) return "";
+
+    // 1. Try Itanium C++ demangling via __cxa_demangle if starts with _Z or __Z
+#if defined(KEETY_HAS_CXXABI)
+    if (s.rfind("_Z", 0) == 0 || s.rfind("__Z", 0) == 0) {
+        int status = 0;
+        char* demangled = abi::__cxa_demangle(s.c_str(), nullptr, nullptr, &status);
+        if (status == 0 && demangled) {
+            std::string result(demangled);
+            std::free(demangled);
+            return clean_diagnostic_message(result);
+        }
+    }
+#endif
+
+    // 2. Strip KeetScript internal runtime namespaces and mangling prefixes
+    strip_prefix(s, "keet::rt::");
+    strip_prefix(s, "::keet::rt::");
+    strip_prefix(s, "_keet_fn_");
+    strip_prefix(s, "_keet_var_");
+    strip_prefix(s, "_keet_");
+    strip_prefix(s, "keet_fn_");
+    strip_prefix(s, "keet_var_");
+    strip_prefix(s, "keet_");
+    strip_prefix(s, "keety_");
+
+    // 3. Strip macOS / C calling convention leading underscore: _symbol -> symbol
+    if (s.size() > 1 && s[0] == '_' && (std::isalpha(static_cast<unsigned char>(s[1])) || s[1] == '_')) {
+        if (s.rfind("__builtin", 0) != 0 && s.rfind("__cxx", 0) != 0) {
+            s.erase(0, 1);
+        }
+    }
+
+    return clean_diagnostic_message(s);
+}
+
+std::string DiagnosticTranslator::suggest_package_for_symbol(std::string_view symbol) {
+    if (symbol.empty()) return "";
+
+    // SQLite
+    if (symbol.rfind("sqlite3_", 0) == 0 || symbol.rfind("sqlite3", 0) == 0) {
+        return "sqlite";
+    }
+
+    // OpenSSL / Crypto
+    if (symbol.rfind("SSL_", 0) == 0 || symbol.rfind("TLS_", 0) == 0 ||
+        symbol.rfind("CRYPTO_", 0) == 0 || symbol.rfind("EVP_", 0) == 0 ||
+        symbol.rfind("OpenSSL_", 0) == 0 || symbol.rfind("X509_", 0) == 0 ||
+        symbol.rfind("HMAC_", 0) == 0 || symbol.rfind("SHA256_", 0) == 0 ||
+        symbol.rfind("BIO_", 0) == 0 || symbol.rfind("RSA_", 0) == 0) {
+        return "openssl";
+    }
+
+    // libcurl
+    if (symbol.rfind("curl_", 0) == 0) {
+        return "libcurl";
+    }
+
+    // zlib
+    if (symbol.rfind("deflate", 0) == 0 || symbol.rfind("inflate", 0) == 0 ||
+        symbol.rfind("compress", 0) == 0 || symbol.rfind("uncompress", 0) == 0 ||
+        symbol.rfind("crc32", 0) == 0 || symbol.rfind("adler32", 0) == 0 ||
+        symbol.rfind("zlibVersion", 0) == 0) {
+        return "zlib";
+    }
+
+    // Math library
+    const std::vector<std::string_view> math_symbols = {
+        "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sinh", "cosh", "tanh",
+        "sqrt", "pow", "exp", "log", "log10", "floor", "ceil", "fmod", "round", "hypot"
+    };
+    for (const auto& m : math_symbols) {
+        if (symbol == m || symbol == std::string(m) + "f" || symbol == std::string(m) + "l") {
+            return "math library (-lm)";
+        }
+    }
+
+    // libuv
+    if (symbol.rfind("uv_", 0) == 0) {
+        return "libuv";
+    }
+
+    // pthreads
+    if (symbol.rfind("pthread_", 0) == 0) {
+        return "pthreads (-pthread)";
+    }
+
+    // PCRE
+    if (symbol.rfind("pcre2_", 0) == 0 || symbol.rfind("pcre_", 0) == 0) {
+        return "pcre2";
+    }
+
+    // SDL2 / GLFW
+    if (symbol.rfind("SDL_", 0) == 0) {
+        return "sdl2";
+    }
+    if (symbol.rfind("glfw", 0) == 0) {
+        return "glfw";
+    }
+
+    // Vulkan / OpenGL
+    if (symbol.rfind("vk", 0) == 0 && symbol.size() > 2 && std::isupper(static_cast<unsigned char>(symbol[2]))) {
+        return "vulkan";
+    }
+    if (symbol.rfind("gl", 0) == 0 && symbol.size() > 2 && std::isupper(static_cast<unsigned char>(symbol[2]))) {
+        return "opengl";
+    }
+
+    return "";
 }
 
 std::string DiagnosticTranslator::clean_diagnostic_message(std::string_view raw_msg) {
@@ -714,6 +834,175 @@ std::vector<Diagnostic> DiagnosticTranslator::translate(
                 d.withHelp(note);
             } else {
                 d.withNote(note);
+            }
+        }
+
+        result.push_back(std::move(d));
+    }
+
+    return result;
+}
+
+std::vector<LinkerSymbol> DiagnosticTranslator::parse_linker_output(std::string_view raw_output) {
+    std::vector<LinkerSymbol> result;
+    std::istringstream stream{std::string(raw_output)};
+    std::string line;
+
+    LinkerSymbol* current_symbol = nullptr;
+    bool in_ld64_undefined_block = false;
+
+    // Regex matchers
+    static const std::regex gnu_undefined_re(
+        R"((?:undefined reference to|undefined symbol:?)\s*['`"]?([^'`"]+)['`"]?)",
+        std::regex::optimize);
+    static const std::regex msvc_undefined_re(
+        R"(error LNK20(?:19|01):\s*unresolved external symbol\s+([^\s]+)(?:\s+referenced in function\s+(.+))?)",
+        std::regex::optimize);
+    static const std::regex ld64_symbol_re(
+        R"(^\s*["']?(_[^"',\s]+)["']?,\s*referenced from:)",
+        std::regex::optimize);
+    static const std::regex lib_not_found_re(
+        R"((?:library not found for -l|cannot find -l|cannot open file ')([^'\s]+))",
+        std::regex::optimize);
+
+    while (std::getline(stream, line)) {
+        std::string_view trimmed = trim_sv(line);
+        if (trimmed.empty()) continue;
+
+        // Check for missing library flags: -lfoo or foo.lib
+        std::smatch lib_match;
+        std::string line_str(trimmed);
+        if (std::regex_search(line_str, lib_match, lib_not_found_re)) {
+            std::string lib_name = lib_match[1].str();
+            if (lib_name.ends_with(".lib")) {
+                lib_name = lib_name.substr(0, lib_name.size() - 4);
+            }
+            if (lib_name.ends_with('\'')) {
+                lib_name.pop_back();
+            }
+
+            LinkerSymbol sym;
+            sym.rawSymbol = "-l" + lib_name;
+            sym.demangledSymbol = lib_name;
+            sym.suggestedPackage = lib_name;
+            sym.referencedFrom = "linker library flag -l" + lib_name;
+            result.push_back(std::move(sym));
+            current_symbol = nullptr;
+            continue;
+        }
+
+        // Check ld64 block header
+        if (trimmed.rfind("Undefined symbols for architecture", 0) == 0 ||
+            trimmed == "Undefined symbols:" ||
+            trimmed.rfind("Undefined symbols:", 0) == 0) {
+            in_ld64_undefined_block = true;
+            continue;
+        }
+
+        // Inside ld64 block
+        if (in_ld64_undefined_block) {
+            if (trimmed.rfind("ld: symbol(s) not found", 0) == 0 ||
+                trimmed.rfind("ld: fatal error", 0) == 0) {
+                in_ld64_undefined_block = false;
+                current_symbol = nullptr;
+                continue;
+            }
+
+            std::smatch ld64_match;
+            if (std::regex_search(line, ld64_match, ld64_symbol_re)) {
+                std::string raw_sym = ld64_match[1].str();
+                LinkerSymbol sym;
+                sym.rawSymbol = raw_sym;
+                sym.demangledSymbol = demangle_symbol(raw_sym);
+                sym.suggestedPackage = suggest_package_for_symbol(sym.demangledSymbol);
+                result.push_back(std::move(sym));
+                current_symbol = &result.back();
+                continue;
+            }
+
+            // Reference line inside ld64: indented with 6+ spaces
+            if (current_symbol && (line.rfind("      ", 0) == 0 || line.rfind("\t\t", 0) == 0 || trimmed.rfind("in ", 0) != std::string_view::npos)) {
+                if (current_symbol->referencedFrom.empty()) {
+                    current_symbol->referencedFrom = std::string(trimmed);
+                }
+                continue;
+            }
+        }
+
+        // Check MSVC unresolved external symbol
+        std::smatch msvc_match;
+        if (std::regex_search(line_str, msvc_match, msvc_undefined_re)) {
+            std::string raw_sym = msvc_match[1].str();
+            LinkerSymbol sym;
+            sym.rawSymbol = raw_sym;
+            sym.demangledSymbol = demangle_symbol(raw_sym);
+            sym.suggestedPackage = suggest_package_for_symbol(sym.demangledSymbol);
+            if (msvc_match.size() > 2 && msvc_match[2].matched) {
+                sym.referencedFrom = msvc_match[2].str();
+            }
+            result.push_back(std::move(sym));
+            current_symbol = &result.back();
+            continue;
+        }
+
+        // Check GNU ld / gold undefined reference
+        std::smatch gnu_match;
+        if (std::regex_search(line_str, gnu_match, gnu_undefined_re)) {
+            std::string raw_sym = gnu_match[1].str();
+            LinkerSymbol sym;
+            sym.rawSymbol = raw_sym;
+            sym.demangledSymbol = demangle_symbol(raw_sym);
+            sym.suggestedPackage = suggest_package_for_symbol(sym.demangledSymbol);
+
+            size_t in_func_pos = line_str.find("in function");
+            if (in_func_pos != std::string::npos) {
+                size_t q1 = line_str.find_first_of("'`\"", in_func_pos);
+                if (q1 != std::string::npos) {
+                    size_t q2 = line_str.find_first_of("'`\"", q1 + 1);
+                    if (q2 != std::string::npos) {
+                        sym.referencedFrom = demangle_symbol(line_str.substr(q1 + 1, q2 - q1 - 1));
+                    }
+                }
+            } else {
+                size_t colon_pos = line_str.find(':');
+                if (colon_pos != std::string::npos && colon_pos < 50) {
+                    sym.referencedFrom = std::string(trim_sv(line_str.substr(0, colon_pos)));
+                }
+            }
+
+            result.push_back(std::move(sym));
+            current_symbol = &result.back();
+            continue;
+        }
+    }
+
+    return result;
+}
+
+std::vector<Diagnostic> DiagnosticTranslator::translate_linker_output(std::string_view raw_output) {
+    auto symbols = parse_linker_output(raw_output);
+    std::vector<Diagnostic> result;
+    result.reserve(symbols.size());
+
+    for (const auto& sym : symbols) {
+        Diagnostic d;
+        d.severity = DiagnosticSeverity::Error;
+        d.code = std::string(getErrorCodeString(ErrorCode::ExternSymbolNotFound));
+
+        if (sym.rawSymbol.rfind("-l", 0) == 0) {
+            d.message = "native library '" + sym.demangledSymbol + "' was not found by the linker";
+            d.withHelp("did you forget to install library '" + sym.demangledSymbol + "' or configure native library paths in keet.toml?");
+        } else {
+            d.message = "unresolved external symbol '" + sym.demangledSymbol + "'";
+
+            if (!sym.referencedFrom.empty()) {
+                d.withNote("referenced from " + sym.referencedFrom);
+            }
+
+            if (!sym.suggestedPackage.empty()) {
+                d.withHelp("did you forget to declare package dependency '" + sym.suggestedPackage + "' in keet.toml?");
+            } else {
+                d.withHelp("ensure the native library containing '" + sym.demangledSymbol + "' is linked or installed on your system");
             }
         }
 
