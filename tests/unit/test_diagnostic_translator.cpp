@@ -34,6 +34,7 @@ TEST_CASE("DiagnosticTranslator: C++ STL Type Demangling", "[diag][translator][d
     SECTION("Map types") {
         REQUIRE(DiagnosticTranslator::demangle_cpp_type("std::unordered_map<std::string, int64_t>") == "[string: int]");
         REQUIRE(DiagnosticTranslator::demangle_cpp_type("std::__1::unordered_map<std::string, std::vector<int64_t>>") == "[string: [int]]");
+        REQUIRE(DiagnosticTranslator::demangle_cpp_type("std::unordered_map<std::string, std::variant<int64_t, double>>") == "[string: int | float]");
     }
 
     SECTION("Variant and optional types") {
@@ -41,6 +42,8 @@ TEST_CASE("DiagnosticTranslator: C++ STL Type Demangling", "[diag][translator][d
         REQUIRE(DiagnosticTranslator::demangle_cpp_type("std::__1::variant<int64_t, double, bool>") == "int | float | bool");
         REQUIRE(DiagnosticTranslator::demangle_cpp_type("std::optional<int64_t>") == "int?");
         REQUIRE(DiagnosticTranslator::demangle_cpp_type("std::__1::optional<std::string>") == "string?");
+        REQUIRE(DiagnosticTranslator::demangle_cpp_type("std::vector<std::variant<int64_t, std::string>>") == "[int | string]");
+        REQUIRE(DiagnosticTranslator::demangle_cpp_type("std::optional<std::vector<int64_t>>") == "[int]?");
     }
 
     SECTION("Pointers and object references") {
@@ -127,6 +130,43 @@ TEST_CASE("DiagnosticTranslator: Clang and GCC Output Parsing", "[diag][translat
         REQUIRE(diags[0].line == 42);
         REQUIRE(diags[0].cleanMessage.find("type mismatch: cannot convert 'string' to 'int'") != std::string::npos);
     }
+
+    SECTION("Parses GCC error with warning flags and notes") {
+        std::string output =
+            "src/utils.keet:24:9: error: 'class String' has no member named 'length_bytes' [-fpermissive]\n"
+            "   24 |     str.length_bytes();\n"
+            "      |         ^~~~~~~~~~~~\n"
+            "src/utils.keet:24:9: note: in expansion of macro 'LEN'\n"
+            "src/utils.keet:30:5: warning: unused variable 'unused_counter' [-Wunused-variable]\n";
+
+        auto diags = DiagnosticTranslator::parse_clang_gcc_output(output);
+        REQUIRE(diags.size() == 2);
+        REQUIRE(diags[0].file == "src/utils.keet");
+        REQUIRE(diags[0].line == 24);
+        REQUIRE(diags[0].column == 9);
+        REQUIRE(diags[0].severity == DiagnosticSeverity::Error);
+        REQUIRE(diags[0].cleanMessage.find("no member named 'length_bytes'") != std::string::npos);
+        REQUIRE(diags[0].notes.size() == 1);
+        REQUIRE(diags[0].notes[0].find("in expansion of macro 'LEN'") != std::string::npos);
+
+        REQUIRE(diags[1].file == "src/utils.keet");
+        REQUIRE(diags[1].line == 30);
+        REQUIRE(diags[1].column == 5);
+        REQUIRE(diags[1].severity == DiagnosticSeverity::Warning);
+        REQUIRE(diags[1].cleanMessage.find("unused variable 'unused_counter'") != std::string::npos);
+    }
+
+    SECTION("Parses line-only GCC diagnostics without column numbers") {
+        std::string output =
+            "src/parser.keet:12: error: expected ';' before '}' token\n";
+
+        auto diags = DiagnosticTranslator::parse_clang_gcc_output(output);
+        REQUIRE(diags.size() == 1);
+        REQUIRE(diags[0].file == "src/parser.keet");
+        REQUIRE(diags[0].line == 12);
+        REQUIRE(diags[0].column == 0);
+        REQUIRE(diags[0].severity == DiagnosticSeverity::Error);
+    }
 }
 
 TEST_CASE("DiagnosticTranslator: MSVC Output Parsing", "[diag][translator][msvc]") {
@@ -142,6 +182,32 @@ TEST_CASE("DiagnosticTranslator: MSVC Output Parsing", "[diag][translator][msvc]
         REQUIRE(diags[0].code == "C2664");
         REQUIRE(diags[0].cleanMessage.find("type mismatch: cannot convert argument 1 from 'string' to 'int'") != std::string::npos);
     }
+
+    SECTION("Parses MSVC warning without column number and note") {
+        std::string output =
+            "src\\main.keet(18): warning C4101: 'x': unreferenced local variable\n"
+            "src\\main.keet(20,5): note: see declaration of 'x'\n";
+
+        auto diags = DiagnosticTranslator::parse_msvc_output(output);
+        REQUIRE(diags.size() == 1);
+        REQUIRE(diags[0].file == "src\\main.keet");
+        REQUIRE(diags[0].line == 18);
+        REQUIRE(diags[0].column == 0);
+        REQUIRE(diags[0].severity == DiagnosticSeverity::Warning);
+        REQUIRE(diags[0].code == "C4101");
+        REQUIRE(diags[0].notes.size() == 1);
+        REQUIRE(diags[0].notes[0].find("see declaration of 'x'") != std::string::npos);
+    }
+
+    SECTION("Parses MSVC fatal error") {
+        std::string output =
+            "src\\app.keet(5,1): fatal error C1083: Cannot open include file: 'missing.h': No such file or directory\n";
+
+        auto diags = DiagnosticTranslator::parse_msvc_output(output);
+        REQUIRE(diags.size() == 1);
+        REQUIRE(diags[0].severity == DiagnosticSeverity::Error);
+        REQUIRE(diags[0].code == "C1083");
+    }
 }
 
 TEST_CASE("DiagnosticTranslator: Translation to KeetScript Diagnostics", "[diag][translator][translate]") {
@@ -155,6 +221,28 @@ TEST_CASE("DiagnosticTranslator: Translation to KeetScript Diagnostics", "[diag]
         REQUIRE(diags[0].severity == DiagnosticSeverity::Error);
         REQUIRE(diags[0].location.line == 10);
         REQUIRE(diags[0].location.column == 8);
+    }
+
+    SECTION("Translates GCC errors across dialects") {
+        std::string gcc_output =
+            "src/app.keet:14:5: error: 'val' was not declared in this scope\n";
+
+        auto diags = DiagnosticTranslator::translate(gcc_output, CompilerKind::GCC);
+        REQUIRE(diags.size() == 1);
+        REQUIRE(diags[0].code == "E2003");
+        REQUIRE(diags[0].location.line == 14);
+        REQUIRE(diags[0].location.column == 5);
+    }
+
+    SECTION("Translates MSVC errors across dialects") {
+        std::string msvc_output =
+            "src\\app.keet(22,10): error C2039: 'run': is not a member of 'Worker'\n";
+
+        auto diags = DiagnosticTranslator::translate(msvc_output, CompilerKind::MSVC);
+        REQUIRE(diags.size() == 1);
+        REQUIRE(diags[0].code == "E3011");
+        REQUIRE(diags[0].location.line == 22);
+        REQUIRE(diags[0].location.column == 10);
     }
 
     SECTION("Translates unknown member error to E3011 InvalidMemberAccess") {

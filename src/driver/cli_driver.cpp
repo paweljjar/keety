@@ -1236,8 +1236,12 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
 
     bool graph_ok = graph.buildGraph(options.input_file, sm, path_resolver, &emitter);
     if (!graph_ok || emitter.hasErrors()) {
-        for (const auto& d : emitter.getDiagnostics()) {
-            err << emitter.format(d);
+        if (options.diagnostic_format == DiagnosticFormat::Json) {
+            emitter.emitJson(err);
+        } else {
+            for (const auto& d : emitter.getDiagnostics()) {
+                err << emitter.format(d);
+            }
         }
         return std::nullopt;
     }
@@ -1245,8 +1249,12 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
     // Check for circular dependency cycles
     resolver::CycleDetector cycle_detector(graph, &emitter);
     if (!cycle_detector.detectCycles() || emitter.hasErrors()) {
-        for (const auto& d : emitter.getDiagnostics()) {
-            err << emitter.format(d);
+        if (options.diagnostic_format == DiagnosticFormat::Json) {
+            emitter.emitJson(err);
+        } else {
+            for (const auto& d : emitter.getDiagnostics()) {
+                err << emitter.format(d);
+            }
         }
         return std::nullopt;
     }
@@ -1345,8 +1353,12 @@ std::optional<std::filesystem::path> CliDriver::build_binary(
         module_scopes[node->canonicalPath] = module_scope;
 
         if (emitter.hasErrors()) {
-            for (const auto& d : emitter.getDiagnostics()) {
-                err << emitter.format(d);
+            if (options.diagnostic_format == DiagnosticFormat::Json) {
+                emitter.emitJson(err);
+            } else {
+                for (const auto& d : emitter.getDiagnostics()) {
+                    err << emitter.format(d);
+                }
             }
             return std::nullopt;
         }

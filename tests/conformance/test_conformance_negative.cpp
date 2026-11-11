@@ -287,6 +287,41 @@ TEST_CASE("Negative compiler rejection conformance: Diagnostic error codes", "[c
         CHECK(err.str().find("E3002") != std::string::npos);
         CHECK(err.str().find("error[E3002]") != std::string::npos);
     }
+
+    SECTION("CliDriver::build rejects faulty code with clean diagnostics and zero raw C++ noise") {
+        auto test_file = locate_conformance_test("negative/neg_io_type_mismatch.keet");
+        REQUIRE(!test_file.empty());
+        REQUIRE(std::filesystem::exists(test_file));
+
+        std::ostringstream out;
+        std::ostringstream err;
+        auto opts = CliDriver::parse_args({"build", test_file.string()});
+
+        int exit_code = CliDriver::run(opts, out, err);
+        CHECK(exit_code == 1);
+        CHECK(err.str().find("error[E3003]") != std::string::npos);
+        CHECK(err.str().find("internal compiler error") == std::string::npos);
+        CHECK(err.str().find("Run with '--verbose-cpp'") == std::string::npos);
+        CHECK(err.str().find("Please file a bug report") == std::string::npos);
+    }
+
+    SECTION("CliDriver::build with --diagnostic-format=json produces valid JSON array") {
+        auto test_file = locate_conformance_test("negative/neg_mut_alias.keet");
+        REQUIRE(!test_file.empty());
+        REQUIRE(std::filesystem::exists(test_file));
+
+        std::ostringstream out;
+        std::ostringstream err;
+        auto opts = CliDriver::parse_args({"build", "--diagnostic-format=json", test_file.string()});
+
+        int exit_code = CliDriver::run(opts, out, err);
+        CHECK(exit_code == 1);
+        std::string json_str = err.str();
+        CHECK(!json_str.empty());
+        CHECK(json_str.front() == '[');
+        CHECK(json_str.find("\"code\": \"E4001\"") != std::string::npos);
+        CHECK(json_str.find("\"severity\": \"error\"") != std::string::npos);
+    }
 }
 
 

@@ -557,10 +557,10 @@ std::vector<RawDiagnostic> DiagnosticTranslator::parse_msvc_output(std::string_v
     std::istringstream stream{std::string(raw_output)};
     std::string line;
 
-    // Matches: <file>(<line>,<col>): (error|warning) <Cxxxx>: <message>
-    // or:      <file>(<line>): (error|warning) <Cxxxx>: <message>
+    // Matches: <file>(<line>,<col>): (error|fatal error|warning) <Cxxxx>: <message>
+    // or:      <file>(<line>): (error|fatal error|warning) <Cxxxx>: <message>
     static const std::regex msvc_regex(
-        R"(^([^(:\r\n]+)\((\d+)(?:,(\d+))?\)\s*:\s*(error|warning)\s*(C\d+):\s*(.+)$)",
+        R"(^([^(:\r\n]+)\((\d+)(?:,(\d+))?\)\s*:\s*(error|fatal error|warning)\s*(C\d+):\s*(.+)$)",
         std::regex::optimize);
 
     RawDiagnostic* current_diag = nullptr;
