@@ -84,6 +84,9 @@ std::optional<std::string> Server::handleRawMessage(const std::string& rawJson) 
             } else if (method == "textDocument/definition") {
                 auto res = handleDefinition(params);
                 return JsonRpcResponse::makeResult(id, res).serialize();
+            } else if (method == "textDocument/references") {
+                auto res = handleReferences(params);
+                return JsonRpcResponse::makeResult(id, res).serialize();
             } else if (method == "textDocument/hover") {
                 auto res = handleHover(params);
                 return JsonRpcResponse::makeResult(id, res).serialize();
@@ -186,6 +189,12 @@ void Server::handleRequest(const RequestId& id, const std::string& method, const
         return;
     }
 
+    if (method == "textDocument/references") {
+        auto res = handleReferences(params);
+        transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
+        return;
+    }
+
     if (method == "textDocument/hover") {
         auto res = handleHover(params);
         transport_.writeMessage(JsonRpcResponse::makeResult(id, res).serialize());
@@ -257,6 +266,7 @@ JsonValue Server::handleInitialize(const JsonValue& /*params*/) {
     caps["textDocumentSync"] = JsonValue(std::move(sync));
 
     caps["definitionProvider"] = JsonValue(true);
+    caps["referencesProvider"] = JsonValue(true);
     caps["hoverProvider"] = JsonValue(true);
 
     JsonValue::Object compProvider;
@@ -354,6 +364,20 @@ JsonValue Server::handleDefinition(const JsonValue& params) {
         return JsonValue(std::monostate{});
     }
     return locOpt->toJson();
+}
+
+JsonValue Server::handleReferences(const JsonValue& params) {
+    auto p = ReferenceParams::fromJson(params);
+    auto docOpt = docManager_.getDocument(p.textDocument.uri);
+    if (!docOpt.has_value()) {
+        return JsonValue(JsonValue::Array{});
+    }
+    auto locs = analyzer_.findReferences(*docOpt, p.position, p.context.includeDeclaration, &docManager_);
+    JsonValue::Array arr;
+    for (const auto& loc : locs) {
+        arr.push_back(loc.toJson());
+    }
+    return JsonValue(std::move(arr));
 }
 
 JsonValue Server::handleHover(const JsonValue& params) {

@@ -19,6 +19,10 @@ public:
     /// Locates the declaration location for the symbol under position (Go-to-Definition).
     std::optional<Location> findDefinition(const Document& doc, Position pos, const DocumentManager* docManager = nullptr);
 
+    /// Finds all references to the symbol under position (Find All References),
+    /// respecting lexical scope and shadow boundaries, across all open documents.
+    std::vector<Location> findReferences(const Document& doc, Position pos, bool includeDeclaration = true, const DocumentManager* docManager = nullptr);
+
     /// Computes rich hover information and Markdown documentation for the symbol or keyword under position.
     std::optional<Hover> getHover(const Document& doc, Position pos, const DocumentManager* docManager = nullptr);
 

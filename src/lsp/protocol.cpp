@@ -323,6 +323,48 @@ TextDocumentPositionParams TextDocumentPositionParams::fromJson(const JsonValue&
     return p;
 }
 
+JsonValue ReferenceContext::toJson() const {
+    JsonValue::Object obj;
+    obj["includeDeclaration"] = JsonValue(includeDeclaration);
+    return JsonValue(std::move(obj));
+}
+
+ReferenceContext ReferenceContext::fromJson(const JsonValue& j) {
+    ReferenceContext ctx;
+    if (auto* obj = asObject(j)) {
+        if (auto* inc = findField(*obj, "includeDeclaration"); inc && inc->is_bool()) {
+            ctx.includeDeclaration = std::get<bool>(inc->value);
+        }
+    }
+    return ctx;
+}
+
+JsonValue ReferenceParams::toJson() const {
+    JsonValue::Object obj;
+    JsonValue::Object docObj;
+    docObj["uri"] = JsonValue(textDocument.uri);
+    obj["textDocument"] = JsonValue(std::move(docObj));
+    obj["position"] = position.toJson();
+    obj["context"] = context.toJson();
+    return JsonValue(std::move(obj));
+}
+
+ReferenceParams ReferenceParams::fromJson(const JsonValue& j) {
+    ReferenceParams p;
+    if (auto* obj = asObject(j)) {
+        if (auto* docNode = findField(*obj, "textDocument")) {
+            p.textDocument = TextDocumentIdentifier::fromJson(*docNode);
+        }
+        if (auto* posNode = findField(*obj, "position")) {
+            p.position = Position::fromJson(*posNode);
+        }
+        if (auto* ctxNode = findField(*obj, "context")) {
+            p.context = ReferenceContext::fromJson(*ctxNode);
+        }
+    }
+    return p;
+}
+
 JsonValue PublishDiagnosticsParams::toJson() const {
     JsonValue::Object obj;
     obj["uri"] = JsonValue(uri);

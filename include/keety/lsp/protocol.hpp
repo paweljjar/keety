@@ -252,6 +252,22 @@ struct TextDocumentPositionParams {
     static TextDocumentPositionParams fromJson(const JsonValue& j);
 };
 
+struct ReferenceContext {
+    bool includeDeclaration = true;
+
+    JsonValue toJson() const;
+    static ReferenceContext fromJson(const JsonValue& j);
+};
+
+struct ReferenceParams {
+    TextDocumentIdentifier textDocument;
+    Position position;
+    ReferenceContext context;
+
+    JsonValue toJson() const;
+    static ReferenceParams fromJson(const JsonValue& j);
+};
+
 struct PublishDiagnosticsParams {
     std::string uri;
     std::optional<int32_t> version;

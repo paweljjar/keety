@@ -77,6 +77,253 @@ Range findIdentifierRange(const Document& doc, const std::string& name, const di
     return spanToRange(doc, enclosingSpan);
 }
 
+diag::SourceSpan findIdentifierSpan(const Document& doc, const std::string& name, const diag::SourceSpan& enclosingSpan) {
+    Range r = findIdentifierRange(doc, name, enclosingSpan);
+    auto sOff = doc.positionToOffset(r.start);
+    auto eOff = doc.positionToOffset(r.end);
+    if (sOff && eOff) {
+        diag::FileId fid = enclosingSpan.isValid() ? enclosingSpan.start.fileId : 1;
+        return diag::SourceSpan{
+            diag::SourceLocation{fid, static_cast<uint32_t>(*sOff), r.start.line + 1, r.start.character + 1},
+            diag::SourceLocation{fid, static_cast<uint32_t>(*eOff), r.end.line + 1, r.end.character + 1}
+        };
+    }
+    return enclosingSpan;
+}
+
+struct ScopeDeclInfo {
+    enum class Kind {
+        LocalVar,
+        Param,
+        Function,
+        Variable,
+        Constant,
+        Define,
+        Class,
+        Field,
+        Method,
+        Enum,
+        EnumMember,
+        Import
+    };
+
+    Kind kind{Kind::LocalVar};
+    std::string name;
+    std::string uri;
+    diag::SourceSpan nameSpan{};
+    diag::SourceSpan fullSpan{};
+    std::string containerName;
+    diag::SourceSpan enclosingFnSpan{};
+};
+
+struct LexicalScopeNode {
+    LexicalScopeNode* parent = nullptr;
+    diag::SourceSpan span{};
+    std::vector<ScopeDeclInfo> decls;
+    std::vector<std::unique_ptr<LexicalScopeNode>> children;
+
+    const ScopeDeclInfo* lookup(const std::string& name, size_t offset) const {
+        for (auto it = decls.rbegin(); it != decls.rend(); ++it) {
+            if (it->name == name && it->nameSpan.start.offset <= offset) {
+                return &(*it);
+            }
+        }
+        if (parent) {
+            return parent->lookup(name, offset);
+        }
+        return nullptr;
+    }
+
+    const LexicalScopeNode* findInnermostScope(size_t offset) const {
+        for (const auto& child : children) {
+            if (child->span.isValid() &&
+                offset >= child->span.start.offset &&
+                offset <= child->span.end.offset) {
+                return child->findInnermostScope(offset);
+            }
+        }
+        return this;
+    }
+
+    const ScopeDeclInfo* findDeclAtOffset(size_t offset) const {
+        for (const auto& d : decls) {
+            if (d.nameSpan.isValid() &&
+                offset >= d.nameSpan.start.offset &&
+                offset <= d.nameSpan.end.offset) {
+                return &d;
+            }
+        }
+        for (const auto& child : children) {
+            if (child->span.isValid() &&
+                offset >= child->span.start.offset &&
+                offset <= child->span.end.offset) {
+                if (const auto* found = child->findDeclAtOffset(offset)) {
+                    return found;
+                }
+            }
+        }
+        return nullptr;
+    }
+};
+
+void buildScopeTree(const Document& doc, const ast::Stmt* stmt, LexicalScopeNode* currentScope, diag::SourceSpan fnSpan) {
+    if (!stmt) return;
+
+    if (const auto* block = dynamic_cast<const ast::BlockStmt*>(stmt)) {
+        auto child = std::make_unique<LexicalScopeNode>();
+        child->parent = currentScope;
+        child->span = block->getSpan();
+        LexicalScopeNode* pChild = child.get();
+        currentScope->children.push_back(std::move(child));
+
+        for (const auto& s : block->getStatements()) {
+            buildScopeTree(doc, s.get(), pChild, fnSpan);
+        }
+    } else if (const auto* declStmt = dynamic_cast<const ast::DeclStmt*>(stmt)) {
+        const auto* d = declStmt->getDeclaration();
+        if (const auto* vd = dynamic_cast<const ast::VarDecl*>(d)) {
+            ScopeDeclInfo info;
+            info.kind = ScopeDeclInfo::Kind::LocalVar;
+            info.name = vd->getName();
+            info.uri = doc.uri();
+            diag::SourceSpan nSpan = vd->getNameSpan();
+            if (!nSpan.isValid()) {
+                nSpan = findIdentifierSpan(doc, vd->getName(), vd->getSpan());
+            }
+            info.nameSpan = nSpan;
+            info.fullSpan = vd->getSpan();
+            info.enclosingFnSpan = fnSpan;
+            currentScope->decls.push_back(std::move(info));
+        } else if (const auto* cd = dynamic_cast<const ast::ConstDecl*>(d)) {
+            ScopeDeclInfo info;
+            info.kind = ScopeDeclInfo::Kind::LocalVar;
+            info.name = cd->getName();
+            info.uri = doc.uri();
+            diag::SourceSpan nSpan = cd->getNameSpan();
+            if (!nSpan.isValid()) {
+                nSpan = findIdentifierSpan(doc, cd->getName(), cd->getSpan());
+            }
+            info.nameSpan = nSpan;
+            info.fullSpan = cd->getSpan();
+            info.enclosingFnSpan = fnSpan;
+            currentScope->decls.push_back(std::move(info));
+        }
+    } else if (const auto* ifStmt = dynamic_cast<const ast::IfStmt*>(stmt)) {
+        LexicalScopeNode* ifScope = currentScope;
+        if (ifStmt->hasInit()) {
+            auto child = std::make_unique<LexicalScopeNode>();
+            child->parent = currentScope;
+            child->span = ifStmt->getSpan();
+            ifScope = child.get();
+            currentScope->children.push_back(std::move(child));
+            buildScopeTree(doc, ifStmt->getInit(), ifScope, fnSpan);
+        }
+        if (ifStmt->getThenBranch()) {
+            buildScopeTree(doc, ifStmt->getThenBranch(), ifScope, fnSpan);
+        }
+        if (ifStmt->getElseBranch()) {
+            buildScopeTree(doc, ifStmt->getElseBranch(), ifScope, fnSpan);
+        }
+    } else if (const auto* whileStmt = dynamic_cast<const ast::WhileStmt*>(stmt)) {
+        LexicalScopeNode* wScope = currentScope;
+        if (whileStmt->hasInit()) {
+            auto child = std::make_unique<LexicalScopeNode>();
+            child->parent = currentScope;
+            child->span = whileStmt->getSpan();
+            wScope = child.get();
+            currentScope->children.push_back(std::move(child));
+            buildScopeTree(doc, whileStmt->getInit(), wScope, fnSpan);
+        }
+        if (whileStmt->getBody()) {
+            buildScopeTree(doc, whileStmt->getBody(), wScope, fnSpan);
+        }
+    } else if (const auto* forStmt = dynamic_cast<const ast::ForStmt*>(stmt)) {
+        auto child = std::make_unique<LexicalScopeNode>();
+        child->parent = currentScope;
+        child->span = forStmt->getSpan();
+        LexicalScopeNode* fScope = child.get();
+        currentScope->children.push_back(std::move(child));
+
+        if (forStmt->getInit()) {
+            buildScopeTree(doc, forStmt->getInit(), fScope, fnSpan);
+        }
+        if (forStmt->getBody()) {
+            buildScopeTree(doc, forStmt->getBody(), fScope, fnSpan);
+        }
+    } else if (const auto* forInStmt = dynamic_cast<const ast::ForInStmt*>(stmt)) {
+        auto child = std::make_unique<LexicalScopeNode>();
+        child->parent = currentScope;
+        child->span = forInStmt->getSpan();
+        LexicalScopeNode* fScope = child.get();
+        currentScope->children.push_back(std::move(child));
+
+        if (!forInStmt->getValueName().empty()) {
+            ScopeDeclInfo info;
+            info.kind = ScopeDeclInfo::Kind::LocalVar;
+            info.name = forInStmt->getValueName();
+            info.uri = doc.uri();
+            info.nameSpan = findIdentifierSpan(doc, forInStmt->getValueName(), forInStmt->getSpan());
+            info.fullSpan = forInStmt->getSpan();
+            info.enclosingFnSpan = fnSpan;
+            fScope->decls.push_back(std::move(info));
+        }
+        if (!forInStmt->getKeyName().empty()) {
+            ScopeDeclInfo info;
+            info.kind = ScopeDeclInfo::Kind::LocalVar;
+            info.name = forInStmt->getKeyName();
+            info.uri = doc.uri();
+            info.nameSpan = findIdentifierSpan(doc, forInStmt->getKeyName(), forInStmt->getSpan());
+            info.fullSpan = forInStmt->getSpan();
+            info.enclosingFnSpan = fnSpan;
+            fScope->decls.push_back(std::move(info));
+        }
+        if (forInStmt->getBody()) {
+            buildScopeTree(doc, forInStmt->getBody(), fScope, fnSpan);
+        }
+    } else if (const auto* swStmt = dynamic_cast<const ast::SwitchStmt*>(stmt)) {
+        LexicalScopeNode* swScope = currentScope;
+        if (swStmt->hasInit()) {
+            auto child = std::make_unique<LexicalScopeNode>();
+            child->parent = currentScope;
+            child->span = swStmt->getSpan();
+            swScope = child.get();
+            currentScope->children.push_back(std::move(child));
+            buildScopeTree(doc, swStmt->getInit(), swScope, fnSpan);
+        }
+        for (const auto& c : swStmt->getCases()) {
+            if (c.body) {
+                buildScopeTree(doc, c.body.get(), swScope, fnSpan);
+            }
+        }
+    }
+}
+
+std::unique_ptr<LexicalScopeNode> buildFnScopeTree(const Document& doc, const ast::FnDecl* fnDecl) {
+    auto fnScope = std::make_unique<LexicalScopeNode>();
+    fnScope->span = fnDecl->getSpan();
+
+    for (const auto& param : fnDecl->getParams()) {
+        ScopeDeclInfo info;
+        info.kind = ScopeDeclInfo::Kind::Param;
+        info.name = param.name;
+        info.uri = doc.uri();
+        diag::SourceSpan nSpan = param.nameSpan;
+        if (!nSpan.isValid()) {
+            nSpan = findIdentifierSpan(doc, param.name, param.span.isValid() ? param.span : fnDecl->getSpan());
+        }
+        info.nameSpan = nSpan;
+        info.fullSpan = param.span.isValid() ? param.span : fnDecl->getSpan();
+        info.enclosingFnSpan = fnDecl->getSpan();
+        fnScope->decls.push_back(std::move(info));
+    }
+
+    if (fnDecl->getBody()) {
+        buildScopeTree(doc, fnDecl->getBody(), fnScope.get(), fnDecl->getSpan());
+    }
+
+    return fnScope;
+}
+
 DiagnosticSeverity convertSeverity(diag::DiagnosticSeverity sev) {
     switch (sev) {
     case diag::DiagnosticSeverity::Error:
@@ -836,17 +1083,18 @@ std::optional<Location> Analyzer::findDefinition(
         }
     }
 
-    // 2b. Check local parameters within function enclosing cursor
+    // 2b. Check local parameters and local variables within function enclosing cursor
     for (const auto& decl : ast.declarations) {
         if (!decl) continue;
         if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
             diag::SourceSpan fnSpan = fnDecl->getSpan();
             if (targetOffset >= fnSpan.start.offset && targetOffset <= fnSpan.end.offset) {
-                // Inside this function! Check its parameters first
-                for (const auto& param : fnDecl->getParams()) {
-                    if (param.name == ident) {
-                        return Location{doc.uri(), spanToRange(doc, param.span)};
-                    }
+                auto fnScope = buildFnScopeTree(doc, fnDecl);
+                if (const auto* declFound = fnScope->findDeclAtOffset(targetOffset)) {
+                    return Location{doc.uri(), spanToRange(doc, declFound->nameSpan)};
+                }
+                if (const auto* resolved = fnScope->findInnermostScope(targetOffset)->lookup(ident, targetOffset)) {
+                    return Location{doc.uri(), spanToRange(doc, resolved->nameSpan)};
                 }
             }
         } else if (const auto* classDecl = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
@@ -854,10 +1102,12 @@ std::optional<Location> Analyzer::findDefinition(
                 if (!method) continue;
                 diag::SourceSpan mSpan = method->getSpan();
                 if (targetOffset >= mSpan.start.offset && targetOffset <= mSpan.end.offset) {
-                    for (const auto& param : method->getParams()) {
-                        if (param.name == ident) {
-                            return Location{doc.uri(), spanToRange(doc, param.span)};
-                        }
+                    auto mScope = buildFnScopeTree(doc, method.get());
+                    if (const auto* declFound = mScope->findDeclAtOffset(targetOffset)) {
+                        return Location{doc.uri(), spanToRange(doc, declFound->nameSpan)};
+                    }
+                    if (const auto* resolved = mScope->findInnermostScope(targetOffset)->lookup(ident, targetOffset)) {
+                        return Location{doc.uri(), spanToRange(doc, resolved->nameSpan)};
                     }
                 }
             }
@@ -912,6 +1162,494 @@ std::optional<Location> Analyzer::findDefinition(
     }
 
     return std::nullopt;
+}
+
+std::vector<Location> Analyzer::findReferences(
+    const Document& doc,
+    Position pos,
+    bool includeDeclaration,
+    const DocumentManager* docManager
+) {
+    auto byteOffsetOpt = doc.positionToOffset(pos);
+    if (!byteOffsetOpt.has_value()) {
+        return {};
+    }
+    size_t targetOffset = *byteOffsetOpt;
+
+    diag::SourceManager sm;
+    std::string pathStr = uriToPath(doc.uri());
+    diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
+
+    lexer::Lexer lexer(fileId, doc.text());
+    auto tokens = lexer.tokenizeAll();
+
+    // Find token under cursor
+    const lexer::Token* targetTok = nullptr;
+    size_t targetTokIdx = 0;
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        if (targetOffset >= tokens[i].span.start.offset && targetOffset < tokens[i].span.end.offset) {
+            targetTok = &tokens[i];
+            targetTokIdx = i;
+            break;
+        }
+    }
+    if (!targetTok) {
+        for (size_t i = 0; i < tokens.size(); ++i) {
+            if (targetOffset == tokens[i].span.end.offset && tokens[i].span.length() > 0) {
+                targetTok = &tokens[i];
+                targetTokIdx = i;
+                break;
+            }
+        }
+    }
+
+    if (!targetTok || !targetTok->is(lexer::TokenKind::Identifier)) {
+        return {};
+    }
+
+    std::string ident = std::string(targetTok->lexeme);
+    bool targetPrecededByDot = (targetTokIdx > 0 && tokens[targetTokIdx - 1].is(lexer::TokenKind::Dot));
+
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+
+    diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+    lexer::Lexer pLexer(fileId, doc.text());
+    parser::Parser parser(pLexer, &emitter);
+    auto ast = parser.parseModule(moduleName);
+
+    // Try to resolve target declaration
+    std::optional<ScopeDeclInfo> targetDecl;
+    std::unique_ptr<LexicalScopeNode> activeFnScope;
+
+    if (!targetPrecededByDot) {
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                diag::SourceSpan fnSpan = fnDecl->getSpan();
+                if (targetOffset >= fnSpan.start.offset && targetOffset <= fnSpan.end.offset) {
+                    activeFnScope = buildFnScopeTree(doc, fnDecl);
+                    if (const auto* declFound = activeFnScope->findDeclAtOffset(targetOffset)) {
+                        targetDecl = *declFound;
+                        break;
+                    }
+                    if (const auto* resolved = activeFnScope->findInnermostScope(targetOffset)->lookup(ident, targetOffset)) {
+                        targetDecl = *resolved;
+                        break;
+                    }
+                }
+            } else if (const auto* classDecl = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                for (const auto& method : classDecl->getMethods()) {
+                    if (!method) continue;
+                    diag::SourceSpan mSpan = method->getSpan();
+                    if (targetOffset >= mSpan.start.offset && targetOffset <= mSpan.end.offset) {
+                        activeFnScope = buildFnScopeTree(doc, method.get());
+                        if (const auto* declFound = activeFnScope->findDeclAtOffset(targetOffset)) {
+                            targetDecl = *declFound;
+                            break;
+                        }
+                        if (const auto* resolved = activeFnScope->findInnermostScope(targetOffset)->lookup(ident, targetOffset)) {
+                            targetDecl = *resolved;
+                            break;
+                        }
+                    }
+                }
+                if (targetDecl.has_value()) break;
+            }
+        }
+    }
+
+    if (!targetDecl.has_value()) {
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* classDecl = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                if (classDecl->getName() == ident && (!targetPrecededByDot || (targetOffset >= classDecl->getSpan().start.offset && targetOffset <= classDecl->getSpan().end.offset))) {
+                    ScopeDeclInfo info;
+                    info.kind = ScopeDeclInfo::Kind::Class;
+                    info.name = ident;
+                    info.uri = doc.uri();
+                    info.nameSpan = findIdentifierSpan(doc, ident, classDecl->getSpan());
+                    info.fullSpan = classDecl->getSpan();
+                    targetDecl = std::move(info);
+                    break;
+                }
+                for (const auto& field : classDecl->getFields()) {
+                    if (field.name == ident) {
+                        ScopeDeclInfo info;
+                        info.kind = ScopeDeclInfo::Kind::Field;
+                        info.name = ident;
+                        info.uri = doc.uri();
+                        info.containerName = classDecl->getName();
+                        info.nameSpan = field.span;
+                        info.fullSpan = field.span;
+                        targetDecl = std::move(info);
+                        break;
+                    }
+                }
+                if (targetDecl.has_value()) break;
+                for (const auto& method : classDecl->getMethods()) {
+                    if (method && method->getName() == ident) {
+                        ScopeDeclInfo info;
+                        info.kind = ScopeDeclInfo::Kind::Method;
+                        info.name = ident;
+                        info.uri = doc.uri();
+                        info.containerName = classDecl->getName();
+                        info.nameSpan = findIdentifierSpan(doc, ident, method->getSpan());
+                        info.fullSpan = method->getSpan();
+                        targetDecl = std::move(info);
+                        break;
+                    }
+                }
+                if (targetDecl.has_value()) break;
+            } else if (const auto* enumDecl = dynamic_cast<const ast::EnumDecl*>(decl.get())) {
+                if (enumDecl->getName() == ident) {
+                    ScopeDeclInfo info;
+                    info.kind = ScopeDeclInfo::Kind::Enum;
+                    info.name = ident;
+                    info.uri = doc.uri();
+                    info.nameSpan = findIdentifierSpan(doc, ident, enumDecl->getSpan());
+                    info.fullSpan = enumDecl->getSpan();
+                    targetDecl = std::move(info);
+                    break;
+                }
+                for (const auto& member : enumDecl->getMembers()) {
+                    if (member.name == ident) {
+                        ScopeDeclInfo info;
+                        info.kind = ScopeDeclInfo::Kind::EnumMember;
+                        info.name = ident;
+                        info.uri = doc.uri();
+                        info.containerName = enumDecl->getName();
+                        info.nameSpan = member.span;
+                        info.fullSpan = member.span;
+                        targetDecl = std::move(info);
+                        break;
+                    }
+                }
+                if (targetDecl.has_value()) break;
+            } else if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                if (fnDecl->getName() == ident) {
+                    ScopeDeclInfo info;
+                    info.kind = ScopeDeclInfo::Kind::Function;
+                    info.name = ident;
+                    info.uri = doc.uri();
+                    info.nameSpan = findIdentifierSpan(doc, ident, fnDecl->getSpan());
+                    info.fullSpan = fnDecl->getSpan();
+                    targetDecl = std::move(info);
+                    break;
+                }
+            } else if (const auto* varDecl = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+                if (varDecl->getName() == ident) {
+                    ScopeDeclInfo info;
+                    info.kind = ScopeDeclInfo::Kind::Variable;
+                    info.name = ident;
+                    info.uri = doc.uri();
+                    info.nameSpan = varDecl->getNameSpan().isValid() ? varDecl->getNameSpan() : findIdentifierSpan(doc, ident, varDecl->getSpan());
+                    info.fullSpan = varDecl->getSpan();
+                    targetDecl = std::move(info);
+                    break;
+                }
+            } else if (const auto* constDecl = dynamic_cast<const ast::ConstDecl*>(decl.get())) {
+                if (constDecl->getName() == ident) {
+                    ScopeDeclInfo info;
+                    info.kind = ScopeDeclInfo::Kind::Constant;
+                    info.name = ident;
+                    info.uri = doc.uri();
+                    info.nameSpan = constDecl->getNameSpan().isValid() ? constDecl->getNameSpan() : findIdentifierSpan(doc, ident, constDecl->getSpan());
+                    info.fullSpan = constDecl->getSpan();
+                    targetDecl = std::move(info);
+                    break;
+                }
+            } else if (const auto* defDecl = dynamic_cast<const ast::DefineDecl*>(decl.get())) {
+                if (defDecl->getName() == ident) {
+                    ScopeDeclInfo info;
+                    info.kind = ScopeDeclInfo::Kind::Define;
+                    info.name = ident;
+                    info.uri = doc.uri();
+                    info.nameSpan = findIdentifierSpan(doc, ident, defDecl->getSpan());
+                    info.fullSpan = defDecl->getSpan();
+                    targetDecl = std::move(info);
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!targetDecl.has_value()) {
+        if (docManager) {
+            for (const auto& decl : ast.declarations) {
+                if (!decl) continue;
+                if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+                    for (const auto& sym : imp->getSymbols()) {
+                        if (sym.getEffectiveName() == ident) {
+                            std::string impPath = imp->getModulePath();
+                            std::string impStem = std::filesystem::path(impPath).stem().string();
+
+                            for (const auto& u : docManager->openUris()) {
+                                if (u == doc.uri()) continue;
+                                std::string uStem = std::filesystem::path(uriToPath(u)).stem().string();
+                                if (uStem == impStem || u.find(impStem) != std::string::npos) {
+                                    auto destDoc = docManager->getDocument(u);
+                                    if (destDoc.has_value()) {
+                                        diag::SourceManager dSm;
+                                        diag::FileId dFid = dSm.addBuffer(uriToPath(destDoc->uri()), destDoc->text());
+                                        diag::DiagnosticEmitter dEmitter(dSm, diag::ColorMode::Never);
+                                        lexer::Lexer dLexer(dFid, destDoc->text());
+                                        parser::Parser dParser(dLexer, &dEmitter);
+                                        auto dAst = dParser.parseModule(uStem);
+                                        for (const auto& dDecl : dAst.declarations) {
+                                            if (!dDecl) continue;
+                                            if (const auto* fn = dynamic_cast<const ast::FnDecl*>(dDecl.get())) {
+                                                if (fn->getName() == ident) {
+                                                    Range r = findIdentifierRange(*destDoc, ident, fn->getSpan());
+                                                    return findReferences(*destDoc, r.start, includeDeclaration, docManager);
+                                                }
+                                            } else if (const auto* vd = dynamic_cast<const ast::VarDecl*>(dDecl.get())) {
+                                                if (vd->getName() == ident) {
+                                                    Range r = findIdentifierRange(*destDoc, ident, vd->getSpan());
+                                                    return findReferences(*destDoc, r.start, includeDeclaration, docManager);
+                                                }
+                                            } else if (const auto* cd = dynamic_cast<const ast::ConstDecl*>(dDecl.get())) {
+                                                if (cd->getName() == ident) {
+                                                    Range r = findIdentifierRange(*destDoc, ident, cd->getSpan());
+                                                    return findReferences(*destDoc, r.start, includeDeclaration, docManager);
+                                                }
+                                            } else if (const auto* cls = dynamic_cast<const ast::ClassDecl*>(dDecl.get())) {
+                                                if (cls->getName() == ident) {
+                                                    Range r = findIdentifierRange(*destDoc, ident, cls->getSpan());
+                                                    return findReferences(*destDoc, r.start, includeDeclaration, docManager);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return {};
+    }
+
+    std::vector<Location> results;
+
+    if (targetDecl->kind == ScopeDeclInfo::Kind::LocalVar || targetDecl->kind == ScopeDeclInfo::Kind::Param) {
+        if (includeDeclaration && targetDecl->nameSpan.isValid()) {
+            results.push_back(Location{doc.uri(), spanToRange(doc, targetDecl->nameSpan)});
+        }
+
+        if (activeFnScope && targetDecl->enclosingFnSpan.isValid()) {
+            for (size_t i = 0; i < tokens.size(); ++i) {
+                const auto& tok = tokens[i];
+                if (tok.span.start.offset >= targetDecl->enclosingFnSpan.start.offset &&
+                    tok.span.end.offset <= targetDecl->enclosingFnSpan.end.offset) {
+                    if (tok.is(lexer::TokenKind::Identifier) && tok.lexeme == targetDecl->name) {
+                        bool precededByDot = (i > 0 && tokens[i - 1].is(lexer::TokenKind::Dot));
+                        if (precededByDot) continue;
+
+                        if (targetDecl->nameSpan.isValid() &&
+                            tok.span.start.offset == targetDecl->nameSpan.start.offset) {
+                            continue;
+                        }
+
+                        auto resolved = activeFnScope->findInnermostScope(tok.span.start.offset)->lookup(targetDecl->name, tok.span.start.offset);
+                        if (resolved && resolved->nameSpan.start.offset == targetDecl->nameSpan.start.offset) {
+                            results.push_back(Location{doc.uri(), spanToRange(doc, tok.span)});
+                        }
+                    }
+                }
+            }
+        }
+    } else if (targetDecl->kind == ScopeDeclInfo::Kind::Field ||
+               targetDecl->kind == ScopeDeclInfo::Kind::Method ||
+               targetDecl->kind == ScopeDeclInfo::Kind::EnumMember) {
+        if (includeDeclaration && targetDecl->nameSpan.isValid()) {
+            results.push_back(Location{targetDecl->uri, spanToRange(doc, targetDecl->nameSpan)});
+        }
+
+        auto scanDocForMember = [&](const Document& d) {
+            diag::SourceManager dSm;
+            diag::FileId dFid = dSm.addBuffer(uriToPath(d.uri()), d.text());
+            lexer::Lexer dLexer(dFid, d.text());
+            auto dTokens = dLexer.tokenizeAll();
+
+            for (size_t i = 0; i < dTokens.size(); ++i) {
+                const auto& tok = dTokens[i];
+                if (tok.is(lexer::TokenKind::Identifier) && tok.lexeme == targetDecl->name) {
+                    if (d.uri() == targetDecl->uri && targetDecl->nameSpan.isValid() &&
+                        tok.span.start.offset == targetDecl->nameSpan.start.offset) {
+                        continue;
+                    }
+                    bool precededByDot = (i > 0 && dTokens[i - 1].is(lexer::TokenKind::Dot));
+                    if (precededByDot) {
+                        results.push_back(Location{d.uri(), spanToRange(d, tok.span)});
+                    }
+                }
+            }
+        };
+
+        scanDocForMember(doc);
+        if (docManager) {
+            for (const auto& u : docManager->openUris()) {
+                if (u != doc.uri()) {
+                    auto oDoc = docManager->getDocument(u);
+                    if (oDoc.has_value()) {
+                        scanDocForMember(*oDoc);
+                    }
+                }
+            }
+        }
+    } else {
+        if (includeDeclaration && targetDecl->nameSpan.isValid()) {
+            results.push_back(Location{doc.uri(), spanToRange(doc, targetDecl->nameSpan)});
+        }
+
+        std::vector<std::pair<diag::SourceSpan, std::unique_ptr<LexicalScopeNode>>> docFnScopes;
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+                docFnScopes.push_back({fnDecl->getSpan(), buildFnScopeTree(doc, fnDecl)});
+            } else if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                for (const auto& m : cd->getMethods()) {
+                    if (m) {
+                        docFnScopes.push_back({m->getSpan(), buildFnScopeTree(doc, m.get())});
+                    }
+                }
+            }
+        }
+
+        for (size_t i = 0; i < tokens.size(); ++i) {
+            const auto& tok = tokens[i];
+            if (tok.is(lexer::TokenKind::Identifier) && tok.lexeme == targetDecl->name) {
+                if (targetDecl->nameSpan.isValid() && tok.span.start.offset == targetDecl->nameSpan.start.offset) {
+                    continue;
+                }
+                bool precededByDot = (i > 0 && tokens[i - 1].is(lexer::TokenKind::Dot));
+                if (precededByDot) continue;
+
+                bool shadowed = false;
+                for (const auto& [span, scope] : docFnScopes) {
+                    if (tok.span.start.offset >= span.start.offset && tok.span.end.offset <= span.end.offset) {
+                        auto local = scope->findInnermostScope(tok.span.start.offset)->lookup(targetDecl->name, tok.span.start.offset);
+                        if (local != nullptr) {
+                            shadowed = true;
+                            break;
+                        }
+                    }
+                }
+                if (!shadowed) {
+                    results.push_back(Location{doc.uri(), spanToRange(doc, tok.span)});
+                }
+            }
+        }
+
+        if (docManager) {
+            std::filesystem::path currentPath(pathStr);
+            std::string currentStem = currentPath.stem().string();
+
+            for (const auto& openUri : docManager->openUris()) {
+                if (openUri == doc.uri()) continue;
+                auto otherDocOpt = docManager->getDocument(openUri);
+                if (!otherDocOpt.has_value()) continue;
+                const auto& otherDoc = *otherDocOpt;
+
+                std::string otherPathStr = uriToPath(otherDoc.uri());
+                diag::SourceManager oSm;
+                diag::FileId oFileId = oSm.addBuffer(otherPathStr, otherDoc.text());
+                diag::DiagnosticEmitter oEmitter(oSm, diag::ColorMode::Never);
+                lexer::Lexer oLexer(oFileId, otherDoc.text());
+                parser::Parser oParser(oLexer, &oEmitter);
+                auto oAst = oParser.parseModule(std::filesystem::path(otherPathStr).stem().string());
+
+                bool importsSymbol = false;
+                diag::SourceSpan importSymSpan{};
+
+                for (const auto& d : oAst.declarations) {
+                    if (!d) continue;
+                    if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(d.get())) {
+                        std::string modPath = imp->getModulePath();
+                        std::string modStem = std::filesystem::path(modPath).stem().string();
+                        bool moduleMatches = (modStem == currentStem || modPath == currentPath.filename().string() || modPath == currentStem);
+
+                        if (moduleMatches) {
+                            if (imp->isSelective()) {
+                                for (const auto& sym : imp->getSymbols()) {
+                                    if (sym.originalName == targetDecl->name) {
+                                        importsSymbol = true;
+                                        importSymSpan = sym.span.isValid() ? sym.span : imp->getSpan();
+                                        break;
+                                    }
+                                }
+                            } else {
+                                importsSymbol = true;
+                            }
+                        }
+                    }
+                    if (importsSymbol) break;
+                }
+
+                if (!importsSymbol) continue;
+
+                if (importSymSpan.isValid()) {
+                    results.push_back(Location{otherDoc.uri(), spanToRange(otherDoc, importSymSpan)});
+                }
+
+                lexer::Lexer oTokLexer(oFileId, otherDoc.text());
+                auto oTokens = oTokLexer.tokenizeAll();
+
+                std::vector<std::pair<diag::SourceSpan, std::unique_ptr<LexicalScopeNode>>> oFnScopes;
+                for (const auto& d : oAst.declarations) {
+                    if (!d) continue;
+                    if (const auto* fnDecl = dynamic_cast<const ast::FnDecl*>(d.get())) {
+                        oFnScopes.push_back({fnDecl->getSpan(), buildFnScopeTree(otherDoc, fnDecl)});
+                    } else if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(d.get())) {
+                        for (const auto& m : cd->getMethods()) {
+                            if (m) {
+                                oFnScopes.push_back({m->getSpan(), buildFnScopeTree(otherDoc, m.get())});
+                            }
+                        }
+                    }
+                }
+
+                for (size_t i = 0; i < oTokens.size(); ++i) {
+                    const auto& tok = oTokens[i];
+                    if (tok.is(lexer::TokenKind::Identifier) && tok.lexeme == targetDecl->name) {
+                        if (importSymSpan.isValid() && tok.span.start.offset == importSymSpan.start.offset) {
+                            continue;
+                        }
+                        bool precededByDot = (i > 0 && oTokens[i - 1].is(lexer::TokenKind::Dot));
+                        if (precededByDot) continue;
+
+                        bool shadowed = false;
+                        for (const auto& [span, scope] : oFnScopes) {
+                            if (tok.span.start.offset >= span.start.offset && tok.span.end.offset <= span.end.offset) {
+                                auto local = scope->findInnermostScope(tok.span.start.offset)->lookup(targetDecl->name, tok.span.start.offset);
+                                if (local != nullptr) {
+                                    shadowed = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!shadowed) {
+                            results.push_back(Location{otherDoc.uri(), spanToRange(otherDoc, tok.span)});
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    std::sort(results.begin(), results.end(), [](const Location& a, const Location& b) {
+        if (a.uri != b.uri) return a.uri < b.uri;
+        if (a.range.start.line != b.range.start.line) return a.range.start.line < b.range.start.line;
+        return a.range.start.character < b.range.start.character;
+    });
+
+    results.erase(std::unique(results.begin(), results.end(), [](const Location& a, const Location& b) {
+        return a.uri == b.uri && a.range == b.range;
+    }), results.end());
+
+    return results;
 }
 
 std::optional<Hover> Analyzer::getHover(
