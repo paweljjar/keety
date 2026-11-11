@@ -3352,6 +3352,436 @@ std::vector<DocumentSymbol> Analyzer::getDocumentSymbols(const Document& doc) {
     return symbols;
 }
 
+namespace {
+
+enum SemanticTokenTypeIdx : uint32_t {
+    SemType = 0,
+    SemClass = 1,
+    SemInterface = 2,
+    SemEnum = 3,
+    SemEnumMember = 4,
+    SemFunction = 5,
+    SemMethod = 6,
+    SemProperty = 7,
+    SemVariable = 8,
+    SemParameter = 9,
+    SemKeyword = 10,
+    SemString = 11,
+    SemNumber = 12,
+    SemOperator = 13,
+    SemComment = 14
+};
+
+enum SemanticTokenModBit : uint32_t {
+    ModNone = 0,
+    ModDeclaration = 1 << 0,
+    ModReadonly = 1 << 1,
+    ModStatic = 1 << 2,
+    ModDefaultLibrary = 1 << 3
+};
+
+struct RawTokenItem {
+    uint32_t line = 0;
+    uint32_t character = 0;
+    uint32_t length = 0;
+    uint32_t tokenType = 0;
+    uint32_t tokenModifiers = 0;
+};
+
+void addSemanticSpanToken(
+    const Document& doc,
+    std::vector<RawTokenItem>& out,
+    const diag::SourceSpan& span,
+    uint32_t type,
+    uint32_t mods
+) {
+    if (!span.isValid()) return;
+    Range r = spanToRange(doc, span);
+    if (r.start.line == r.end.line) {
+        if (r.end.character > r.start.character) {
+            out.push_back(RawTokenItem{r.start.line, r.start.character, r.end.character - r.start.character, type, mods});
+        }
+    } else {
+        const std::string& text = doc.text();
+        size_t startOff = span.start.offset;
+        size_t endOff = span.end.offset;
+        if (endOff > text.size()) endOff = text.size();
+        if (startOff >= endOff) return;
+
+        size_t cur = startOff;
+        uint32_t curLine = r.start.line;
+        uint32_t curCol = r.start.character;
+
+        while (cur < endOff) {
+            size_t nextNl = text.find('\n', cur);
+            size_t lineEnd = (nextNl == std::string::npos || nextNl >= endOff) ? endOff : nextNl;
+            if (lineEnd > cur) {
+                out.push_back(RawTokenItem{curLine, curCol, static_cast<uint32_t>(lineEnd - cur), type, mods});
+            }
+            if (nextNl == std::string::npos || nextNl >= endOff) {
+                break;
+            }
+            cur = nextNl + 1;
+            curLine++;
+            curCol = 0;
+        }
+    }
+}
+
+} // namespace
+
+SemanticTokens Analyzer::getSemanticTokens(const Document& doc) {
+    diag::SourceManager sm;
+    std::string pathStr = uriToPath(doc.uri());
+    diag::FileId fileId = sm.addBuffer(pathStr, doc.text());
+
+    lexer::Lexer lexer(fileId, doc.text());
+    lexer.setCaptureComments(true);
+    auto tokens = lexer.tokenizeAll();
+    auto comments = lexer.takeCapturedComments();
+
+    std::filesystem::path fsPath(pathStr);
+    std::string moduleName = fsPath.stem().string();
+
+    diag::DiagnosticEmitter emitter(sm, diag::ColorMode::Never);
+    lexer::Lexer pLexer(fileId, doc.text());
+    parser::Parser parser(pLexer, &emitter);
+    auto ast = parser.parseModule(moduleName);
+
+    std::unordered_set<std::string> classNames;
+    std::unordered_set<std::string> enumNames;
+    std::unordered_set<std::string> enumMemberNames;
+    std::unordered_set<std::string> functionNames;
+    std::unordered_set<std::string> constNames;
+    std::unordered_set<std::string> varNames;
+    std::unordered_set<std::string> methodNames;
+    std::unordered_set<std::string> fieldNames;
+    std::unordered_set<std::string> importedNames;
+
+    for (const auto& decl : ast.declarations) {
+        if (!decl) continue;
+        if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+            classNames.insert(cd->getName());
+            for (const auto& f : cd->getFields()) {
+                fieldNames.insert(f.name);
+            }
+            for (const auto& m : cd->getMethods()) {
+                if (m) methodNames.insert(m->getName());
+            }
+        } else if (const auto* ed = dynamic_cast<const ast::EnumDecl*>(decl.get())) {
+            enumNames.insert(ed->getName());
+            for (const auto& m : ed->getMembers()) {
+                enumMemberNames.insert(m.name);
+            }
+        } else if (const auto* fn = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+            functionNames.insert(fn->getName());
+        } else if (const auto* kd = dynamic_cast<const ast::ConstDecl*>(decl.get())) {
+            constNames.insert(kd->getName());
+        } else if (const auto* vd = dynamic_cast<const ast::VarDecl*>(decl.get())) {
+            varNames.insert(vd->getName());
+        } else if (const auto* imp = dynamic_cast<const ast::ImportDecl*>(decl.get())) {
+            for (const auto& sym : imp->getSymbols()) {
+                importedNames.insert(sym.getEffectiveName());
+            }
+        }
+    }
+
+    std::vector<std::unique_ptr<LexicalScopeNode>> fnScopes;
+    for (const auto& decl : ast.declarations) {
+        if (!decl) continue;
+        if (const auto* fn = dynamic_cast<const ast::FnDecl*>(decl.get())) {
+            fnScopes.push_back(buildFnScopeTree(doc, fn));
+        } else if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+            for (const auto& m : cd->getMethods()) {
+                if (m) {
+                    fnScopes.push_back(buildFnScopeTree(doc, m.get()));
+                }
+            }
+        }
+    }
+
+    auto lookupInScopes = [&](size_t offset, const std::string& name) -> const ScopeDeclInfo* {
+        for (const auto& scope : fnScopes) {
+            if (offset >= scope->span.start.offset && offset <= scope->span.end.offset) {
+                const auto* inner = scope->findInnermostScope(offset);
+                if (inner) {
+                    return inner->lookup(name, offset);
+                }
+            }
+        }
+        return nullptr;
+    };
+
+    auto isMethodDecl = [&](size_t offset, const std::string& name) -> bool {
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                if (offset >= cd->getSpan().start.offset && offset <= cd->getSpan().end.offset) {
+                    for (const auto& m : cd->getMethods()) {
+                        if (m && m->getName() == name) return true;
+                    }
+                }
+            }
+        }
+        return false;
+    };
+
+    auto isFieldDecl = [&](size_t offset, const std::string& name) -> bool {
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* cd = dynamic_cast<const ast::ClassDecl*>(decl.get())) {
+                if (offset >= cd->getSpan().start.offset && offset <= cd->getSpan().end.offset) {
+                    for (const auto& f : cd->getFields()) {
+                        if (f.name == name) return true;
+                    }
+                }
+            }
+        }
+        return false;
+    };
+
+    auto isEnumMemberDecl = [&](size_t offset, const std::string& name) -> bool {
+        for (const auto& decl : ast.declarations) {
+            if (!decl) continue;
+            if (const auto* ed = dynamic_cast<const ast::EnumDecl*>(decl.get())) {
+                if (offset >= ed->getSpan().start.offset && offset <= ed->getSpan().end.offset) {
+                    for (const auto& m : ed->getMembers()) {
+                        if (m.name == name) return true;
+                    }
+                }
+            }
+        }
+        return false;
+    };
+
+    std::vector<RawTokenItem> rawTokens;
+
+    // 1. Captured comments
+    for (const auto& c : comments) {
+        addSemanticSpanToken(doc, rawTokens, c.span, SemComment, ModNone);
+    }
+
+    // 2. Lexical tokens
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        const auto& tok = tokens[i];
+        if (tok.isOneOf(lexer::TokenKind::Eof, lexer::TokenKind::Invalid)) {
+            continue;
+        }
+
+        // 2a. Built-in types
+        if (tok.isOneOf(lexer::TokenKind::KwBool, lexer::TokenKind::KwInt, lexer::TokenKind::KwFloat,
+                        lexer::TokenKind::KwChar, lexer::TokenKind::KwString, lexer::TokenKind::KwVoid,
+                        lexer::TokenKind::KwError, lexer::TokenKind::KwArray, lexer::TokenKind::KwMap)) {
+            addSemanticSpanToken(doc, rawTokens, tok.span, SemType, ModDefaultLibrary);
+            continue;
+        }
+
+        // 2b. Keywords
+        if (lexer::isKeyword(tok.kind)) {
+            addSemanticSpanToken(doc, rawTokens, tok.span, SemKeyword, ModNone);
+            continue;
+        }
+
+        // 2c. String and char literals
+        if (tok.isOneOf(lexer::TokenKind::StringLiteral, lexer::TokenKind::CharLiteral,
+                        lexer::TokenKind::TemplateNoSub, lexer::TokenKind::TemplateHead,
+                        lexer::TokenKind::TemplateMiddle, lexer::TokenKind::TemplateTail)) {
+            addSemanticSpanToken(doc, rawTokens, tok.span, SemString, ModNone);
+            continue;
+        }
+
+        // 2d. Numbers
+        if (tok.isOneOf(lexer::TokenKind::IntLiteral, lexer::TokenKind::FloatLiteral)) {
+            addSemanticSpanToken(doc, rawTokens, tok.span, SemNumber, ModNone);
+            continue;
+        }
+
+        // 2e. Operators
+        if (tok.isOneOf(lexer::TokenKind::Plus, lexer::TokenKind::Minus, lexer::TokenKind::Star,
+                        lexer::TokenKind::Slash, lexer::TokenKind::Percent, lexer::TokenKind::PlusPlus,
+                        lexer::TokenKind::MinusMinus, lexer::TokenKind::Question,
+                        lexer::TokenKind::EqualEqual, lexer::TokenKind::ExclaimEqual,
+                        lexer::TokenKind::Less, lexer::TokenKind::LessEqual,
+                        lexer::TokenKind::Greater, lexer::TokenKind::GreaterEqual,
+                        lexer::TokenKind::AmpAmp, lexer::TokenKind::PipePipe,
+                        lexer::TokenKind::Exclaim, lexer::TokenKind::Pipe,
+                        lexer::TokenKind::Equal, lexer::TokenKind::PlusEqual,
+                        lexer::TokenKind::MinusEqual, lexer::TokenKind::StarEqual,
+                        lexer::TokenKind::SlashEqual, lexer::TokenKind::PercentEqual,
+                        lexer::TokenKind::Arrow)) {
+            addSemanticSpanToken(doc, rawTokens, tok.span, SemOperator, ModNone);
+            continue;
+        }
+
+        // Skip punctuation tokens (dots, commas, colons, semicolons, parens, brackets, braces)
+        if (!tok.is(lexer::TokenKind::Identifier)) {
+            continue;
+        }
+
+        // 2f. Identifiers classification
+        std::string ident = std::string(tok.lexeme);
+        uint32_t type = SemVariable;
+        uint32_t mods = ModNone;
+
+        lexer::TokenKind declKw = lexer::TokenKind::Invalid;
+        if (i > 0) {
+            if (tokens[i - 1].is(lexer::TokenKind::KwMut) && i >= 2) {
+                declKw = tokens[i - 2].kind;
+            } else {
+                declKw = tokens[i - 1].kind;
+            }
+        }
+
+        if (declKw == lexer::TokenKind::KwFn) {
+            if (isMethodDecl(tok.span.start.offset, ident)) {
+                type = SemMethod;
+            } else {
+                type = SemFunction;
+            }
+            mods = ModDeclaration;
+        } else if (declKw == lexer::TokenKind::KwClass) {
+            type = SemClass;
+            mods = ModDeclaration;
+        } else if (declKw == lexer::TokenKind::KwEnum) {
+            type = SemEnum;
+            mods = ModDeclaration;
+        } else if (declKw == lexer::TokenKind::KwLet) {
+            if (isFieldDecl(tok.span.start.offset, ident)) {
+                type = SemProperty;
+            } else {
+                type = SemVariable;
+            }
+            mods = ModDeclaration;
+        } else if (declKw == lexer::TokenKind::KwConst) {
+            if (isFieldDecl(tok.span.start.offset, ident)) {
+                type = SemProperty;
+            } else {
+                type = SemVariable;
+            }
+            mods = ModDeclaration | ModReadonly;
+        } else if (isEnumMemberDecl(tok.span.start.offset, ident)) {
+            type = SemEnumMember;
+            mods = ModDeclaration;
+        } else if (i > 0 && tokens[i - 1].is(lexer::TokenKind::Dot)) {
+            std::string receiver;
+            if (i >= 2 && tokens[i - 2].is(lexer::TokenKind::Identifier)) {
+                receiver = std::string(tokens[i - 2].lexeme);
+            } else if (i >= 2 && tokens[i - 2].is(lexer::TokenKind::KwThis)) {
+                receiver = "this";
+            }
+
+            bool followedByParen = (i + 1 < tokens.size() && tokens[i + 1].is(lexer::TokenKind::LParen));
+            bool isStdlib = (receiver == "io" || receiver == "fs" || receiver == "sys" ||
+                             receiver == "math" || receiver == "time" || receiver == "json" ||
+                             receiver == "net" || receiver == "test" || receiver == "crypto");
+
+            if (enumNames.count(receiver)) {
+                type = SemEnumMember;
+            } else if (followedByParen) {
+                type = SemMethod;
+                if (isStdlib) mods |= ModDefaultLibrary;
+            } else {
+                type = SemProperty;
+                if (isStdlib) mods |= ModDefaultLibrary;
+            }
+        } else if (i + 1 < tokens.size() && tokens[i + 1].is(lexer::TokenKind::LParen)) {
+            if (classNames.count(ident)) {
+                type = SemClass;
+            } else if (getStdlibMemberDoc(ident).has_value()) {
+                type = SemFunction;
+                mods |= ModDefaultLibrary;
+            } else if (methodNames.count(ident) && isMethodDecl(tok.span.start.offset, ident)) {
+                type = SemMethod;
+            } else {
+                type = SemFunction;
+            }
+        } else if (i > 0 && tokens[i - 1].isOneOf(lexer::TokenKind::Colon, lexer::TokenKind::KwAs, lexer::TokenKind::KwInherits)) {
+            if (classNames.count(ident)) {
+                type = SemClass;
+            } else if (enumNames.count(ident)) {
+                type = SemEnum;
+            } else {
+                type = SemType;
+            }
+        } else if (ident == "io" || ident == "fs" || ident == "sys" || ident == "math" ||
+                   ident == "time" || ident == "json" || ident == "net" || ident == "test" || ident == "crypto") {
+            type = SemVariable;
+            mods |= ModDefaultLibrary;
+        } else if (const auto* sDecl = lookupInScopes(tok.span.start.offset, ident)) {
+            if (sDecl->kind == ScopeDeclInfo::Kind::Param) {
+                type = SemParameter;
+            } else {
+                type = SemVariable;
+            }
+            if (sDecl->nameSpan.isValid() &&
+                tok.span.start.offset >= sDecl->nameSpan.start.offset &&
+                tok.span.end.offset <= sDecl->nameSpan.end.offset) {
+                mods |= ModDeclaration;
+            }
+        } else if (classNames.count(ident)) {
+            type = SemClass;
+        } else if (enumNames.count(ident)) {
+            type = SemEnum;
+        } else if (enumMemberNames.count(ident)) {
+            type = SemEnumMember;
+        } else if (functionNames.count(ident)) {
+            type = SemFunction;
+        } else if (constNames.count(ident)) {
+            type = SemVariable;
+            mods |= ModReadonly;
+        } else if (varNames.count(ident)) {
+            type = SemVariable;
+        } else if (fieldNames.count(ident)) {
+            type = SemProperty;
+        } else if (importedNames.count(ident)) {
+            type = SemVariable;
+        } else if (getStdlibMemberDoc(ident).has_value()) {
+            type = SemVariable;
+            mods |= ModDefaultLibrary;
+        } else {
+            type = SemVariable;
+        }
+
+        addSemanticSpanToken(doc, rawTokens, tok.span, type, mods);
+    }
+
+    // 3. Sort raw tokens by line ASC, then character ASC
+    std::sort(rawTokens.begin(), rawTokens.end(), [](const RawTokenItem& a, const RawTokenItem& b) {
+        if (a.line != b.line) return a.line < b.line;
+        return a.character < b.character;
+    });
+
+    // Deduplicate any identical positions
+    rawTokens.erase(std::unique(rawTokens.begin(), rawTokens.end(), [](const RawTokenItem& a, const RawTokenItem& b) {
+        return a.line == b.line && a.character == b.character;
+    }), rawTokens.end());
+
+    // 4. Compute standard LSP 5-integer delta encoding
+    std::vector<uint32_t> data;
+    data.reserve(rawTokens.size() * 5);
+
+    uint32_t prevLine = 0;
+    uint32_t prevChar = 0;
+
+    for (const auto& tok : rawTokens) {
+        uint32_t deltaLine = tok.line - prevLine;
+        uint32_t deltaChar = (deltaLine == 0) ? (tok.character - prevChar) : tok.character;
+
+        data.push_back(deltaLine);
+        data.push_back(deltaChar);
+        data.push_back(tok.length);
+        data.push_back(tok.tokenType);
+        data.push_back(tok.tokenModifiers);
+
+        prevLine = tok.line;
+        prevChar = tok.character;
+    }
+
+    SemanticTokens result;
+    result.data = std::move(data);
+    return result;
+}
+
 std::vector<TextEdit> Analyzer::format(const Document& doc, const FormattingOptions& options) {
     keety::fmt::FormatterOptions fmtOpts;
     if (options.tabSize > 0) {

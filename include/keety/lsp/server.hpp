@@ -56,6 +56,7 @@ private:
     JsonValue handleSignatureHelp(const JsonValue& params);
     JsonValue handleCompletion(const JsonValue& params);
     JsonValue handleDocumentSymbol(const JsonValue& params);
+    JsonValue handleSemanticTokensFull(const JsonValue& params);
     JsonValue handleFormatting(const JsonValue& params);
     JsonValue handleCodeAction(const JsonValue& params);
 

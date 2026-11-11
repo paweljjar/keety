@@ -567,6 +567,124 @@ SignatureHelpParams SignatureHelpParams::fromJson(const JsonValue& j) {
     return p;
 }
 
+SemanticTokensLegend SemanticTokensLegend::defaultLegend() {
+    return SemanticTokensLegend{
+        {
+            "type",
+            "class",
+            "interface",
+            "enum",
+            "enumMember",
+            "function",
+            "method",
+            "property",
+            "variable",
+            "parameter",
+            "keyword",
+            "string",
+            "number",
+            "operator",
+            "comment"
+        },
+        {
+            "declaration",
+            "readonly",
+            "static",
+            "defaultLibrary"
+        }
+    };
+}
+
+JsonValue SemanticTokensLegend::toJson() const {
+    JsonValue::Object obj;
+    JsonValue::Array typesArr;
+    typesArr.reserve(tokenTypes.size());
+    for (const auto& t : tokenTypes) {
+        typesArr.push_back(JsonValue(t));
+    }
+    obj["tokenTypes"] = JsonValue(std::move(typesArr));
+
+    JsonValue::Array modsArr;
+    modsArr.reserve(tokenModifiers.size());
+    for (const auto& m : tokenModifiers) {
+        modsArr.push_back(JsonValue(m));
+    }
+    obj["tokenModifiers"] = JsonValue(std::move(modsArr));
+    return JsonValue(std::move(obj));
+}
+
+SemanticTokensLegend SemanticTokensLegend::fromJson(const JsonValue& j) {
+    SemanticTokensLegend leg;
+    if (auto* obj = asObject(j)) {
+        if (auto* tt = findField(*obj, "tokenTypes"); tt && tt->is_array()) {
+            for (const auto& item : std::get<JsonValue::Array>(tt->value)) {
+                if (item.is_string()) {
+                    leg.tokenTypes.push_back(std::get<std::string>(item.value));
+                }
+            }
+        }
+        if (auto* tm = findField(*obj, "tokenModifiers"); tm && tm->is_array()) {
+            for (const auto& item : std::get<JsonValue::Array>(tm->value)) {
+                if (item.is_string()) {
+                    leg.tokenModifiers.push_back(std::get<std::string>(item.value));
+                }
+            }
+        }
+    }
+    return leg;
+}
+
+JsonValue SemanticTokensParams::toJson() const {
+    JsonValue::Object obj;
+    JsonValue::Object docObj;
+    docObj["uri"] = JsonValue(textDocument.uri);
+    obj["textDocument"] = JsonValue(std::move(docObj));
+    return JsonValue(std::move(obj));
+}
+
+SemanticTokensParams SemanticTokensParams::fromJson(const JsonValue& j) {
+    SemanticTokensParams p;
+    if (auto* obj = asObject(j)) {
+        if (auto* docNode = findField(*obj, "textDocument")) {
+            p.textDocument = TextDocumentIdentifier::fromJson(*docNode);
+        }
+    }
+    return p;
+}
+
+JsonValue SemanticTokens::toJson() const {
+    JsonValue::Object obj;
+    if (resultId.has_value()) {
+        obj["resultId"] = JsonValue(*resultId);
+    }
+    JsonValue::Array arr;
+    arr.reserve(data.size());
+    for (uint32_t val : data) {
+        arr.push_back(JsonValue(int64_t(val)));
+    }
+    obj["data"] = JsonValue(std::move(arr));
+    return JsonValue(std::move(obj));
+}
+
+SemanticTokens SemanticTokens::fromJson(const JsonValue& j) {
+    SemanticTokens st;
+    if (auto* obj = asObject(j)) {
+        if (auto* rid = findField(*obj, "resultId"); rid && rid->is_string()) {
+            st.resultId = std::get<std::string>(rid->value);
+        }
+        if (auto* d = findField(*obj, "data"); d && d->is_array()) {
+            for (const auto& item : std::get<JsonValue::Array>(d->value)) {
+                if (item.is_int()) {
+                    st.data.push_back(static_cast<uint32_t>(std::get<int64_t>(item.value)));
+                } else if (item.is_number()) {
+                    st.data.push_back(static_cast<uint32_t>(std::get<double>(item.value)));
+                }
+            }
+        }
+    }
+    return st;
+}
+
 JsonValue PublishDiagnosticsParams::toJson() const {
     JsonValue::Object obj;
     obj["uri"] = JsonValue(uri);

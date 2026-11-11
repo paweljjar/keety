@@ -138,6 +138,7 @@ add_executable(keety_unit_tests
     unit/test_lsp_references.cpp
     unit/test_lsp_rename.cpp
     unit/test_lsp_signature_help.cpp
+    unit/test_lsp_semantic_tokens.cpp
 )
 
 target_link_libraries(keety_unit_tests PRIVATE

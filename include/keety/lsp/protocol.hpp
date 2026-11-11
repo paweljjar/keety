@@ -328,6 +328,30 @@ struct SignatureHelpParams {
     static SignatureHelpParams fromJson(const JsonValue& j);
 };
 
+struct SemanticTokensLegend {
+    std::vector<std::string> tokenTypes;
+    std::vector<std::string> tokenModifiers;
+
+    JsonValue toJson() const;
+    static SemanticTokensLegend fromJson(const JsonValue& j);
+    static SemanticTokensLegend defaultLegend();
+};
+
+struct SemanticTokensParams {
+    TextDocumentIdentifier textDocument;
+
+    JsonValue toJson() const;
+    static SemanticTokensParams fromJson(const JsonValue& j);
+};
+
+struct SemanticTokens {
+    std::optional<std::string> resultId;
+    std::vector<uint32_t> data;
+
+    JsonValue toJson() const;
+    static SemanticTokens fromJson(const JsonValue& j);
+};
+
 struct PublishDiagnosticsParams {
     std::string uri;
     std::optional<int32_t> version;
