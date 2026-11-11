@@ -41,6 +41,7 @@ flowchart TD
             B1_6["SQLite Database Module (std::db)"]
             B1_7["Multi-User Server-Push & Shared Store (std::ui)"]
             B1_8["Input & Scrollable Containers (.kml)"]
+            B1_9["Mobile App Build Support (Android & iOS)"]
         end
         subgraph B2["B2: Mid-Term"]
             B2_1["Debug Adapter Protocol (keet-dap)"]
@@ -230,6 +231,13 @@ Active development backlog organized by implementation priority and time horizon
   - Native `<input>` and `<textarea>` components with two-way text binding (`$bind.value={...}`) and key shortcut handling (`@keydown.enter={...}`).
   - Scrollable container layouts (`overflow-y: auto`) with programmatic auto-scroll anchors for live message streams and dynamic feeds.
   - Dynamic collection rendering loops (`{#for item in items; key=item.id}`) optimized for append-heavy stream updates and surgical DOM diffing.
+
+- **Mobile Application Build Support (Android & iOS)**
+  - Native cross-compilation pipeline targeting iOS (`aarch64-apple-ios`, `aarch64-apple-ios-sim`) and Android (`aarch64-linux-android`, `x86_64-linux-android`).
+  - Command-line packaging toolchain (`keety build --platform=ios|android`) producing Android `.apk`/`.aab` bundles and iOS `.app`/`.ipa` archives.
+  - Mobile runtime lifecycle binding (Android `NativeActivity` / JNI bridge and iOS `UIApplicationDelegate` / `UIWindow`).
+  - Touch input & multi-touch gestures, screen orientation, DPI display scaling, and safe area insets integration with `std::ui` and `.kml`.
+  - One-command deployment and log streaming to connected mobile devices and simulators/emulators (`keety run --target=ios|android`).
 
 ---
 
