@@ -802,6 +802,141 @@ void TypeChecker::reportTypeMismatch(TypePtr expectedType, TypePtr actualType, d
     }
 }
 
+diag::Diagnostic TypeChecker::createInvalidTypeCastDiagnostic(
+    TypePtr sourceType,
+    TypePtr targetType,
+    diag::SourceSpan span) {
+    std::string srcStr = sourceType ? sourceType->toString() : "<unknown>";
+    std::string tgtStr = targetType ? targetType->toString() : "<unknown>";
+
+    std::string msg = "invalid type cast from '" + srcStr + "' to '" + tgtStr + "'";
+    auto d = diag::Diagnostic::makeError(
+        diag::ErrorCode::InvalidTypeCast,
+        std::move(msg),
+        span.isValid() ? span.start : diag::SourceLocation{});
+
+    if (span.isValid()) {
+        d.labels.push_back(diag::DiagnosticLabel{
+            span,
+            "cannot cast expression of type '" + srcStr + "' to '" + tgtStr + "'",
+            true
+        });
+    }
+
+    d.footers.push_back(diag::DiagnosticFooter{
+        diag::DiagnosticFooter::Kind::Note,
+        "type assertions and explicit casts via 'as' are only valid between compatible types, numeric conversions, union variants, or inheritance hierarchies"
+    });
+
+    return d;
+}
+
+diag::Diagnostic TypeChecker::createInvalidMemberAccessDiagnostic(
+    std::string_view targetDesc,
+    std::string_view memberName,
+    diag::SourceSpan span,
+    std::string_view helpSuggestion) {
+    std::string msg = std::string(targetDesc) + " has no member or method named '" + std::string(memberName) + "'";
+    auto d = diag::Diagnostic::makeError(
+        diag::ErrorCode::InvalidMemberAccess,
+        std::move(msg),
+        span.isValid() ? span.start : diag::SourceLocation{});
+
+    if (span.isValid()) {
+        d.labels.push_back(diag::DiagnosticLabel{
+            span,
+            "unknown member '" + std::string(memberName) + "'",
+            true
+        });
+    }
+
+    if (!helpSuggestion.empty()) {
+        d.footers.push_back(diag::DiagnosticFooter{
+            diag::DiagnosticFooter::Kind::Help,
+            std::string(helpSuggestion)
+        });
+    }
+
+    return d;
+}
+
+bool TypeChecker::isValidTypeCast(const TypePtr& source, const TypePtr& target, const sema::Scope& scope) const {
+    if (!source || !target) return true;
+    if (source->isUnknown() || target->isUnknown()) return true;
+    if (source->equals(*target)) return true;
+
+    // Numeric casts (int <-> float, literals)
+    if (source->isNumeric() && target->isNumeric()) return true;
+
+    // Union casts:
+    // 1) Union narrowing: source is (A | B | C) and target can be cast from at least one variant
+    if (source->isUnion()) {
+        const auto* u = dynamic_cast<const UnionType*>(source.get());
+        if (u) {
+            for (const auto& v : u->getVariants()) {
+                if (isValidTypeCast(v, target, scope)) return true;
+            }
+        }
+    }
+    // 2) Union widening / projection: target is (A | B | C) and source matches one of the variants
+    if (target->isUnion()) {
+        const auto* u = dynamic_cast<const UnionType*>(target.get());
+        if (u) {
+            for (const auto& v : u->getVariants()) {
+                if (isValidTypeCast(source, v, scope)) return true;
+            }
+        }
+    }
+
+    // Enum conversions: enum <-> int
+    if (source->isCustom()) {
+        const auto* customSrc = dynamic_cast<const CustomType*>(source.get());
+        if (customSrc) {
+            auto sym = scope.lookup(customSrc->getName());
+            if (sym && sym->getKind() == sema::SymbolKind::Enum && target->isInt()) {
+                return true;
+            }
+        }
+    }
+    if (target->isCustom()) {
+        const auto* customTgt = dynamic_cast<const CustomType*>(target.get());
+        if (customTgt) {
+            auto sym = scope.lookup(customTgt->getName());
+            if (sym && sym->getKind() == sema::SymbolKind::Enum && source->isInt()) {
+                return true;
+            }
+        }
+    }
+
+    // Class hierarchy (upcast / downcast):
+    if (source->isCustom() && target->isCustom()) {
+        const auto* sCls = dynamic_cast<const CustomType*>(source.get());
+        const auto* tCls = dynamic_cast<const CustomType*>(target.get());
+        if (sCls && tCls) {
+            // Check if source inherits from target (upcast)
+            auto sSym = scope.lookup(sCls->getName());
+            const auto* sDecl = (sSym && sSym->getAstNode()) ? dynamic_cast<const ast::ClassDecl*>(sSym->getAstNode()) : nullptr;
+            const auto* cur = sDecl;
+            while (cur && cur->hasBaseClass()) {
+                if (cur->getBaseClass() == tCls->getName()) return true;
+                auto bSym = scope.lookup(cur->getBaseClass());
+                cur = (bSym && bSym->getAstNode()) ? dynamic_cast<const ast::ClassDecl*>(bSym->getAstNode()) : nullptr;
+            }
+            // Check if target inherits from source (downcast)
+            auto tSym = scope.lookup(tCls->getName());
+            const auto* tDecl = (tSym && tSym->getAstNode()) ? dynamic_cast<const ast::ClassDecl*>(tSym->getAstNode()) : nullptr;
+            cur = tDecl;
+            while (cur && cur->hasBaseClass()) {
+                if (cur->getBaseClass() == sCls->getName()) return true;
+                auto bSym = scope.lookup(cur->getBaseClass());
+                cur = (bSym && bSym->getAstNode()) ? dynamic_cast<const ast::ClassDecl*>(bSym->getAstNode()) : nullptr;
+            }
+        }
+    }
+
+    return false;
+}
+
 // =============================================================================
 // Exhaustiveness & Reachability Analysis (E5001 / E5002)
 // =============================================================================
@@ -5365,6 +5500,12 @@ bool TypeChecker::checkTypes(const parser::ModuleAST& module, sema::Scope* rootS
             sym->setExported(clsDecl->isExported());
             auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, sym, emitter_);
             if (!res.success) hasErrors_ = true;
+        } else if (const auto* enumDecl = dynamic_cast<const ast::EnumDecl*>(decl.get())) {
+            auto sym = std::make_shared<sema::Symbol>(enumDecl->getName(), sema::SymbolKind::Enum, enumDecl->getSpan());
+            sym->setAstNode(enumDecl);
+            sym->setExported(enumDecl->isExported());
+            auto res = sema::ShadowChecker::defineWithDiagnostics(*targetScope, sym, emitter_);
+            if (!res.success) hasErrors_ = true;
         }
     }
 
@@ -6063,10 +6204,18 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
 
 
     if (const auto* cast = dynamic_cast<const ast::TypeCastExpr*>(&expr)) {
+        TypePtr srcType = Type::unknownType();
         if (cast->getExpr()) {
-            inferType(*cast->getExpr(), scope);
+            srcType = inferType(*cast->getExpr(), scope);
         }
-        return Type::fromAnnotation(cast->getTargetType());
+        TypePtr targetType = Type::fromAnnotation(cast->getTargetType());
+        if (srcType && targetType && !isValidTypeCast(srcType, targetType, scope)) {
+            if (emitter_) {
+                emitter_->report(createInvalidTypeCastDiagnostic(srcType, targetType, cast->getSpan()));
+            }
+            hasErrors_ = true;
+        }
+        return targetType;
     }
 
     if (const auto* typeofExpr = dynamic_cast<const ast::TypeofExpr*>(&expr)) {
@@ -6276,6 +6425,14 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
         if (const auto* member = dynamic_cast<const ast::MemberExpr*>(call->getCallee())) {
             if (const auto* objIdent = dynamic_cast<const ast::IdentExpr*>(member->getObject())) {
                 auto sym = scope.lookup(objIdent->getName());
+                if (sym && sym->getKind() == sema::SymbolKind::Enum && sym->getAstNode()) {
+                    if (emitter_) {
+                        emitter_->report(createInvalidMemberAccessDiagnostic(
+                            "enum '" + sym->getName() + "'", member->getMemberName(), call->getSpan(), "enum values cannot be called as functions"));
+                    }
+                    hasErrors_ = true;
+                    return Type::unknownType();
+                }
                 if (objIdent->getName() == "io" || (sym && sym->isModule() && sym->getName() == "io")) {
                     if (!sym) {
                         if (emitter_) {
@@ -6660,19 +6817,78 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 auto clsSym = scope.lookup(clsName);
                 if (clsSym && clsSym->getAstNode()) {
                     const auto* clsDecl = dynamic_cast<const ast::ClassDecl*>(clsSym->getAstNode());
-                    while (clsDecl) {
-                        for (const auto& m : clsDecl->getMethods()) {
+                    std::vector<const ast::ClassDecl*> hierarchy;
+                    const auto* cur = clsDecl;
+                    while (cur) {
+                        hierarchy.push_back(cur);
+                        if (cur->hasBaseClass()) {
+                            auto baseSym = scope.lookup(cur->getBaseClass());
+                            cur = (baseSym && baseSym->getAstNode()) ? dynamic_cast<const ast::ClassDecl*>(baseSym->getAstNode()) : nullptr;
+                        } else {
+                            cur = nullptr;
+                        }
+                    }
+                    for (const auto* c : hierarchy) {
+                        for (const auto& m : c->getMethods()) {
                             if (m && m->getName() == member->getMemberName()) {
                                 methodDecl = m.get();
                                 break;
                             }
                         }
                         if (methodDecl) break;
-                        if (clsDecl->hasBaseClass()) {
-                            auto baseSym = scope.lookup(clsDecl->getBaseClass());
-                            clsDecl = (baseSym && baseSym->getAstNode()) ? dynamic_cast<const ast::ClassDecl*>(baseSym->getAstNode()) : nullptr;
-                        } else {
-                            clsDecl = nullptr;
+                    }
+
+                    if (!methodDecl) {
+                        if (emitter_) {
+                            bool isField = false;
+                            for (const auto* c : hierarchy) {
+                                for (const auto& f : c->getFields()) {
+                                    if (f.name == member->getMemberName()) {
+                                        isField = true;
+                                        break;
+                                    }
+                                }
+                                if (isField) break;
+                            }
+
+                            std::string help = "";
+                            if (isField) {
+                                help = "'" + member->getMemberName() + "' is a field, not a method; did you mean to access it without '()' ?";
+                            } else {
+                                std::vector<std::string> allMethodNames;
+                                for (const auto* c : hierarchy) {
+                                    for (const auto& m : c->getMethods()) {
+                                        if (m) allMethodNames.push_back(m->getName());
+                                    }
+                                }
+                                auto closest = diag::find_closest_match(member->getMemberName(), allMethodNames);
+                                if (closest.has_value() && diag::levenshtein_distance(member->getMemberName(), *closest) <= 3) {
+                                    help = "did you mean '" + std::string(*closest) + "'?";
+                                }
+                            }
+                            emitter_->report(createInvalidMemberAccessDiagnostic(
+                                "class '" + clsName + "'", member->getMemberName(), member->getSpan(), help));
+                        }
+                        hasErrors_ = true;
+                    } else {
+                        size_t minRequired = 0;
+                        for (const auto& p : methodDecl->getParams()) {
+                            if (!p.defaultValue) minRequired++;
+                        }
+                        size_t maxAllowed = methodDecl->getParams().size();
+                        size_t provided = call->getArgs().size();
+                        if (provided < minRequired || provided > maxAllowed) {
+                            if (emitter_) {
+                                std::string countStr = (minRequired == maxAllowed)
+                                    ? std::to_string(minRequired)
+                                    : (std::to_string(minRequired) + " to " + std::to_string(maxAllowed));
+                                std::string msg = "method '" + methodDecl->getName() + "' expects " +
+                                    countStr + " argument(s), but " + std::to_string(provided) + " were supplied";
+                                auto d = diag::Diagnostic::makeError(diag::ErrorCode::TypeMismatch, msg, call->getSpan().start);
+                                d.withLabel(call->getSpan(), "expected " + countStr + " argument(s)");
+                                emitter_->report(d);
+                            }
+                            hasErrors_ = true;
                         }
                     }
                 }
@@ -6864,6 +7080,45 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             }
 
             if (fnDecl) {
+                size_t minRequired = 0;
+                for (const auto& p : fnDecl->getParams()) {
+                    if (!p.defaultValue) minRequired++;
+                }
+                size_t maxAllowed = fnDecl->getParams().size();
+                size_t provided = call->getArgs().size();
+
+                bool hasMatchingOverload = false;
+                if (sym && sym->hasOverloads()) {
+                    for (const auto& ov : sym->getOverloads()) {
+                        if (ov && ov->getAstNode()) {
+                            if (const auto* fd = dynamic_cast<const ast::FnDecl*>(ov->getAstNode())) {
+                                size_t ovMin = 0;
+                                for (const auto& p : fd->getParams()) {
+                                    if (!p.defaultValue) ovMin++;
+                                }
+                                if (provided >= ovMin && provided <= fd->getParams().size()) {
+                                    hasMatchingOverload = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if ((provided < minRequired || provided > maxAllowed) && !hasMatchingOverload) {
+                    if (emitter_) {
+                        std::string countStr = (minRequired == maxAllowed)
+                            ? std::to_string(minRequired)
+                            : (std::to_string(minRequired) + " to " + std::to_string(maxAllowed));
+                        std::string msg = "function '" + fnDecl->getName() + "' expects " +
+                            countStr + " argument(s), but " + std::to_string(provided) + " were supplied";
+                        auto d = diag::Diagnostic::makeError(diag::ErrorCode::TypeMismatch, msg, call->getSpan().start);
+                        d.withLabel(call->getSpan(), "expected " + countStr + " argument(s)");
+                        emitter_->report(d);
+                    }
+                    hasErrors_ = true;
+                }
+
                 std::unordered_map<std::string, TypePtr> typeSubst;
                 std::unordered_set<std::string> typeParamSet(
                     fnDecl->getTypeParams().begin(), fnDecl->getTypeParams().end()
@@ -6899,6 +7154,19 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 auto retType = Type::fromAnnotation(fnDecl->getReturnType());
                 return substituteTypeParams(retType, typeSubst);
             } else if (funcTypeAnnotation) {
+                size_t expectedCount = funcTypeAnnotation->getParams().size();
+                size_t provided = call->getArgs().size();
+                if (provided != expectedCount) {
+                    if (emitter_) {
+                        std::string msg = "function value expects " + std::to_string(expectedCount) +
+                            " argument(s), but " + std::to_string(provided) + " were supplied";
+                        auto d = diag::Diagnostic::makeError(diag::ErrorCode::TypeMismatch, msg, call->getSpan().start);
+                        d.withLabel(call->getSpan(), "expected " + std::to_string(expectedCount) + " argument(s)");
+                        emitter_->report(d);
+                    }
+                    hasErrors_ = true;
+                }
+
                 for (size_t i = 0; i < call->getArgs().size(); ++i) {
                     const auto& arg = call->getArgs()[i];
                     if (arg.value) {
@@ -6918,15 +7186,31 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 }
                 return Type::fromAnnotation(funcTypeAnnotation->getReturnType());
             } else if (clsDecl) {
+                const auto& fields = clsDecl->getFields();
+                size_t maxAllowed = fields.size();
+                size_t provided = call->getArgs().size();
+
+                if (provided > maxAllowed) {
+                    if (emitter_) {
+                        std::string msg = "class '" + clsDecl->getName() + "' constructor expects at most " +
+                            std::to_string(maxAllowed) + " argument(s), but " + std::to_string(provided) + " were supplied";
+                        auto d = diag::Diagnostic::makeError(diag::ErrorCode::TypeMismatch, msg, call->getSpan().start);
+                        d.withLabel(call->getSpan(), "expected at most " + std::to_string(maxAllowed) + " argument(s)");
+                        emitter_->report(d);
+                    }
+                    hasErrors_ = true;
+                }
+
                 for (size_t i = 0; i < call->getArgs().size(); ++i) {
                     const auto& arg = call->getArgs()[i];
                     if (arg.value) {
-                        TypePtr pType = (i < clsDecl->getFields().size())
-                            ? Type::fromAnnotation(clsDecl->getFields()[i].type.get())
+                        TypePtr pType = (i < fields.size())
+                            ? Type::fromAnnotation(fields[i].type.get())
                             : nullptr;
                         auto argType = inferType(*arg.value, scope, pType);
                         if (pType) {
-                            checkAssignment(pType, argType, arg.value->getSpan(), "constructor argument");
+                            checkAssignment(pType, argType, arg.value->getSpan(),
+                                            "constructor argument '" + fields[i].name + "'");
                         }
                         checkCallArg(arg, arg.isMut);
                     }
@@ -7120,6 +7404,31 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
                 }
             }
             auto sym = scope.lookup(objIdent->getName());
+            if (sym && sym->getKind() == sema::SymbolKind::Enum && sym->getAstNode()) {
+                const auto* enumDecl = dynamic_cast<const ast::EnumDecl*>(sym->getAstNode());
+                if (enumDecl) {
+                    for (const auto& m : enumDecl->getMembers()) {
+                        if (m.name == member->getMemberName()) {
+                            return Type::custom(enumDecl->getName());
+                        }
+                    }
+                    if (emitter_) {
+                        std::vector<std::string> memberNames;
+                        for (const auto& m : enumDecl->getMembers()) {
+                            memberNames.push_back(m.name);
+                        }
+                        auto closest = diag::find_closest_match(member->getMemberName(), memberNames);
+                        std::string help = "";
+                        if (closest.has_value() && diag::levenshtein_distance(member->getMemberName(), *closest) <= 3) {
+                            help = "did you mean '" + std::string(*closest) + "'?";
+                        }
+                        emitter_->report(createInvalidMemberAccessDiagnostic(
+                            "enum '" + enumDecl->getName() + "'", member->getMemberName(), member->getSpan(), help));
+                    }
+                    hasErrors_ = true;
+                    return Type::unknownType();
+                }
+            }
             if (objIdent->getName() == "io" || (sym && sym->isModule() && sym->getName() == "io")) {
                 if (!sym) {
                     if (emitter_) {
@@ -7760,6 +8069,14 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             hasErrors_ = true;
             return Type::unknownType();
         }
+        if (objType && (objType->isPrimitiveInt() || objType->isPrimitiveFloat() || objType->isPrimitiveBool() || objType->isChar())) {
+            if (emitter_) {
+                emitter_->report(createInvalidMemberAccessDiagnostic(
+                    "primitive type '" + objType->toString() + "'", member->getMemberName(), member->getSpan(), "primitive types have no members"));
+            }
+            hasErrors_ = true;
+            return Type::unknownType();
+        }
         if (objType && (objType->isError() || (objType->isCustom() && static_cast<const CustomType*>(objType.get())->getName() == "error"))) {
             if (member->getMemberName() == "message" || member->getMemberName() == "name") {
                 return Type::stringType();
@@ -7816,19 +8133,57 @@ TypePtr TypeChecker::inferType(const ast::Expr& expr, sema::Scope& scope, TypePt
             auto clsSym = scope.lookup(clsName);
             if (clsSym && clsSym->getAstNode()) {
                 const auto* clsDecl = dynamic_cast<const ast::ClassDecl*>(clsSym->getAstNode());
-                while (clsDecl) {
-                    for (const auto& f : clsDecl->getFields()) {
+                std::vector<const ast::ClassDecl*> hierarchy;
+                const auto* cur = clsDecl;
+                while (cur) {
+                    hierarchy.push_back(cur);
+                    if (cur->hasBaseClass()) {
+                        auto baseSym = scope.lookup(cur->getBaseClass());
+                        cur = (baseSym && baseSym->getAstNode()) ? dynamic_cast<const ast::ClassDecl*>(baseSym->getAstNode()) : nullptr;
+                    } else {
+                        cur = nullptr;
+                    }
+                }
+                for (const auto* c : hierarchy) {
+                    for (const auto& f : c->getFields()) {
                         if (f.name == member->getMemberName()) {
                             return Type::fromAnnotation(f.type.get());
                         }
                     }
-                    if (clsDecl->hasBaseClass()) {
-                        auto baseSym = scope.lookup(clsDecl->getBaseClass());
-                        clsDecl = (baseSym && baseSym->getAstNode()) ? dynamic_cast<const ast::ClassDecl*>(baseSym->getAstNode()) : nullptr;
-                    } else {
-                        clsDecl = nullptr;
-                    }
                 }
+
+                if (emitter_) {
+                    bool isMethod = false;
+                    for (const auto* c : hierarchy) {
+                        for (const auto& m : c->getMethods()) {
+                            if (m && m->getName() == member->getMemberName()) {
+                                isMethod = true;
+                                break;
+                            }
+                        }
+                        if (isMethod) break;
+                    }
+
+                    std::string help = "";
+                    if (isMethod) {
+                        help = "'" + member->getMemberName() + "' is a method, not a field; did you mean to call it as '" + member->getMemberName() + "()' ?";
+                    } else {
+                        std::vector<std::string> allFieldNames;
+                        for (const auto* c : hierarchy) {
+                            for (const auto& f : c->getFields()) {
+                                allFieldNames.push_back(f.name);
+                            }
+                        }
+                        auto closest = diag::find_closest_match(member->getMemberName(), allFieldNames);
+                        if (closest.has_value() && diag::levenshtein_distance(member->getMemberName(), *closest) <= 3) {
+                            help = "did you mean '" + std::string(*closest) + "'?";
+                        }
+                    }
+                    emitter_->report(createInvalidMemberAccessDiagnostic(
+                        "class '" + clsName + "'", member->getMemberName(), member->getSpan(), help));
+                }
+                hasErrors_ = true;
+                return Type::unknownType();
             }
         }
         return Type::unknownType();

@@ -4,6 +4,8 @@ add_library(keety_core STATIC
     diag/diagnostic_emitter.cpp
     diag/levenshtein.cpp
     diag/error_code.cpp
+    diag/source_map.cpp
+    diag/diagnostic_translator.cpp
     lexer/token.cpp
     lexer/lexer.cpp
     parser/parser.cpp

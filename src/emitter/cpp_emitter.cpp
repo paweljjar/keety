@@ -137,14 +137,11 @@ void CppEmitter::register_module_var(std::string name) {
 }
 
 std::string CppEmitter::format_line(const diag::SourceSpan& span) const {
-    if (!options_.emit_line_directives) {
-        return "";
-    }
     std::string fallback = options_.source_file_path;
     if (fallback.empty() && !module_name_.empty()) {
         fallback = module_name_ + ".keet";
     }
-    return line_tracker_.format_line(span, options_.source_manager, fallback);
+    return line_tracker_.format_line_tracked(span, options_.source_manager, fallback);
 }
 
 void CppEmitter::add_storage_allocation(std::string name, std::string cpp_type, std::string initial_value, std::string line_directive) {
@@ -1129,7 +1126,7 @@ std::string CppEmitter::translate_statement(const ast::Stmt* stmt, int indent) c
             ScopedNarrowing scope(narrowed_vars_, narrowing.else_facts);
             if (const auto* else_if = dynamic_cast<const ast::IfStmt*>(if_stmt->getElseBranch())) {
                 std::string elif_str = translate_statement(else_if, indent);
-                if (elif_str.rfind("#line", 0) == 0) {
+                if (elif_str.rfind("#line", 0) == 0 || elif_str.rfind("/*__KSM__:", 0) == 0) {
                     size_t newline_pos = elif_str.find('\n');
                     std::string line_part = elif_str.substr(0, newline_pos + 1);
                     std::string rest = elif_str.substr(newline_pos + 1);
@@ -1616,7 +1613,7 @@ std::string CppEmitter::emit_storage_allocations() const {
         ss << "    // Storage definitions for module-level variables\n";
     }
     for (const auto& alloc : storage_allocations_) {
-        if (alloc.rfind("#line", 0) == 0) {
+        if (alloc.rfind("#line", 0) == 0 || alloc.rfind("/*__KSM__:", 0) == 0) {
             ss << alloc << "\n";
         } else {
             ss << "    " << alloc << "\n";
@@ -2030,7 +2027,7 @@ std::string CppEmitter::emit() const {
         }
     }
 
-    return ss.str();
+    return line_tracker_.finalize_source_map(ss.str());
 }
 
 void CppEmitter::emit(std::ostream& os) const {

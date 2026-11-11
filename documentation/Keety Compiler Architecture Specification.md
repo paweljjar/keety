@@ -318,7 +318,38 @@ Diagnostics produced by `keety` follow the modern compiler standard (similar to 
    * `E3000`–`E3999`: Type Checking, Union Narrowing, and Assignment Soundness.
    * `E4000`–`E4999`: Memory Safety, Aliasing, and `mut` Borrow Checker Violations.
    * `E5000`–`E5999`: Control Flow, Termination, and Reachability Errors.
-   * `E6000`–`E6999`: Foreign Function Interface (FFI) and C++ Linkage Errors.
+   * `E6000`–`E6999`: Foreign Function Interface (FFI) and C++ Linkage Errors (`E6001` unresolved external symbols, `E6002` missing native library).
+   * `E7000`–`E7999`: Backend Code Generation & Remapped Host Toolchain Errors (`E7001` backend compilation failure).
+
+4. **Backend Diagnostic Translation & Error Remapping Engine:**
+   Because `keety` lowers KeetScript AST and KeetIR to native C++20 before compiling with host toolchains (Clang, GCC, MSVC), any compilation or linker issue occurring in the native stage could potentially expose hundreds of lines of template substitution backtraces, internal runtime symbols (`_keet_fn_`, `_keet_var_`, `keet::rt::*`), and reference ephemeral `.keety_build/*.cpp` files. To deliver a pristine language experience, `keety` includes a strict translation pipeline:
+
+   * **Line Directives & Source Map Fallback (`LineDirectiveTracker` & `SourceMap`):**
+     * During C++ emission, `LineDirectiveTracker` emits standard `#line <line> "<orig.keet>"` directives ahead of functions and statements.
+     * To defend against aggressive toolchain optimization passes or preprocessors stripping `#line` directives, `CppEmitter` also injects compact source map annotations `/*__KSM:<file>:<sline>:<scol>-<eline>:<ecol>*/`.
+     * `SourceMap` indexes these ranges, providing accurate KeetScript file, line, and column coordinates even if host toolchains report lines relative to intermediate C++ files.
+   * **Host Toolchain Dialect Parsing (`DiagnosticTranslator`):**
+     * **Clang / Apple Clang:** Regex-based extraction of `file:line:col: error/warning/note` with sub-notes and "did you mean" fix-it suggestions.
+     * **GCC:** Handles warning flags (`[-W...]`), notes, and macro expansions.
+     * **MSVC (`cl.exe`):** Parses `file(line,col): error/fatal error/warning Cxxxx: message` across standard Windows path and drive formats.
+   * **Type & Symbol Demangling:**
+     * Translates standard library C++ types into idiomatic KeetScript types:
+       * `std::vector<T>` $\to$ `[T]`
+       * `std::unordered_map<K, V>` $\to$ `[K: V]`
+       * `std::variant<Ts...>` $\to$ `T1 | T2`
+       * `std::optional<T>` $\to$ `T?`
+       * `std::string` / `std::string_view` $\to$ `string`
+       * `int64_t` / `long long` $\to$ `int`, `double` / `float` $\to$ `float`
+       * `std::shared_ptr<T>` $\to$ `T`
+     * Reverses internal compiler mangling (`_keet_fn_foo` $\to$ `foo`, `_keet_var_bar` $\to$ `bar`).
+     * Filters out standard library internal headers (`<vector>`, `<type_traits>`, `xutility`, `stl_vector.h`).
+   * **Linker Error Remapping (`translate_linker_output`):**
+     * Detects unresolved external symbols across `ld64` (macOS), `GNU ld` (Linux), and `link.exe` (Windows).
+     * Maps missing symbols to actionable package dependency suggestions (e.g. `sqlite3_open` $\to$ suggests `sqlite`, `SSL_connect` $\to$ suggests `openssl`, `curl_easy_init` $\to$ suggests `libcurl`).
+   * **Strict ICE Confinement & CLI Flags:**
+     * `error[ICE]` is strictly reserved for unhandled compiler host crashes (e.g. SIGSEGV, SIGABRT) or unmappable empty outputs. Standard compilation and linker failures are translated into structured `error[E...]` diagnostics.
+     * The `--verbose-cpp` flag is reserved for compiler development to display raw untranslated C++ toolchain outputs alongside translated diagnostics.
+     * `--diagnostic-format=json` (or `--json`) outputs valid JSON diagnostic payloads compliant with IDE and LSP tooling.
 
 ---
 

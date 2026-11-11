@@ -89,7 +89,14 @@ enum class ErrorCode : uint16_t {
     // -------------------------------------------------------------------------
     ExternSymbolNotFound          = 6001,
     IncompatibleFFIType           = 6002,
-    InvalidLinkageSpecification   = 6003
+    InvalidLinkageSpecification   = 6003,
+
+    // -------------------------------------------------------------------------
+    // E7000 - E7999: Backend & Toolchain Diagnostics
+    // -------------------------------------------------------------------------
+    BackendCompilationError       = 7001,
+    BackendTemplateInstantiation  = 7002,
+    BackendCodegenConstraint      = 7003
 };
 
 /// Diagnostic code info helper

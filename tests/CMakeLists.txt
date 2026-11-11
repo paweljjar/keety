@@ -24,6 +24,10 @@ add_executable(keety_unit_tests
     unit/test_source_location.cpp
     unit/test_source_manager.cpp
     unit/test_diagnostic_emitter.cpp
+    unit/test_diagnostic_translator.cpp
+    unit/test_source_map_translation.cpp
+    unit/test_linker_diagnostic_translator.cpp
+    unit/test_cli_pipeline_diagnostics.cpp
     unit/test_diagnostics.cpp
     unit/test_error_code.cpp
     unit/test_runtime_error.cpp
@@ -73,6 +77,7 @@ add_executable(keety_unit_tests
     unit/test_no_shadowing.cpp
     unit/test_const_view.cpp
     unit/test_type_checker.cpp
+    unit/test_frontend_soundness.cpp
     unit/test_keet_ir.cpp
     unit/test_ast_lowerer.cpp
     unit/test_zonk_lowering.cpp

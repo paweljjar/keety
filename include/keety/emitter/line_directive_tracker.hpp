@@ -2,12 +2,25 @@
 
 #include <keety/diag/source_location.hpp>
 #include <keety/diag/source_manager.hpp>
+#include <keety/diag/source_map.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace keety::emitter {
+
+/// Record of an emitted location for SourceMap correlation
+struct TrackedLocation {
+    size_t id{0};
+    std::string file;
+    uint32_t line{0};
+    uint32_t column{0};
+    diag::SourceSpan span{};
+    std::string symbol{};
+};
 
 /// Tracks emitted source line directives (#line <line> "<file>") to guarantee
 /// deduplication, hermetic formatting, and cross-platform path normalization.
@@ -27,7 +40,21 @@ public:
                                           const diag::SourceManager* source_mgr = nullptr,
                                           std::string_view fallback_file = "");
 
-    /// Clears last emitted line and file state.
+    /// Generates a tracked line directive or internal marker with SourceSpan metadata
+    [[nodiscard]] std::string format_line_tracked(const diag::SourceSpan& span,
+                                                  const diag::SourceManager* source_mgr = nullptr,
+                                                  std::string_view fallback_file = "",
+                                                  std::string_view symbol = "");
+
+    /// Finalizes the emitted C++ text by stripping internal markers, computing generated line numbers,
+    /// and populating the internal SourceMap.
+    [[nodiscard]] std::string finalize_source_map(std::string_view raw_emitted_cpp);
+
+    /// Returns the populated SourceMap
+    [[nodiscard]] const diag::SourceMap& get_source_map() const noexcept { return source_map_; }
+    [[nodiscard]] diag::SourceMap& get_source_map() noexcept { return source_map_; }
+
+    /// Clears last emitted line, file state, and tracked source map entries.
     void reset() noexcept;
 
     /// Enables or disables line directive emission.
@@ -41,6 +68,8 @@ private:
     bool enabled_{true};
     std::string last_file_{};
     uint32_t last_line_{0};
+    std::vector<TrackedLocation> tracked_records_;
+    diag::SourceMap source_map_;
 };
 
 } // namespace keety::emitter
