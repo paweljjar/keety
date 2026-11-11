@@ -56,6 +56,7 @@ public:
     void set_emit_line_directives(bool emit) noexcept { options_.emit_line_directives = emit; }
     void set_source_manager(const diag::SourceManager* sm) noexcept { options_.source_manager = sm; }
     void set_source_file_path(std::string path) { options_.source_file_path = std::move(path); }
+    [[nodiscard]] const diag::SourceMap& get_source_map() const noexcept { return line_tracker_.get_source_map(); }
 
     // Header include management
     [[nodiscard]] std::string get_header_include() const;

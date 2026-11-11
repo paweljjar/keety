@@ -502,11 +502,18 @@ ErrorCode DiagnosticTranslator::map_to_error_code(std::string_view clean_msg) {
         return std::tolower(c);
     });
 
+    if (lower.find("redefinition of") != std::string::npos ||
+        lower.find("conflicting types for") != std::string::npos ||
+        lower.find("already defined") != std::string::npos) {
+        return ErrorCode::RedeclarationInSameScope;
+    }
+
     if (lower.find("cannot convert") != std::string::npos ||
         lower.find("no viable conversion") != std::string::npos ||
         lower.find("no matching function") != std::string::npos ||
         lower.find("no matching constructor") != std::string::npos ||
-        lower.find("incompatible type") != std::string::npos) {
+        lower.find("incompatible type") != std::string::npos ||
+        lower.find("no viable overloaded '='") != std::string::npos) {
         return ErrorCode::TypeMismatch;
     }
 
@@ -520,6 +527,27 @@ ErrorCode DiagnosticTranslator::map_to_error_code(std::string_view clean_msg) {
         lower.find("has no member") != std::string::npos ||
         lower.find("is not a member of") != std::string::npos) {
         return ErrorCode::InvalidMemberAccess;
+    }
+
+    if (lower.find("cannot assign to") != std::string::npos ||
+        lower.find("read-only variable") != std::string::npos ||
+        lower.find("expression is not assignable") != std::string::npos) {
+        return ErrorCode::CannotAssignToConstant;
+    }
+
+    if (lower.find("control reaches end of non-void function") != std::string::npos ||
+        lower.find("non-void function does not return") != std::string::npos) {
+        return ErrorCode::MissingReturnStatement;
+    }
+
+    if (lower.find("unreachable code") != std::string::npos ||
+        lower.find("code will never be executed") != std::string::npos) {
+        return ErrorCode::UnreachableCode;
+    }
+
+    if (lower.find("subscript") != std::string::npos ||
+        lower.find("operator[]") != std::string::npos) {
+        return ErrorCode::InvalidIndexOperation;
     }
 
     if (lower.find("invalid cast") != std::string::npos ||
@@ -537,20 +565,148 @@ ErrorCode DiagnosticTranslator::map_to_error_code(std::string_view clean_msg) {
 
 std::vector<Diagnostic> DiagnosticTranslator::translate(
     std::string_view raw_output,
-    driver::CompilerKind kind) {
+    driver::CompilerKind kind,
+    const SourceManager* source_mgr,
+    const SourceMap* source_map) {
     auto raw_diags = parse_compiler_output(raw_output, kind);
     std::vector<Diagnostic> result;
     result.reserve(raw_diags.size());
 
     for (const auto& raw : raw_diags) {
         ErrorCode code = map_to_error_code(raw.cleanMessage);
+        std::string file = raw.file;
+        uint32_t line = raw.line;
+        uint32_t col = raw.column;
+        std::optional<SourceSpan> resolved_span;
+
+        // 1. If file is a generated C++ file or source_map is available:
+        bool is_cpp_file = file.ends_with(".cpp") || file.ends_with(".cc") ||
+                           file.ends_with(".cxx") || file.ends_with(".h") ||
+                           file.ends_with(".hpp");
+
+        if (source_map) {
+            if (is_cpp_file) {
+                auto mapped = source_map->findSourceLocation(line, col);
+                if (mapped.has_value()) {
+                    file = mapped->sourceFile;
+                    line = mapped->sourceLine;
+                    if (mapped->sourceColumn > 0) col = mapped->sourceColumn;
+                    if (mapped->sourceSpan.isValid()) resolved_span = mapped->sourceSpan;
+                }
+            } else {
+                auto mapped = source_map->findEntryForSourceLine(file, line);
+                if (mapped.has_value()) {
+                    if (mapped->sourceSpan.isValid()) resolved_span = mapped->sourceSpan;
+                    if (col == 0 && mapped->sourceColumn > 0) col = mapped->sourceColumn;
+                }
+            }
+        }
+
+        // 2. Span reconstruction using SourceManager
+        FileId fid = INVALID_FILE_ID;
+        const SourceBuffer* buf = nullptr;
+        if (source_mgr) {
+            buf = source_mgr->getBufferByPath(file);
+            if (!buf) {
+                // Try fuzzy path matching (e.g. filename only or relative path)
+                for (FileId id = 0; ; ++id) {
+                    const auto* b = source_mgr->getBuffer(id);
+                    if (!b) break;
+                    if (b->getFilePath() == file ||
+                        b->getFilePath().ends_with("/" + file) ||
+                        file.ends_with("/" + b->getFilePath())) {
+                        buf = b;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (buf) {
+            fid = buf->getId();
+
+            if (resolved_span.has_value() && resolved_span->isValid() && resolved_span->start.line == line) {
+                resolved_span->start.fileId = fid;
+                resolved_span->end.fileId = fid;
+            } else {
+                // Reconstruct span from buffer line text
+                if (line > 0 && line <= buf->getLineCount()) {
+                    std::string_view line_str = buf->getLineText(line);
+
+                    size_t token_col = col;
+                    size_t token_len = 1;
+
+                    // Extract quoted identifier from raw.cleanMessage if any (e.g. 'hp')
+                    size_t q1 = raw.cleanMessage.find('\'');
+                    std::string quoted_sym;
+                    if (q1 != std::string::npos) {
+                        size_t q2 = raw.cleanMessage.find('\'', q1 + 1);
+                        if (q2 != std::string::npos) {
+                            quoted_sym = raw.cleanMessage.substr(q1 + 1, q2 - q1 - 1);
+                        }
+                    }
+
+                    // If quoted symbol is on the source line, snap squiggle directly to it!
+                    if (!quoted_sym.empty()) {
+                        size_t sym_pos = line_str.find(quoted_sym);
+                        if (sym_pos != std::string_view::npos) {
+                            token_col = sym_pos + 1;
+                            token_len = quoted_sym.size();
+                            col = static_cast<uint32_t>(token_col);
+                        }
+                    }
+
+                    if (token_col == 0) {
+                        size_t first_non_ws = line_str.find_first_not_of(" \t");
+                        if (first_non_ws != std::string_view::npos) {
+                            token_col = first_non_ws + 1;
+                        } else {
+                            token_col = 1;
+                        }
+                        col = static_cast<uint32_t>(token_col);
+                    }
+
+                    if (token_len == 1 && token_col > 0 && token_col <= line_str.size()) {
+                        size_t start_idx = token_col - 1;
+                        size_t end_idx = start_idx;
+                        if (isalnum(static_cast<unsigned char>(line_str[start_idx])) || line_str[start_idx] == '_') {
+                            while (end_idx < line_str.size() &&
+                                   (isalnum(static_cast<unsigned char>(line_str[end_idx])) || line_str[end_idx] == '_')) {
+                                end_idx++;
+                            }
+                        } else {
+                            end_idx = start_idx + 1;
+                        }
+                        token_len = std::max<size_t>(1, end_idx - start_idx);
+                    }
+
+                    auto start_off = buf->getOffsetAtLocation(line, static_cast<uint32_t>(token_col));
+                    auto end_off = buf->getOffsetAtLocation(line, static_cast<uint32_t>(token_col + token_len));
+                    if (start_off.has_value() && end_off.has_value()) {
+                        resolved_span = SourceSpan{
+                            SourceLocation{fid, *start_off, line, static_cast<uint32_t>(token_col)},
+                            SourceLocation{fid, *end_off, line, static_cast<uint32_t>(token_col + token_len)}
+                        };
+                    }
+                }
+            }
+        }
+
         SourceLocation loc{};
-        loc.line = raw.line;
-        loc.column = raw.column;
+        loc.fileId = fid;
+        loc.line = line;
+        loc.column = col;
+        if (resolved_span.has_value() && resolved_span->isValid()) {
+            loc.offset = resolved_span->start.offset;
+        }
 
         Diagnostic d = (raw.severity == DiagnosticSeverity::Warning)
             ? Diagnostic::makeWarning(std::string(getErrorCodeString(code)), raw.cleanMessage, loc)
             : Diagnostic::makeError(code, raw.cleanMessage, loc);
+
+        if (resolved_span.has_value() && resolved_span->isValid()) {
+            d.withLabel(*resolved_span, "");
+        }
 
         for (const auto& note : raw.notes) {
             if (note.rfind("did you mean", 0) != std::string::npos ||

@@ -2,6 +2,8 @@
 
 #include <keety/diag/diagnostic.hpp>
 #include <keety/diag/error_code.hpp>
+#include <keety/diag/source_manager.hpp>
+#include <keety/diag/source_map.hpp>
 #include <keety/driver/toolchain_detector.hpp>
 
 #include <cstdint>
@@ -57,7 +59,9 @@ public:
     /// Translates raw compiler output into a list of native KeetScript Diagnostic objects
     [[nodiscard]] static std::vector<Diagnostic> translate(
         std::string_view raw_output,
-        driver::CompilerKind kind = driver::CompilerKind::Clang);
+        driver::CompilerKind kind = driver::CompilerKind::Clang,
+        const SourceManager* source_mgr = nullptr,
+        const SourceMap* source_map = nullptr);
 
     /// Maps a raw cleaned compiler error message to an appropriate KeetScript ErrorCode
     [[nodiscard]] static ErrorCode map_to_error_code(std::string_view clean_msg);
